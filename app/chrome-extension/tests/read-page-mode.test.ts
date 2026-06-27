@@ -1403,7 +1403,7 @@ describe('read_page mode', () => {
       },
     ] as any);
 
-    const actions = await (readPageTool as any).collectVisibleSearchSurfaceActions({
+    const result = await (readPageTool as any).collectVisibleSearchSurfaceActions({
       tabId: 5228,
       currentUrl: 'https://example.test/search?q=ai',
       assistantGuidance: {
@@ -1419,7 +1419,8 @@ describe('read_page mode', () => {
         world: 'MAIN',
       }),
     );
-    expect(actions).toEqual([
+    expect(result.sensingDiagnostic).toBeUndefined();
+    expect(result.actions).toEqual([
       expect.objectContaining({
         id: 'ca_filter_trigger_12345678',
         actionType: 'click',
@@ -2739,6 +2740,54 @@ describe('read_page mode', () => {
         },
       ],
       claimBoundary: expect.stringContaining('partial evidence'),
+    });
+  });
+
+  it('reports partial object sensing when visible result card action scan fails', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 52032,
+      windowId: 1,
+      active: true,
+      status: 'complete',
+      url: 'https://example.com/search?q=ai',
+      title: 'Search',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent:
+        '- heading "Search results" [ref=ref_1] (x=200,y=120)\n- textbox "Search" [ref=ref_2] (x=280,y=180)\n- button "Search" [ref=ref_3] (x=420,y=180)\n- link "Result A" [ref=ref_4] (x=280,y=240)\n- link "Result B" [ref=ref_5] (x=280,y=300)\n- link "Result C" [ref=ref_6] (x=280,y=360)\n- generic "Author A" [ref=ref_7] (x=280,y=400)\n- generic "Footer" [ref=ref_8] (x=280,y=520)',
+      refMap: [
+        { ref: 'ref_2', selector: 'input[name=q]' },
+        { ref: 'ref_3', selector: 'button[type=submit]' },
+        { ref: 'ref_4', selector: 'a.result-a' },
+      ],
+      stats: { processed: 12, included: 8, durationMs: 12 },
+      viewport: { width: 1280, height: 720, dpr: 1 },
+      diagnostics: [],
+    });
+    vi.spyOn(chrome.scripting, 'executeScript').mockImplementation(async (details: any) => {
+      if (details?.func?.name === 'scanVisibleResultCardsInPage') {
+        throw new Error('frame blocked');
+      }
+      return [{ result: '' }] as any;
+    });
+
+    const result = await readPageTool.execute({
+      mode: 'normal',
+      assistantGuidance: { taskKind: 'search' },
+    });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+    expect(result.isError).toBe(false);
+    expect(payload.pageContext.sensingDiagnostics).toMatchObject({
+      source: 'accessibility_tree_helper',
+      coverageStatus: 'partial',
+      partialErrors: [
+        {
+          source: 'visible_search_surface.scan',
+          message: expect.stringContaining('frame blocked'),
+        },
+      ],
     });
   });
 

@@ -16,6 +16,7 @@ import {
   type ReadPageRenderMode,
   type ReadPageRequestedLayer,
   type ReadPageSearchSurface,
+  type ReadPageSensingDiagnostic,
   type ReadPageOwnershipRuntimeSummary,
   type ReadPageWindowRuntimeState,
   type ReadPageBrowserPageObjectView,
@@ -51,7 +52,10 @@ import {
   resetObjectLifecycleCacheForTests,
 } from './read-page-object-delta';
 import { buildAndRememberReadPageObjectSensingOutput } from './read-page-object-sensing-output';
-import { normalizeAccessibilityTreeDiagnostics } from './read-page-sensing-diagnostics';
+import {
+  appendObjectSensingDiagnostic,
+  normalizeAccessibilityTreeDiagnostics,
+} from './read-page-sensing-diagnostics';
 import { buildLoadReadiness, inferPageStability, normalizeFrameContext } from './read-page-state';
 import { scanVisibleResultCardsInPage } from './collect-result-cards';
 import {
@@ -140,6 +144,10 @@ interface ReadPageStats {
 }
 type PageType = ReadPagePageType;
 type PrimaryRegionConfidence = ReadPagePrimaryRegionConfidence;
+interface VisibleSearchSurfaceActionsResult {
+  actions: CandidateActionSeed[];
+  sensingDiagnostic?: ReadPageSensingDiagnostic;
+}
 
 interface ReadPageParams {
   filter?: 'interactive'; // when omitted, return all visible elements
@@ -1144,9 +1152,9 @@ class ReadPageTool extends BaseBrowserToolExecutor {
     currentUrl: string;
     assistantGuidance?: ReadPageAssistantGuidance;
     pageRole?: string;
-  }): Promise<CandidateActionSeed[]> {
+  }): Promise<VisibleSearchSurfaceActionsResult> {
     if (!shouldRecoverSearchToolbarTargets(params.assistantGuidance, params.pageRole)) {
-      return [];
+      return { actions: [] };
     }
     try {
       const results = await chrome.scripting.executeScript({
@@ -1168,14 +1176,22 @@ class ReadPageTool extends BaseBrowserToolExecutor {
           if (actionDelta !== 0) return actionDelta;
           return (right.cards?.length ?? 0) - (left.cards?.length ?? 0);
         })[0];
-      if (!scan) return [];
-      return (scan.candidateActions ?? [])
+      if (!scan) return { actions: [] };
+      const actions = (scan.candidateActions ?? [])
         .map((action: any) => normalizeVisibleSearchSurfaceAction(action))
         .filter(
           (action: CandidateActionSeed | null): action is CandidateActionSeed => action !== null,
         );
-    } catch {
-      return [];
+      return { actions };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        actions: [],
+        sensingDiagnostic: {
+          source: 'visible_search_surface.scan',
+          message: `visible result card action scan failed: ${message.replace(/\s+/g, ' ').slice(0, 120)}`,
+        },
+      };
     }
   }
 
@@ -2300,10 +2316,16 @@ class ReadPageTool extends BaseBrowserToolExecutor {
         assistantGuidance,
         pageRole: basePayload.pageRole,
       });
-      if (visibleSearchSurfaceActions.length > 0) {
+      if (visibleSearchSurfaceActions.sensingDiagnostic) {
+        basePayload.sensingDiagnostics = appendObjectSensingDiagnostic(
+          basePayload.sensingDiagnostics,
+          visibleSearchSurfaceActions.sensingDiagnostic,
+        );
+      }
+      if (visibleSearchSurfaceActions.actions.length > 0) {
         basePayload.candidateActions = mergeVisibleSearchSurfaceActions(
           basePayload.candidateActions,
-          visibleSearchSurfaceActions,
+          visibleSearchSurfaceActions.actions,
         );
         basePayload.fallbackSource = basePayload.fallbackSource
           ? `${basePayload.fallbackSource}+visible_search_surface_actions`
@@ -2485,10 +2507,16 @@ class ReadPageTool extends BaseBrowserToolExecutor {
             assistantGuidance,
             pageRole: basePayload.pageRole,
           });
-          if (visibleSearchSurfaceActions.length > 0) {
+          if (visibleSearchSurfaceActions.sensingDiagnostic) {
+            basePayload.sensingDiagnostics = appendObjectSensingDiagnostic(
+              basePayload.sensingDiagnostics,
+              visibleSearchSurfaceActions.sensingDiagnostic,
+            );
+          }
+          if (visibleSearchSurfaceActions.actions.length > 0) {
             basePayload.candidateActions = mergeVisibleSearchSurfaceActions(
               basePayload.candidateActions,
-              visibleSearchSurfaceActions,
+              visibleSearchSurfaceActions.actions,
             );
             basePayload.fallbackSource = basePayload.fallbackSource
               ? `${basePayload.fallbackSource}+visible_search_surface_actions`

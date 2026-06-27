@@ -71,3 +71,20 @@ export function normalizeAccessibilityTreeDiagnostics(
       'content-script diagnostics mean some low-level object-sensing probes failed; the snapshot can still be useful but should be treated as partial evidence, not business-success proof',
   };
 }
+
+export function appendObjectSensingDiagnostic(
+  current: ReadPagePageContext['sensingDiagnostics'] | undefined,
+  diagnostic: ReadPageSensingDiagnostic,
+): ReadPagePageContext['sensingDiagnostics'] {
+  const partialErrors = [...(current?.partialErrors ?? []), diagnostic].slice(
+    -ACCESSIBILITY_TREE_DIAGNOSTIC_LIMIT,
+  );
+  return {
+    source: 'accessibility_tree_helper',
+    coverageStatus: 'partial',
+    partialErrors,
+    claimBoundary:
+      current?.claimBoundary ??
+      'content-script diagnostics mean some low-level object-sensing probes failed; the snapshot can still be useful but should be treated as partial evidence, not business-success proof',
+  };
+}
