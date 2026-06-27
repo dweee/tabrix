@@ -18,6 +18,11 @@ interface TabrixPreviousFeedback {
   confidence: number | null;
   reasonCode: string | null;
   summary: string | null;
+  evaluationVersion: string | null;
+  rubricVersion: string | null;
+  evaluatorModel: string | null;
+  userGoalSnapshot: string | null;
+  experienceCandidate: boolean | null;
 }
 
 export interface TabrixToolMetadata {
@@ -75,6 +80,11 @@ const TABRIX_TOOL_METADATA_SCHEMA = {
           },
           reasonCode: { type: 'string' },
           summary: { type: 'string' },
+          evaluationVersion: { type: 'string' },
+          rubricVersion: { type: 'string' },
+          evaluatorModel: { type: 'string' },
+          userGoalSnapshot: { type: 'string' },
+          experienceCandidate: { type: 'boolean' },
         },
         required: ['traceId', 'feedbackToken', 'businessStatus'],
       },
@@ -208,6 +218,10 @@ function readOptionalInteger(value: unknown): number | null {
   return Math.max(0, Math.floor(value));
 }
 
+function readOptionalBoolean(value: unknown): boolean | null {
+  return typeof value === 'boolean' ? value : null;
+}
+
 function readPreviousFeedback(value: unknown): TabrixPreviousFeedback[] {
   if (!Array.isArray(value)) return [];
   const feedback: TabrixPreviousFeedback[] = [];
@@ -234,6 +248,11 @@ function readPreviousFeedback(value: unknown): TabrixPreviousFeedback[] {
       confidence: readOptionalConfidence(object.confidence),
       reasonCode: readOptionalString(object.reasonCode),
       summary: readOptionalString(object.summary),
+      evaluationVersion: readOptionalString(object.evaluationVersion),
+      rubricVersion: readOptionalString(object.rubricVersion),
+      evaluatorModel: readOptionalString(object.evaluatorModel),
+      userGoalSnapshot: readOptionalString(object.userGoalSnapshot),
+      experienceCandidate: readOptionalBoolean(object.experienceCandidate),
     });
   }
   return feedback;

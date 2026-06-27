@@ -1,6 +1,7 @@
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { TOOL_NAMES } from '@tabrix/shared';
 import { MkeAiFeedbackValidationError } from '../memory/mke-memory-trace-service';
+import { isTrustedAiFeedbackEvaluator } from '../memory/mke-ai-feedback-recorder';
 import type { NativeToolHandler } from './native-tool-handlers';
 
 const MEMORY_FEEDBACK_STATUSES = new Set(['achieved', 'partial', 'not_achieved', 'unknown']);
@@ -52,10 +53,12 @@ function shouldProjectExperienceAfterAiFeedback(input: {
   businessStatus: string;
   confidence: number | null;
   summary?: string | null;
+  evaluatorModel?: string | null;
   experienceCandidate?: boolean | null;
 }): boolean {
   return (
     input.businessStatus === 'achieved' &&
+    isTrustedAiFeedbackEvaluator(input.evaluatorModel) &&
     typeof input.confidence === 'number' &&
     input.confidence >= 0.9 &&
     typeof input.summary === 'string' &&
@@ -152,6 +155,7 @@ export const handleMemoryRecordAiFeedback: NativeToolHandler = async (args, deps
     businessStatus,
     confidence: updated.aiFeedbackScore,
     summary: readStringArg(object, 'summary'),
+    evaluatorModel: readStringArg(object, 'evaluatorModel'),
     experienceCandidate: readBooleanArg(object, 'experienceCandidate'),
   });
   const experienceRevocation =

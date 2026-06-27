@@ -440,6 +440,7 @@ describe('SessionManager', () => {
           confidence: 0.94,
           reasonCode: 'result_cards_collected',
           summary: 'Collected reusable result cards for the search task.',
+          evaluatorModel: 'codex-test-evaluator',
         });
 
         const feedbackProjection = await mgr.flushAndProjectMkeAfterAiFeedback();

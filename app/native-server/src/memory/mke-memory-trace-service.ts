@@ -71,6 +71,10 @@ function readRequestNumber(request: Record<string, unknown> | null, key: string)
   return readNumber(request?.[key]);
 }
 
+function readOptionalText(value: string | null | undefined): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
+}
+
 export class MkeMemoryTraceService {
   private readonly asyncBrowserObjectWrites: BoundedAsyncBrowserObjectWriteQueue;
 
@@ -183,6 +187,11 @@ export class MkeMemoryTraceService {
     confidence?: number | null;
     reasonCode?: string | null;
     summary?: string | null;
+    evaluationVersion?: string | null;
+    rubricVersion?: string | null;
+    evaluatorModel?: string | null;
+    userGoalSnapshot?: string | null;
+    experienceCandidate?: boolean | null;
     sourceToolName?: string | null;
     sourceToolCallId?: string | null;
     rejectionCode: string;
@@ -192,6 +201,10 @@ export class MkeMemoryTraceService {
     const trace = this.repo.get(input.traceId);
     if (!trace) return false;
     const receivedAt = input.receivedAt ?? new Date().toISOString();
+    const evaluationVersion = readOptionalText(input.evaluationVersion) ?? 'ai_feedback_v1';
+    const rubricVersion = readOptionalText(input.rubricVersion) ?? 'tabrix_ai_business_feedback_v1';
+    const evaluatorModel = readOptionalText(input.evaluatorModel);
+    const userGoalSnapshot = readOptionalText(input.userGoalSnapshot);
     this.repo.insertFeedbackEvent({
       traceId: trace.traceId,
       taskId: trace.taskId,
@@ -200,14 +213,14 @@ export class MkeMemoryTraceService {
       sequenceIndex: trace.sequenceIndex,
       traceBindingHash: input.traceBindingHash ?? '',
       evaluationScope: input.evaluationScope === 'task' ? 'task' : 'step',
-      evaluationVersion: 'ai_feedback_v1',
-      rubricVersion: 'tabrix_ai_business_feedback_v1',
-      evaluatorModel: null,
+      evaluationVersion,
+      rubricVersion,
+      evaluatorModel,
       businessStatus: input.businessStatus,
       confidence: input.confidence ?? null,
       reasonCode: input.reasonCode ?? null,
       summary: input.summary ?? null,
-      userGoalSnapshot: null,
+      userGoalSnapshot,
       experienceCandidate: false,
       sourceToolName: input.sourceToolName ?? null,
       sourceToolCallId: input.sourceToolCallId ?? null,
@@ -222,6 +235,12 @@ export class MkeMemoryTraceService {
           reasonCode: input.reasonCode ?? null,
           rejectionCode: input.rejectionCode,
           rejectionMessage: input.rejectionMessage,
+          evaluationVersion,
+          rubricVersion,
+          ...(evaluatorModel ? { evaluatorModel } : {}),
+          ...(userGoalSnapshot ? { userGoalSnapshot } : {}),
+          requestedExperienceCandidate: input.experienceCandidate ?? null,
+          experienceCandidate: false,
         },
         'tabrix_ai_business_feedback',
       ),

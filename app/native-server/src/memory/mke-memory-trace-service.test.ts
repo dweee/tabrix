@@ -487,6 +487,7 @@ describe('MkeMemoryTraceService', () => {
         confidence: 0.94,
         reasonCode: 'ai_verified_result',
         summary: 'AI verified the expected page result appeared.',
+        evaluatorModel: 'codex-test-evaluator',
         receivedAt: '2026-06-10T10:00:01.000Z',
       });
 
@@ -823,13 +824,14 @@ describe('MkeMemoryTraceService', () => {
         businessStatus: 'achieved',
         confidence: 0.95,
         summary: 'AI verified the result.',
+        evaluatorModel: 'codex-test-evaluator',
       });
       expect(updated?.aiFeedback).toMatchObject({
         businessStatus: 'achieved',
         confidence: 0.95,
+        evaluatorModel: 'codex-test-evaluator',
       });
       expect(updated?.aiFeedback).not.toHaveProperty('evidenceRefs');
-      expect(updated?.aiFeedback).not.toHaveProperty('evaluatorModel');
       expect(updated?.aiFeedback).not.toHaveProperty('userGoalSnapshot');
       expect(traceRepo.listFeedbackEventsByTrace(trace.traceId)[0]).toMatchObject({
         businessStatus: 'achieved',
@@ -845,7 +847,7 @@ describe('MkeMemoryTraceService', () => {
     }
   });
 
-  it('accepts experience-ready AI feedback without evaluator metadata', () => {
+  it('records high-confidence AI feedback without evaluator metadata but keeps it out of Experience', () => {
     const { db } = openMemoryDb({ dbPath: ':memory:' });
     const traceRepo = new MemoryTraceRepository(db);
     const traceService = new MkeMemoryTraceService(traceRepo);
@@ -879,13 +881,61 @@ describe('MkeMemoryTraceService', () => {
       });
       expect(traceRepo.listFeedbackEventsByTrace(trace.traceId)[0]).toMatchObject({
         businessStatus: 'achieved',
-        experienceCandidate: true,
+        experienceCandidate: false,
       });
     } finally {
       traceService.discardPendingAsyncWrites();
       db.close();
     }
   });
+
+  it.each([undefined, '', 'unknown', 'default', 'system', 'tabrix'])(
+    'records AI feedback from untrusted evaluator %p without making it Experience-ready',
+    (evaluatorModel) => {
+      const { db } = openMemoryDb({ dbPath: ':memory:' });
+      const traceRepo = new MemoryTraceRepository(db);
+      const traceService = new MkeMemoryTraceService(traceRepo);
+
+      try {
+        const trace = traceService.recordToolCall({
+          taskId: 'trace-ai-feedback-task',
+          aiClient: 'jest',
+          toolName: 'chrome_click_element',
+          stepId: 'trace-ai-feedback-step',
+          sequenceIndex: 1,
+          requestParams: { tabId: 7 },
+          requestAtMs: NOW_MS,
+          responseAtMs: NOW_MS + 30,
+          result: textResult({ success: true }),
+        });
+
+        const updated = traceService.recordAiBusinessFeedback({
+          traceId: trace.traceId,
+          taskId: trace.taskId,
+          toolName: trace.toolName,
+          sequenceIndex: trace.sequenceIndex,
+          traceBindingHash: buildMemoryTraceBindingHash(trace),
+          businessStatus: 'achieved',
+          confidence: 0.95,
+          summary: 'AI verified the result.',
+          evaluatorModel,
+        });
+        expect(updated?.aiFeedback).toMatchObject({
+          businessStatus: 'achieved',
+          confidence: 0.95,
+          experienceCandidate: false,
+        });
+        expect(traceRepo.listFeedbackEventsByTrace(trace.traceId)[0]).toMatchObject({
+          businessStatus: 'achieved',
+          accepted: true,
+          experienceCandidate: false,
+        });
+      } finally {
+        traceService.discardPendingAsyncWrites();
+        db.close();
+      }
+    },
+  );
 
   it('projects API-backed read_page results as data_source Browser Objects', async () => {
     const { db } = openMemoryDb({ dbPath: ':memory:' });

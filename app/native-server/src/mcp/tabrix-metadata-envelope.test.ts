@@ -112,6 +112,11 @@ describe('tabrix metadata envelope', () => {
             confidence: 1.4,
             reasonCode: ' ai_verified_result ',
             summary: ' done ',
+            evaluationVersion: ' ai_feedback_v2 ',
+            rubricVersion: ' tabrix_step_quality_v2 ',
+            evaluatorModel: ' codex-test-evaluator ',
+            userGoalSnapshot: ' collect top ten cards ',
+            experienceCandidate: true,
           },
           {
             traceId: 'trace-bad-status',
@@ -145,6 +150,11 @@ describe('tabrix metadata envelope', () => {
           confidence: 1,
           reasonCode: 'ai_verified_result',
           summary: 'done',
+          evaluationVersion: 'ai_feedback_v2',
+          rubricVersion: 'tabrix_step_quality_v2',
+          evaluatorModel: 'codex-test-evaluator',
+          userGoalSnapshot: 'collect top ten cards',
+          experienceCandidate: true,
         },
       ],
     });

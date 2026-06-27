@@ -117,6 +117,7 @@ describe('native-tool-handlers · memory_record_ai_feedback', () => {
         confidence: 0.94,
         reasonCode: 'ai_verified_result',
         summary: 'AI verified the expected page result.',
+        evaluatorModel: 'codex-test-evaluator',
       },
       makeDeps({ memoryTraces: { recordAiBusinessFeedback }, flushAndProjectMkeAfterAiFeedback }),
     );
@@ -130,6 +131,7 @@ describe('native-tool-handlers · memory_record_ai_feedback', () => {
         confidence: 0.94,
         reasonCode: 'ai_verified_result',
         summary: 'AI verified the expected page result.',
+        evaluatorModel: 'codex-test-evaluator',
         sourceToolName: TOOL_NAMES.MEMORY.RECORD_AI_FEEDBACK,
       }),
     );
@@ -147,6 +149,48 @@ describe('native-tool-handlers · memory_record_ai_feedback', () => {
       },
     });
     expect(flushAndProjectMkeAfterAiFeedback).toHaveBeenCalledTimes(1);
+  });
+
+  it('records achieved AI feedback without trusted evaluator but does not trigger Experience projection', async () => {
+    const handler = getMemoryFeedbackHandler();
+    const recordAiBusinessFeedback = jest.fn().mockReturnValue({
+      traceId: 'trace-1',
+      aiFeedbackScore: 0.94,
+    });
+    const flushAndProjectMkeAfterAiFeedback = jest.fn();
+
+    const result = await handler(
+      {
+        traceId: 'trace-1',
+        feedbackToken: 'binding-hash-1',
+        businessStatus: 'achieved',
+        confidence: 0.94,
+        reasonCode: 'ai_verified_result',
+        summary: 'AI verified the expected page result.',
+      },
+      makeDeps({ memoryTraces: { recordAiBusinessFeedback }, flushAndProjectMkeAfterAiFeedback }),
+    );
+
+    expect(result.isError).toBe(false);
+    expect(recordAiBusinessFeedback).toHaveBeenCalledWith(
+      expect.objectContaining({
+        traceId: 'trace-1',
+        traceBindingHash: 'binding-hash-1',
+        businessStatus: 'achieved',
+        confidence: 0.94,
+        summary: 'AI verified the expected page result.',
+      }),
+    );
+    expect(callTextPayload(result)).toMatchObject({
+      status: 'recorded',
+      projection: {
+        status: 'skipped_experience_not_eligible',
+        knowledgeUpserted: null,
+        experienceSaved: null,
+        experienceIds: [],
+      },
+    });
+    expect(flushAndProjectMkeAfterAiFeedback).not.toHaveBeenCalled();
   });
 
   it('passes AI evaluation metadata and lets AI block Experience mining for brittle success', async () => {

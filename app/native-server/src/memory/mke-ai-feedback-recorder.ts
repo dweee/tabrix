@@ -36,6 +36,13 @@ export class MkeAiFeedbackValidationError extends Error {
 
 const DEFAULT_AI_FEEDBACK_EVALUATION_VERSION = 'ai_feedback_v1';
 const DEFAULT_AI_FEEDBACK_RUBRIC_VERSION = 'tabrix_ai_business_feedback_v1';
+const UNTRUSTED_AI_FEEDBACK_EVALUATOR_NAMES = new Set([
+  '',
+  'unknown',
+  'default',
+  'system',
+  'tabrix',
+]);
 
 function normalizeConfidence(value: number | null | undefined): number | null {
   if (!Number.isFinite(value)) return null;
@@ -48,6 +55,11 @@ function normalizeAiFeedbackScope(value: string | null | undefined): 'step' | 't
 
 function normalizeOptionalText(value: string | null | undefined): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
+}
+
+export function isTrustedAiFeedbackEvaluator(value: string | null | undefined): boolean {
+  const normalized = normalizeOptionalText(value)?.toLowerCase() ?? '';
+  return normalized.length > 0 && !UNTRUSTED_AI_FEEDBACK_EVALUATOR_NAMES.has(normalized);
 }
 
 function ensureFeedbackBinding(
@@ -141,6 +153,7 @@ export function recordAiBusinessFeedback(input: {
   const userGoalSnapshot = normalizeOptionalText(input.feedback.userGoalSnapshot);
   const experienceReady =
     input.feedback.businessStatus === 'achieved' &&
+    isTrustedAiFeedbackEvaluator(evaluatorModel) &&
     typeof confidence === 'number' &&
     confidence >= 0.9 &&
     typeof input.feedback.summary === 'string' &&

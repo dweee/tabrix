@@ -400,6 +400,11 @@ describe('handleToolCall execution wrapper', () => {
             confidence: 0.85,
             reasonCode: 'target_page_opened',
             summary: '目标页面已打开',
+            evaluationVersion: 'ai_feedback_v2',
+            rubricVersion: 'tabrix_step_quality_v2',
+            evaluatorModel: 'codex-test-evaluator',
+            userGoalSnapshot: '打开目标页面并读取发布状态',
+            experienceCandidate: true,
             ignoredFutureField: 'safe additive',
           },
         ],
@@ -417,6 +422,11 @@ describe('handleToolCall execution wrapper', () => {
         confidence: 0.85,
         reasonCode: 'target_page_opened',
         summary: '目标页面已打开',
+        evaluationVersion: 'ai_feedback_v2',
+        rubricVersion: 'tabrix_step_quality_v2',
+        evaluatorModel: 'codex-test-evaluator',
+        userGoalSnapshot: '打开目标页面并读取发布状态',
+        experienceCandidate: false,
         sourceToolName: 'chrome_read_page',
       },
     });
@@ -428,6 +438,7 @@ describe('handleToolCall execution wrapper', () => {
     ]);
     expect(sessionManager.memoryTraces!.listFeedbackEventsByTrace(traceId)[0]).toMatchObject({
       accepted: true,
+      evaluatorModel: 'codex-test-evaluator',
     });
   });
 

@@ -8,6 +8,7 @@ import type {
   MemoryTraceRepository,
 } from './db';
 import { shouldRequestAiFeedbackForTrace } from './ai-feedback-requirement';
+import { isTrustedAiFeedbackEvaluator } from './mke-ai-feedback-recorder';
 import { buildMkePageModelKey } from './mke-knowledge-projector';
 
 export interface MkeExperienceProjectionInput {
@@ -70,8 +71,6 @@ const TEMPLATE_BLOCKING_UNTEMPLATED_TOOLS = new Set([
 const MAX_REPLAYABLE_ACTION_DURATION_MS = 30_000;
 const UNREPLAYABLE_FALLBACK_PATTERN =
   /coordinate|coords|mouse|screenshot|image|ocr|fallback|retry|unstable|no[_-]?stable[_-]?target/i;
-
-const UNTRUSTED_EVALUATOR_NAMES = new Set(['', 'unknown', 'default', 'system', 'tabrix']);
 
 const BLOCKED_PAGE_SIGNAL_PATTERN =
   /\b(captcha|recaptcha|challenge|verification|security[-_]?check|human[-_]?check|verify(uuid|type|biz)?|user[_-]?verification[_-]?required|login[_-]?required|auth[_-]?required|access[_-]?denied|restricted)\b|安全验证|人机验证|滑块验证|验证码|登录验证/i;
@@ -190,6 +189,7 @@ function hasVerifiedAiSuccessFeedback(trace: MemoryTrace): boolean {
   const sourceKind = readString(feedback?.sourceKind);
   const businessStatus = readString(feedback?.businessStatus);
   const summary = readString(feedback?.summary);
+  const evaluatorModel = readString(feedback?.evaluatorModel);
   const experienceCandidate = readBoolean(feedback?.experienceCandidate);
   const confidence =
     typeof feedback?.confidence === 'number' && Number.isFinite(feedback.confidence)
@@ -198,6 +198,7 @@ function hasVerifiedAiSuccessFeedback(trace: MemoryTrace): boolean {
   return (
     sourceKind === 'ai_feedback' &&
     businessStatus === 'achieved' &&
+    isTrustedAiFeedbackEvaluator(evaluatorModel) &&
     experienceCandidate !== false &&
     typeof confidence === 'number' &&
     confidence >= 0.9 &&

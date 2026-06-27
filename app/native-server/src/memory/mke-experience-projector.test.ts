@@ -35,6 +35,7 @@ function verifiedExperienceFeedback(input: {
   confidence: number;
   reasonCode: string;
   summary: string;
+  evaluatorModel?: string;
   experienceCandidate?: boolean;
 }) {
   return {
@@ -44,6 +45,7 @@ function verifiedExperienceFeedback(input: {
     confidence: input.confidence,
     reasonCode: input.reasonCode,
     summary: input.summary,
+    evaluatorModel: input.evaluatorModel ?? 'codex-test-evaluator',
     ...(typeof input.experienceCandidate === 'boolean'
       ? { experienceCandidate: input.experienceCandidate }
       : {}),
@@ -1394,4 +1396,73 @@ describe('MkeExperienceProjector', () => {
     expect(result.savedExperienceCount).toBe(0);
     expect(experience.findByScenario(`mke:example.test:${pageModelKey}`)).toEqual([]);
   });
+
+  it.each([undefined, '', 'unknown', 'default', 'system', 'tabrix'])(
+    'does not mine recipes from high-confidence feedback by untrusted evaluator %p',
+    (evaluatorModel) => {
+      const opened = openMemoryDb({ dbPath: ':memory:' });
+      const traces = new MemoryTraceRepository(opened.db);
+      const knowledge = new KnowledgeModelRepository(opened.db);
+      const experience = new ExperienceRecipeRepository(opened.db);
+      const projector = new MkeExperienceProjector(traces, knowledge, experience);
+
+      const readTrace = traces.append({
+        traceId: `trace-read-untrusted-${String(evaluatorModel ?? 'missing')}`,
+        taskId: `task-untrusted-${String(evaluatorModel ?? 'missing')}`,
+        toolName: 'chrome_read_page',
+        requestParams: { tabId: 11 },
+        requestAt: '2026-06-06T09:15:01.000Z',
+        response: { payloadDigest: { summary: { quality: 'usable' } } },
+        responseAt: '2026-06-06T09:15:02.000Z',
+        toolSuccess: true,
+        tabId: 11,
+        siteFamily: 'example.test',
+        pageUrlPattern: 'https://example.test/search',
+        pageRole: 'search_results',
+        pageState: 'ready',
+        createdAt: '2026-06-06T09:15:02.000Z',
+      });
+      const pageModelKey = buildMkePageModelKey(readTrace)!;
+      addKnowledge({
+        knowledge,
+        siteFamily: 'example.test',
+        pageModelKey,
+        pageRole: 'search_results',
+        pageUrlPattern: 'https://example.test/search',
+      });
+      traces.append({
+        traceId: `trace-click-untrusted-${String(evaluatorModel ?? 'missing')}`,
+        taskId: readTrace.taskId,
+        toolName: 'chrome_click_element',
+        requestParams: { tabId: 11, ref: 'result-card' },
+        requestAt: '2026-06-06T09:15:03.000Z',
+        response: { payloadDigest: { success: true } },
+        responseAt: '2026-06-06T09:15:04.000Z',
+        toolSuccess: true,
+        businessSuccess: 'achieved',
+        aiFeedbackScore: 0.99,
+        aiFeedback: {
+          sourceKind: 'ai_feedback',
+          businessStatus: 'achieved',
+          confidence: 0.99,
+          reasonCode: 'untrusted_evaluator',
+          summary: 'AI-like feedback claims the step succeeded.',
+          evaluatorModel,
+          experienceCandidate: true,
+        },
+        tabId: 11,
+        siteFamily: 'example.test',
+        pageUrlPattern: 'https://example.test/search',
+        pageRole: 'search_results',
+        pageState: 'ready',
+        createdAt: '2026-06-06T09:15:04.000Z',
+      });
+
+      const result = projector.projectIdleBatch({ nowIso: '2026-06-06T09:15:05.000Z' });
+
+      expect(result.savedExperienceCount).toBe(0);
+      expect(experience.findByScenario(`mke:example.test:${pageModelKey}`)).toEqual([]);
+      opened.db.close();
+    },
+  );
 });
