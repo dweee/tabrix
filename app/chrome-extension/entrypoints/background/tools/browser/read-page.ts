@@ -98,6 +98,7 @@ import {
   buildAuthQrArtifactRefs,
   buildNotRequestedAuthArtifactStatus,
 } from './read-page-auth-artifacts';
+import { supplementAuthFormInteractiveControls as supplementAuthFormInteractiveControlsPayload } from './read-page-auth-form-controls';
 import {
   browserWorldTabOpenedByToOwnerType,
   buildReadPageOwnershipRuntimeSummary,
@@ -316,30 +317,6 @@ function shouldSampleVisibleText(input: {
   if (input.rows.visibleRegionRowsUsed) return false;
   if (input.pageRole === 'search_results') return true;
   return input.requestedDepth !== undefined && input.requestedDepth <= 3;
-}
-
-const AUTH_FORM_TARGETED_CONTROL_QUERIES = [
-  '输入手机号',
-  '手机号',
-  '输入验证码',
-  '验证码',
-  '获取验证码',
-  '发送验证码',
-  '重新发送',
-  '阅读并同意',
-  '同意并继续',
-  '登录',
-] as const;
-
-function hasAuthFormInteractiveContext(
-  pageContent: string,
-  visibleTextContent?: string | null,
-): boolean {
-  const text = `${pageContent || ''}\n${visibleTextContent || ''}`;
-  if (!text.trim()) return false;
-  return /手机号|手机号码|电话号码|短信验证码|输入验证码|获取验证码|发送验证码|重新发送|同意.*协议|隐私条款/i.test(
-    text,
-  );
 }
 
 async function buildModeOutput(params: {
@@ -899,54 +876,12 @@ class ReadPageTool extends BaseBrowserToolExecutor {
     basePayload: Record<string, any>,
     frameId?: number,
   ): Promise<void> {
-    if (
-      !hasAuthFormInteractiveContext(
-        String(basePayload.pageContent || ''),
-        basePayload.visibleTextContent,
-      )
-    ) {
-      return;
-    }
-
-    const targetedElements: any[] = [];
-    const seenTargetKeys = new Set<string>();
-    for (const query of AUTH_FORM_TARGETED_CONTROL_QUERIES) {
-      const targeted = await this.collectInteractiveElementsFallback(tabId, {
-        textQuery: query,
-        includeCoordinates: true,
-        frameId,
-      });
-      const first = Array.isArray(targeted?.elements) ? targeted.elements[0] : null;
-      if (!first) continue;
-      const key = [
-        String(first.selector || '').trim(),
-        String(first.text || first.name || '').trim(),
-        String(first.tagName || first.role || '').trim(),
-      ].join('|');
-      if (!key.trim() || seenTargetKeys.has(key)) continue;
-      seenTargetKeys.add(key);
-      targetedElements.push(first);
-    }
-
-    const fallback = await this.collectInteractiveElementsFallback(tabId, { frameId });
-    const broadElements = Array.isArray(fallback?.elements) ? fallback.elements : [];
-    const fallbackElements = [...targetedElements, ...broadElements];
-    if (fallbackElements.length === 0) return;
-
-    const merged = fallbackElements.slice(0, 150);
-    const fallbackRefMap = buildFallbackRefMap(merged);
-    const mergedWithRefs = attachFallbackRefs(merged, fallbackRefMap);
-    const existingElements = Array.isArray(basePayload.elements) ? basePayload.elements : [];
-    const existingRefMap = Array.isArray(basePayload.refMap) ? basePayload.refMap : [];
-
-    basePayload.elements = [...existingElements, ...mergedWithRefs];
-    basePayload.count = Math.max(Number(basePayload.count || 0), fallbackElements.length);
-    basePayload.refMap = [...existingRefMap, ...fallbackRefMap];
-    basePayload.refMapCount = basePayload.refMap.filter((entry: unknown) => entry != null).length;
-    basePayload.fallbackUsed = true;
-    basePayload.fallbackSource = basePayload.fallbackSource
-      ? `${basePayload.fallbackSource}+auth_form_interactive_supplement`
-      : 'auth_form_interactive_supplement';
+    await supplementAuthFormInteractiveControlsPayload({
+      tabId,
+      basePayload,
+      frameId,
+      collectInteractiveElementsFallback: this.collectInteractiveElementsFallback.bind(this),
+    });
   }
 
   private async collectQrVisualElements(params: {
