@@ -958,27 +958,34 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
               ),
             },
           );
-          sessionManager.completeStep(session.sessionId, step.stepId, {
-            status: 'failed',
-            errorCode: 'read_page_target_mismatch',
-            resultSummary: 'chrome_read_page blocked because returned target did not match tabId',
-            operationLog: {
-              decisionReason: 'read_page_target_mismatch',
-              metadata: {
-                actionOutcome: 'blocked',
-                executionMode: 'runtime_truth_target_binding',
+          return finishAndRecordToolCallResult({
+            sessionManager,
+            sessionId: session.sessionId,
+            stepId: step.stepId,
+            step: {
+              status: 'failed',
+              errorCode: 'read_page_target_mismatch',
+              resultSummary: 'chrome_read_page blocked because returned target did not match tabId',
+              operationLog: {
+                decisionReason: 'read_page_target_mismatch',
+                metadata: {
+                  actionOutcome: 'blocked',
+                  executionMode: 'runtime_truth_target_binding',
+                },
               },
             },
-          });
-          sessionManager.finishSession(session.sessionId, {
-            status: 'failed',
-            summary: 'chrome_read_page blocked because returned target did not match tabId',
-          });
-          return recordAndAttachMkeMemoryTrace(mismatchResult, {
-            requestParams: outgoingArgs,
-            resultSummary: 'chrome_read_page blocked because returned target did not match tabId',
-            errorCode: 'read_page_target_mismatch',
-            browserContextKey: taskContextAttachment.taskContextKey,
+            session: {
+              status: 'failed',
+              summary: 'chrome_read_page blocked because returned target did not match tabId',
+            },
+            result: mismatchResult,
+            recordTrace: recordAndAttachMkeMemoryTrace,
+            trace: {
+              requestParams: outgoingArgs,
+              resultSummary: 'chrome_read_page blocked because returned target did not match tabId',
+              errorCode: 'read_page_target_mismatch',
+              browserContextKey: taskContextAttachment.taskContextKey,
+            },
           });
         }
       }
@@ -1079,21 +1086,30 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
                 ),
               },
             );
-            sessionManager.completeStep(session.sessionId, step.stepId, {
-              status: 'completed',
-              resultSummary: 'chrome_read_page fulfilled via visible DOM region rows',
-              artifactRefs:
-                postResult.extraArtifactRefs.length > 0 ? postResult.extraArtifactRefs : undefined,
-              operationLog,
-            });
-            sessionManager.finishSession(session.sessionId, {
-              status: 'completed',
-              summary: 'chrome_read_page fulfilled via visible DOM region rows',
-            });
-            return recordAndAttachMkeMemoryTrace(aiFacingDomRowsResult, {
-              requestParams: outgoingArgs,
-              resultSummary: 'chrome_read_page fulfilled via visible DOM region rows',
-              browserContextKey: taskContextAttachment.taskContextKey,
+            return finishAndRecordToolCallResult({
+              sessionManager,
+              sessionId: session.sessionId,
+              stepId: step.stepId,
+              step: {
+                status: 'completed',
+                resultSummary: 'chrome_read_page fulfilled via visible DOM region rows',
+                artifactRefs:
+                  postResult.extraArtifactRefs.length > 0
+                    ? postResult.extraArtifactRefs
+                    : undefined,
+                operationLog,
+              },
+              session: {
+                status: 'completed',
+                summary: 'chrome_read_page fulfilled via visible DOM region rows',
+              },
+              result: aiFacingDomRowsResult,
+              recordTrace: recordAndAttachMkeMemoryTrace,
+              trace: {
+                requestParams: outgoingArgs,
+                resultSummary: 'chrome_read_page fulfilled via visible DOM region rows',
+                browserContextKey: taskContextAttachment.taskContextKey,
+              },
             });
           }
 
