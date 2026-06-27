@@ -22,6 +22,7 @@ export {
   type ExperienceRecipeInput,
   type KnowledgeModel,
   type KnowledgeModelInput,
+  type MemoryFeedbackEvent,
   type MemoryTrace,
   type MemoryTraceAiFeedbackUpdate,
   type MemoryTraceInsert,

@@ -27,6 +27,13 @@ export interface TabrixToolMetadata {
   previousFeedback: TabrixPreviousFeedback[];
 }
 
+export interface TabrixPreviousFeedbackResult {
+  traceId: string;
+  accepted: boolean;
+  rejectionCode?: string;
+  rejectionMessage?: string;
+}
+
 const TABRIX_TOOL_METADATA_SCHEMA = {
   type: 'object',
   description:
@@ -119,6 +126,7 @@ export function attachTabrixMemoryTraceEnvelope(
   trace: MemoryTrace | null,
   metadata: TabrixToolMetadata,
   toolName: string,
+  previousFeedbackResults: TabrixPreviousFeedbackResult[] = [],
 ): CallToolResult {
   if (!trace) return result;
   const first = result.content?.[0];
@@ -164,6 +172,9 @@ export function attachTabrixMemoryTraceEnvelope(
       toolSuccess: trace.toolSuccess,
       aiFeedbackRequired,
       businessFeedbackRequired: aiFeedbackRequired,
+      ...(previousFeedbackResults.length > 0
+        ? { previousFeedbackResults: previousFeedbackResults.slice(0, 8) }
+        : {}),
     },
   };
 

@@ -6,6 +6,7 @@ import { logger } from '../logging/logger';
 import {
   attachTabrixMemoryTraceEnvelope,
   type TabrixToolMetadata,
+  type TabrixPreviousFeedbackResult,
 } from './tabrix-metadata-envelope';
 
 const mkeMemoryTraceLogger = logger.child('mke-memory-trace');
@@ -25,13 +26,18 @@ interface ApplyPreviousBusinessFeedbackInput {
   receivedAtMs: number;
 }
 
-export function applyPreviousBusinessFeedback(input: ApplyPreviousBusinessFeedbackInput): void {
+export type PreviousBusinessFeedbackResult = TabrixPreviousFeedbackResult;
+
+export function applyPreviousBusinessFeedback(
+  input: ApplyPreviousBusinessFeedbackInput,
+): PreviousBusinessFeedbackResult[] {
   const { metadata, sessionManager, sourceToolName, sourceToolCallId, receivedAtMs } = input;
-  if (metadata.previousFeedback.length === 0) return;
+  if (metadata.previousFeedback.length === 0) return [];
   const traceWriter = sessionManager.memoryTraces;
-  if (!traceWriter) return;
+  if (!traceWriter) return [];
 
   let feedbackRecorded = false;
+  const results: PreviousBusinessFeedbackResult[] = [];
   for (const feedback of metadata.previousFeedback) {
     try {
       traceWriter.recordAiBusinessFeedback({
@@ -51,13 +57,43 @@ export function applyPreviousBusinessFeedback(input: ApplyPreviousBusinessFeedba
         sourceToolCallId,
       });
       feedbackRecorded = true;
+      results.push({ traceId: feedback.traceId, accepted: true });
     } catch (feedbackError) {
       const message =
         feedbackError instanceof Error ? feedbackError.message : String(feedbackError);
+      const rejectionCode =
+        typeof (feedbackError as { code?: unknown }).code === 'string'
+          ? (feedbackError as { code: string }).code
+          : 'feedback_update_failed';
+      traceWriter.recordRejectedAiBusinessFeedback({
+        traceId: feedback.traceId,
+        taskId: feedback.taskId,
+        toolName: feedback.toolName,
+        toolCallId: feedback.toolCallId,
+        sequenceIndex: feedback.sequenceIndex,
+        traceBindingHash: feedback.feedbackToken,
+        evaluationScope: feedback.evaluationScope,
+        businessStatus: feedback.businessStatus,
+        confidence: feedback.confidence,
+        reasonCode: feedback.reasonCode,
+        summary: feedback.summary,
+        receivedAt: new Date(receivedAtMs).toISOString(),
+        sourceToolName,
+        sourceToolCallId,
+        rejectionCode,
+        rejectionMessage: message,
+      });
+      results.push({
+        traceId: feedback.traceId,
+        accepted: false,
+        rejectionCode,
+        rejectionMessage: message,
+      });
       mkeMemoryTraceLogger.warn('ai feedback update failed', { errorMessage: message });
     }
   }
   if (feedbackRecorded) sessionManager.scheduleMkeProjectionAfterAiFeedback();
+  return results;
 }
 
 interface CreateMkeMemoryTraceRecorderInput {
@@ -70,6 +106,7 @@ interface CreateMkeMemoryTraceRecorderInput {
   requestStartedAtMs: number;
   defaultRequestParams: unknown;
   metadata: TabrixToolMetadata;
+  getPreviousFeedbackResults?: () => PreviousBusinessFeedbackResult[];
 }
 
 export function createMkeMemoryTraceRecorder(input: CreateMkeMemoryTraceRecorderInput): {
@@ -86,6 +123,7 @@ export function createMkeMemoryTraceRecorder(input: CreateMkeMemoryTraceRecorder
     requestStartedAtMs,
     defaultRequestParams,
     metadata,
+    getPreviousFeedbackResults,
   } = input;
 
   const record = (
@@ -123,7 +161,13 @@ export function createMkeMemoryTraceRecorder(input: CreateMkeMemoryTraceRecorder
   ): CallToolResult => {
     const trace = record(result, traceInput);
     if (trace) sessionManager.scheduleMkeProjectionAfterTrace();
-    return attachTabrixMemoryTraceEnvelope(result, trace, metadata, toolName);
+    return attachTabrixMemoryTraceEnvelope(
+      result,
+      trace,
+      metadata,
+      toolName,
+      getPreviousFeedbackResults?.() ?? [],
+    );
   };
 
   return { record, recordAndAttach };

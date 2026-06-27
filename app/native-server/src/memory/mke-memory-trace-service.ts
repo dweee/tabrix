@@ -1,6 +1,12 @@
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
-import { BrowserObjectRepository, MemoryTraceRepository, type MemoryTrace } from './db';
+import {
+  BrowserObjectRepository,
+  MemoryTraceRepository,
+  type BusinessSuccessVerdict,
+  type MemoryFeedbackEvent,
+  type MemoryTrace,
+} from './db';
 import { BoundedAsyncBrowserObjectWriteQueue } from './mke-browser-object-write-queue';
 import {
   recordBrowserObjectsFromToolResult,
@@ -165,8 +171,71 @@ export class MkeMemoryTraceService {
     return recordAiBusinessFeedbackWithRepo({ repo: this.repo, feedback: input });
   }
 
+  public recordRejectedAiBusinessFeedback(input: {
+    traceId: string;
+    taskId?: string | null;
+    toolName?: string | null;
+    toolCallId?: string | null;
+    sequenceIndex?: number | null;
+    traceBindingHash?: string | null;
+    evaluationScope?: 'step' | 'task' | null;
+    businessStatus: BusinessSuccessVerdict;
+    confidence?: number | null;
+    reasonCode?: string | null;
+    summary?: string | null;
+    sourceToolName?: string | null;
+    sourceToolCallId?: string | null;
+    rejectionCode: string;
+    rejectionMessage: string;
+    receivedAt?: string;
+  }): boolean {
+    const trace = this.repo.get(input.traceId);
+    if (!trace) return false;
+    const receivedAt = input.receivedAt ?? new Date().toISOString();
+    this.repo.insertFeedbackEvent({
+      traceId: trace.traceId,
+      taskId: trace.taskId,
+      toolName: trace.toolName,
+      toolCallId: trace.toolCallId,
+      sequenceIndex: trace.sequenceIndex,
+      traceBindingHash: input.traceBindingHash ?? '',
+      evaluationScope: input.evaluationScope === 'task' ? 'task' : 'step',
+      evaluationVersion: 'ai_feedback_v1',
+      rubricVersion: 'tabrix_ai_business_feedback_v1',
+      evaluatorModel: null,
+      businessStatus: input.businessStatus,
+      confidence: input.confidence ?? null,
+      reasonCode: input.reasonCode ?? null,
+      summary: input.summary ?? null,
+      userGoalSnapshot: null,
+      experienceCandidate: false,
+      sourceToolName: input.sourceToolName ?? null,
+      sourceToolCallId: input.sourceToolCallId ?? null,
+      accepted: false,
+      rejectionCode: input.rejectionCode,
+      rejectionMessage: input.rejectionMessage,
+      payload: sanitizeValue(
+        {
+          sourceKind: 'ai_feedback_rejected',
+          traceId: trace.traceId,
+          businessStatus: input.businessStatus,
+          reasonCode: input.reasonCode ?? null,
+          rejectionCode: input.rejectionCode,
+          rejectionMessage: input.rejectionMessage,
+        },
+        'tabrix_ai_business_feedback',
+      ),
+      createdAt: receivedAt,
+    });
+    return true;
+  }
+
   public get(traceId: string): MemoryTrace | undefined {
     return this.repo.get(traceId);
+  }
+
+  public listFeedbackEventsByTrace(traceId: string): MemoryFeedbackEvent[] {
+    return this.repo.listFeedbackEventsByTrace(traceId);
   }
 
   public listByTask(taskId: string): MemoryTrace[] {

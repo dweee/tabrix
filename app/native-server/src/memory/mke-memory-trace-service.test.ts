@@ -662,6 +662,61 @@ describe('MkeMemoryTraceService', () => {
     }
   });
 
+  it('records rejected AI feedback attempts as audit events without changing the trace verdict', () => {
+    const { db } = openMemoryDb({ dbPath: ':memory:' });
+    const traceRepo = new MemoryTraceRepository(db);
+    const traceService = new MkeMemoryTraceService(traceRepo);
+
+    try {
+      const trace = traceService.recordToolCall({
+        taskId: 'trace-rejected-feedback-task',
+        aiClient: 'jest',
+        toolName: 'chrome_click_element',
+        stepId: 'trace-rejected-feedback-step',
+        sequenceIndex: 1,
+        requestParams: { tabId: 7 },
+        requestAtMs: NOW_MS,
+        responseAtMs: NOW_MS + 30,
+        result: textResult({ success: true }),
+      });
+
+      const recorded = traceService.recordRejectedAiBusinessFeedback({
+        traceId: trace.traceId,
+        traceBindingHash: 'wrong-binding-hash',
+        businessStatus: 'achieved',
+        confidence: 0.9,
+        reasonCode: 'wrong_trace_binding',
+        summary: 'This feedback should be rejected.',
+        sourceToolName: 'chrome_read_page',
+        sourceToolCallId: 'feedback-source-step',
+        rejectionCode: 'trace_binding_mismatch',
+        rejectionMessage: 'The feedback token did not match this trace.',
+        receivedAt: new Date(NOW_MS + 100).toISOString(),
+      });
+
+      expect(recorded).toBe(true);
+      expect(traceRepo.get(trace.traceId)?.aiFeedback).toBeNull();
+      expect(traceRepo.get(trace.traceId)?.businessSuccess).toBe('unknown');
+      expect(traceRepo.listFeedbackEventsByTrace(trace.traceId)).toHaveLength(1);
+      expect(traceRepo.listFeedbackEventsByTrace(trace.traceId)[0]).toMatchObject({
+        traceId: trace.traceId,
+        taskId: trace.taskId,
+        toolName: trace.toolName,
+        toolCallId: trace.toolCallId,
+        businessStatus: 'achieved',
+        confidence: 0.9,
+        accepted: false,
+        rejectionCode: 'trace_binding_mismatch',
+        rejectionMessage: 'The feedback token did not match this trace.',
+        sourceToolName: 'chrome_read_page',
+        sourceToolCallId: 'feedback-source-step',
+      });
+    } finally {
+      traceService.discardPendingAsyncWrites();
+      db.close();
+    }
+  });
+
   it('records high-confidence achieved AI feedback without product evidence refs', () => {
     const { db } = openMemoryDb({ dbPath: ':memory:' });
     const traceRepo = new MemoryTraceRepository(db);

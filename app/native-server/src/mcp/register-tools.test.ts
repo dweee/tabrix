@@ -388,7 +388,7 @@ describe('handleToolCall execution wrapper', () => {
     const traceId = firstPayload._tabrix.traceId as string;
     const feedbackTarget = firstPayload._tabrix.feedbackTarget;
 
-    await handleToolCall('chrome_read_page', {
+    const second = await handleToolCall('chrome_read_page', {
       tabId: 1,
       _tabrix: {
         intentTitle: '读取发布状态',
@@ -405,6 +405,7 @@ describe('handleToolCall execution wrapper', () => {
         ],
       },
     });
+    const secondPayload = JSON.parse(String(second.content[0].text));
 
     const updated = sessionManager.memoryTraces!.get(traceId);
     expect(updated).toMatchObject({
@@ -418,6 +419,80 @@ describe('handleToolCall execution wrapper', () => {
         summary: '目标页面已打开',
         sourceToolName: 'chrome_read_page',
       },
+    });
+    expect(secondPayload._tabrix.previousFeedbackResults).toEqual([
+      {
+        traceId,
+        accepted: true,
+      },
+    ]);
+    expect(sessionManager.memoryTraces!.listFeedbackEventsByTrace(traceId)[0]).toMatchObject({
+      accepted: true,
+    });
+  });
+
+  it('records rejected _tabrix previousFeedback and reports it on the current tool result', async () => {
+    markBridgeReady();
+    jest
+      .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
+      .mockResolvedValueOnce({
+        status: 'success',
+        data: {
+          content: [{ type: 'text', text: JSON.stringify({ message: 'opened' }) }],
+          isError: false,
+        },
+      } as never)
+      .mockResolvedValueOnce({
+        status: 'success',
+        data: {
+          content: [{ type: 'text', text: JSON.stringify({ message: 'next read' }) }],
+          isError: false,
+        },
+      } as never);
+
+    const first = await handleToolCall('chrome_read_page', {
+      tabId: 1,
+      _tabrix: { intentTitle: '打开发布页' },
+    });
+    const firstPayload = JSON.parse(String(first.content[0].text));
+    const traceId = firstPayload._tabrix.traceId as string;
+
+    const second = await handleToolCall('chrome_read_page', {
+      tabId: 1,
+      _tabrix: {
+        intentTitle: '读取发布状态',
+        previousFeedback: [
+          {
+            traceId,
+            feedbackToken: 'wrong-feedback-token',
+            businessStatus: 'achieved',
+            confidence: 0.85,
+            reasonCode: 'target_page_opened',
+            summary: '目标页面已打开',
+          },
+        ],
+      },
+    });
+    const secondPayload = JSON.parse(String(second.content[0].text));
+
+    const original = sessionManager.memoryTraces!.get(traceId);
+    expect(original?.aiFeedback).toBeNull();
+    expect(original?.businessSuccess).toBe('unknown');
+    expect(secondPayload._tabrix.previousFeedbackResults).toEqual([
+      {
+        traceId,
+        accepted: false,
+        rejectionCode: 'trace_binding_mismatch',
+        rejectionMessage: expect.any(String),
+      },
+    ]);
+    expect(sessionManager.memoryTraces!.listFeedbackEventsByTrace(traceId)[0]).toMatchObject({
+      traceId,
+      accepted: false,
+      rejectionCode: 'trace_binding_mismatch',
+      businessStatus: 'achieved',
+      confidence: 0.85,
+      sourceToolName: 'chrome_read_page',
     });
   });
 

@@ -515,4 +515,40 @@ describe('tabrix metadata envelope', () => {
       },
     });
   });
+
+  it('attaches previous feedback write-back results to the current trace envelope', () => {
+    const result = attachTabrixMemoryTraceEnvelope(
+      textResult({ message: 'next step completed' }),
+      makeTrace({ toolName: TOOL_NAMES.BROWSER.READ_PAGE }),
+      {
+        intentTitle: '读取下一步结果',
+        intentSummary: null,
+        nextIntent: null,
+        previousFeedback: [],
+      },
+      TOOL_NAMES.BROWSER.READ_PAGE,
+      [
+        {
+          traceId: 'trace-previous',
+          accepted: false,
+          rejectionCode: 'trace_binding_mismatch',
+          rejectionMessage: 'The feedback token did not match this trace.',
+        },
+      ],
+    );
+    const payload = parseFirstText(result);
+
+    expect(payload._tabrix).toMatchObject({
+      traceId: 'trace-1',
+      toolName: TOOL_NAMES.BROWSER.READ_PAGE,
+      previousFeedbackResults: [
+        {
+          traceId: 'trace-previous',
+          accepted: false,
+          rejectionCode: 'trace_binding_mismatch',
+          rejectionMessage: 'The feedback token did not match this trace.',
+        },
+      ],
+    });
+  });
 });

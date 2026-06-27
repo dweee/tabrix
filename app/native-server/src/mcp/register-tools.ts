@@ -262,6 +262,7 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
     stepType: 'tool_call',
     inputSummary: JSON.stringify(args ?? {}),
   });
+  let previousFeedbackResults: ReturnType<typeof applyPreviousBusinessFeedback> = [];
   const mkeMemoryTraceRecorder = createMkeMemoryTraceRecorder({
     sessionManager,
     task,
@@ -272,6 +273,7 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
     requestStartedAtMs: toolCallStartedAtMs,
     defaultRequestParams: args,
     metadata: tabrixMetadata,
+    getPreviousFeedbackResults: () => previousFeedbackResults,
   });
   const recordAndAttachMkeMemoryTrace = (
     result: CallToolResult,
@@ -284,7 +286,7 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
   ): CallToolResult => mkeMemoryTraceRecorder.recordAndAttach(result, input);
 
   try {
-    applyPreviousBusinessFeedback({
+    previousFeedbackResults = applyPreviousBusinessFeedback({
       metadata: tabrixMetadata,
       sessionManager,
       sourceToolName: name,
@@ -375,7 +377,8 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
             try {
               const parsed = JSON.parse(text) as { message?: string };
               if (parsed && typeof parsed.message === 'string') errorSummary = parsed.message;
-            } catch {
+            } catch (parseError) {
+              void parseError;
               // Non-JSON error payload — fall back to the generic summary.
             }
           }
