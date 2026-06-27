@@ -133,8 +133,12 @@ async function shutdownGracefully(reason: string): Promise<void> {
       await mcpClient.close();
       mcpClient = null;
     }
-  } catch {
-    // ignore close errors
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    stdioLogger.warn('failed to close stdio MCP client during shutdown', {
+      reason,
+      errorMessage: message,
+    });
   }
   stdioLogger.error('shutting down', { reason });
   process.exit(0);

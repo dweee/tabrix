@@ -790,7 +790,7 @@ describe('observeNewTabUntil', () => {
     });
   });
 
-  it('non-verifier clicks still allow weak page outcomes to finish quickly', async () => {
+  it('non-verifier clicks do not treat focus-only signals as page outcome readiness', async () => {
     const observedPromise = observeNewTabUntil(
       3,
       Promise.resolve({
@@ -810,9 +810,11 @@ describe('observeNewTabUntil', () => {
       { maxMs: 75, verifierRequested: false },
     );
 
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(75);
     await expect(observedPromise).resolves.toMatchObject({
       newTabOpened: false,
-      waitDiagnostics: { newTabObservation: { reason: 'page_outcome_observed' } },
+      waitDiagnostics: { newTabObservation: { reason: 'ambiguous_cap_elapsed' } },
     });
   });
 });

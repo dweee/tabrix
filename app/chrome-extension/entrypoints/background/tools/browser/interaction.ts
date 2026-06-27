@@ -602,17 +602,16 @@ function buildClickDiffSummary(
   const menuAdded = page?.domAddedMenu === true;
   const focusChanged = page?.focusChanged === true;
 
-  const hasChange =
+  const hasTaskAdvancingChange =
     browser.newTabOpened ||
     beforeUnloadFired ||
     (urlDelta !== 'none' && urlDelta !== 'unavailable') ||
     domChanged ||
     dialogAdded ||
     menuAdded ||
-    focusChanged ||
     stateChanged;
 
-  if (!hasChange) {
+  if (!hasTaskAdvancingChange) {
     return { kind: 'no_change' };
   }
 
@@ -654,7 +653,6 @@ function buildBrowserActionPostActionDelta(input: {
           clickDiff.dialogAdded ? 'dialog_opened' : null,
           clickDiff.menuAdded ? 'menu_opened' : null,
           clickDiff.stateChanged || verification?.stateChanged ? 'state_changed' : null,
-          clickDiff.focusChanged || verification?.focusChanged ? 'focus_changed' : null,
         ].filter((entry): entry is string => Boolean(entry))
       : [];
 
@@ -896,6 +894,10 @@ function stripHash(url: string): string {
   return i >= 0 ? url.slice(0, i) : url;
 }
 
+function toErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 /**
  * Observe new-tab creation for the lifetime of a single click interaction,
  * then keep the listener alive for a tiny drain window so we do not miss a
@@ -943,8 +945,9 @@ export function observeNewTabUntil(
       if (timeoutId != null) clearTimeout(timeoutId);
       try {
         chrome.tabs.onCreated.removeListener(listener);
-      } catch {
-        // ignore
+      } catch (error) {
+        void error;
+        // Best-effort cleanup. The one-shot observation has already resolved.
       }
       resolve({
         newTabOpened,
@@ -1010,8 +1013,7 @@ export function observeNewTabUntil(
         page.hashBefore !== page.hashAfter ||
         page.domAddedDialog ||
         page.domAddedMenu ||
-        page.targetStateDelta != null ||
-        page.focusChanged
+        page.targetStateDelta != null
       );
     };
     const checkTabDelta = async (): Promise<boolean> => {
@@ -1084,8 +1086,9 @@ class ClickTool extends BaseBrowserToolExecutor {
               if (deref instanceof Element) {
                 element = deref;
               }
-            } catch {
-              // ignore
+            } catch (error) {
+              void error;
+              // The ref map is advisory; unresolved refs fall through to the normal no-target path.
             }
           } else if (params.selector && typeof params.selector === 'string') {
             element = document.querySelector(params.selector);
@@ -1576,6 +1579,7 @@ class ClickTool extends BaseBrowserToolExecutor {
 
       // Send click message to content script
       let result: any;
+      let actionOutcomeSignalError: string | null = null;
       try {
         result = await resultPromise;
       } catch (error) {
@@ -1637,8 +1641,8 @@ class ClickTool extends BaseBrowserToolExecutor {
         if (pageSig && (pageSig.domAddedDialog === true || pageSig.dialogOpened === true)) {
           actionOutcomeHandle.pushSignal({ kind: 'dialog_opened' });
         }
-      } catch {
-        // best-effort
+      } catch (error) {
+        actionOutcomeSignalError = toErrorMessage(error);
       }
 
       if (result?.interceptedDownload && result?.downloadUrl) {
@@ -1857,6 +1861,13 @@ class ClickTool extends BaseBrowserToolExecutor {
               verification: merged.verification,
               clickDiff,
               postActionDelta,
+              ...(actionOutcomeSignalError
+                ? {
+                    actionOutcomeDiagnostics: {
+                      signalForwardingError: actionOutcomeSignalError,
+                    },
+                  }
+                : {}),
               // One-release compat field; equals verification.navigationOccurred.
               navigationOccurred: merged.verification.navigationOccurred,
               // Explicit lane label. Always `tabrix_owned` for the

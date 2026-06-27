@@ -18,7 +18,8 @@ export function summarizeNativeToolErrorResult(
     if (parsed && typeof parsed.message === 'string' && parsed.message) {
       return parsed.message;
     }
-  } catch {
+  } catch (error) {
+    void error;
     // Non-JSON error payloads keep the generic native-tool summary.
   }
 
