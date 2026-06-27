@@ -29,12 +29,6 @@ import {
 import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
 import { ERROR_MESSAGES } from '@/common/constants';
 import { inferPageUnderstanding, type PageRole } from './read-page-understanding';
-import {
-  recordCandidateActionTargetLocatorsSnapshot,
-  recordStableTargetRefSnapshot,
-  type CandidateActionTargetLocatorEntry,
-  type StableTargetRefEntry,
-} from './stable-target-ref-registry';
 import { inferSchemeGuard } from './read-page-scheme-guard';
 import { summarizePageContent } from './read-page-content-summary';
 import { buildInteractiveElements } from './read-page-interactive-elements';
@@ -46,6 +40,7 @@ import {
   resetObjectLifecycleCacheForTests,
 } from './read-page-object-delta';
 import { buildAndRememberReadPageObjectSensingOutput } from './read-page-object-sensing-output';
+import { recordReadPageTargetPublication } from './read-page-object-publication';
 import {
   appendObjectSensingDiagnostic,
   normalizeAccessibilityTreeDiagnostics,
@@ -339,50 +334,12 @@ async function buildModeOutput(params: {
     artifactRefs,
   });
 
-  // Feed the per-tab stable-targetRef registry so the click bridge can
-  // translate `tgt_*` from prior turns back into the live per-snapshot
-  // `ref_*` for this exact tab. We do this exactly once per snapshot, after
-  // the extension layer is built but before serializing the response, so
-  // every successful read replaces the previous mapping atomically.
-  if (Array.isArray(extensionLayer.highValueObjects)) {
-    const entries: StableTargetRefEntry[] = [];
-    const snapshotFrameId = params.frameContext?.frameId;
-    for (const highValueObject of extensionLayer.highValueObjects) {
-      if (highValueObject.targetRef && highValueObject.ref) {
-        entries.push({
-          targetRef: highValueObject.targetRef,
-          ref: highValueObject.ref,
-          ...(typeof snapshotFrameId === 'number' ? { frameId: snapshotFrameId } : {}),
-        });
-      }
-    }
-    recordStableTargetRefSnapshot(params.tabId, entries);
-  }
-  if (Array.isArray(candidateActions)) {
-    const entries: CandidateActionTargetLocatorEntry[] = [];
-    const snapshotFrameId = params.frameContext?.frameId;
-    for (const candidateAction of candidateActions) {
-      const targetRef =
-        typeof candidateAction?.targetRef === 'string' ? candidateAction.targetRef.trim() : '';
-      if (!targetRef) continue;
-      const cssLocator = Array.isArray(candidateAction.locatorChain)
-        ? candidateAction.locatorChain.find((locator) => locator?.type === 'css')
-        : undefined;
-      const selector = typeof cssLocator?.value === 'string' ? cssLocator.value.trim() : '';
-      if (!selector) continue;
-      entries.push({
-        targetRef,
-        selector,
-        selectorType: 'css',
-        ...(typeof candidateAction.frameId === 'number'
-          ? { frameId: candidateAction.frameId }
-          : typeof snapshotFrameId === 'number'
-            ? { frameId: snapshotFrameId }
-            : {}),
-      });
-    }
-    recordCandidateActionTargetLocatorsSnapshot(params.tabId, entries);
-  }
+  recordReadPageTargetPublication({
+    tabId: params.tabId,
+    highValueObjects: extensionLayer.highValueObjects,
+    candidateActions,
+    frameId: params.frameContext?.frameId,
+  });
 
   const publishFormReadiness = buildPublishFormReadiness({
     pageRole: regionAlignedUnderstanding.pageRole,
