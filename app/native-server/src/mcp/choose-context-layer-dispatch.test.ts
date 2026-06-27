@@ -208,7 +208,7 @@ describe('dispatchLayer — priority 5 MKEP support', () => {
 });
 
 describe('dispatchLayer — fail-safe', () => {
-  test('no rule matches → fail-safe L0+L1+L2 with non-empty fallbackCause', () => {
+  test('no rule matches → fail-safe L0+L1 with non-empty fallbackCause', () => {
     const out = dispatchLayer({
       pageRole: '',
       taskType: 'unknown',
@@ -216,18 +216,20 @@ describe('dispatchLayer — fail-safe', () => {
       knowledgeAvailable: false,
       candidateActionsCount: 0,
       hvoCount: 0,
+      fullReadByteLength: 1000,
     });
-    expect(out.chosenLayer).toBe('L0+L1+L2');
+    expect(out.chosenLayer).toBe('L0+L1');
     expect(out.reason).toBe('dispatcher_fallback_safe');
     expect(out.sourceRoute).toBe('dispatcher_fallback_safe');
     expect(out.fallbackCause.length).toBeGreaterThan(0);
+    expect(out.tokenEstimate).toBeLessThan(out.fullReadTokenEstimate);
     expect(out.readPageAvoided).toBe(false);
   });
 
   test('non-object input returns fail-safe (no throw)', () => {
     // @ts-expect-error — exercising runtime guard
     const out = dispatchLayer(null);
-    expect(out.chosenLayer).toBe('L0+L1+L2');
+    expect(out.chosenLayer).toBe('L0+L1');
     expect(out.reason).toBe('dispatcher_fallback_safe');
   });
 });

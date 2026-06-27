@@ -190,7 +190,7 @@ interface NormalizedInput {
 }
 
 const SAFE_REASON_FALLBACK: LayerDispatchReason = 'dispatcher_fallback_safe';
-const SAFE_LAYER_FALLBACK: ReadPageRequestedLayer = 'L0+L1+L2';
+const SAFE_LAYER_FALLBACK: ReadPageRequestedLayer = 'L0+L1';
 const SAFE_ROUTE_FALLBACK: LayerSourceRoute = 'dispatcher_fallback_safe';
 
 /**
@@ -372,7 +372,7 @@ ensureClosedEnumsAreInSync();
 
 /**
  * Pure dispatcher entrypoint. NEVER throws on bad input — returns the
- * fail-safe `{ L0+L1+L2, dispatcher_fallback_safe, dispatcher_fallback_safe }`
+ * fail-safe `{ L0+L1, dispatcher_fallback_safe, dispatcher_fallback_safe }`
  * triple so the chooser callsite always has a usable result.
  *
  * Programmer errors (e.g. a future change accidentally inserts a
@@ -432,11 +432,12 @@ export function dispatchLayer(input: LayerDispatchInput): LayerDispatchResult {
 
 function buildFailSafe(fullReadByteLength: number, cause: string): LayerDispatchResult {
   const fullReadTokenEstimate = estimateTokensFromBytes(fullReadByteLength);
+  const chosenBytes = Math.floor(fullReadByteLength * layerByteFraction(SAFE_LAYER_FALLBACK));
   return {
     chosenLayer: SAFE_LAYER_FALLBACK,
     reason: SAFE_REASON_FALLBACK,
     sourceRoute: SAFE_ROUTE_FALLBACK,
-    tokenEstimate: fullReadTokenEstimate,
+    tokenEstimate: estimateTokensFromBytes(chosenBytes),
     fullReadTokenEstimate,
     alternatives: [],
     readPageAvoided: false,
