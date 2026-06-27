@@ -305,4 +305,49 @@ describe('read_page object snapshot and delta', () => {
       },
     });
   });
+
+  it('returns restricted when the current snapshot is an unsupported browser surface', () => {
+    const report = buildReadPagePageDeltaReport({
+      tabId: 100,
+      previousSnapshot: snapshot({ snapshotId: 'before' }),
+      currentSnapshot: snapshot({
+        snapshotId: 'after',
+        pageType: 'unsupported_page',
+        pageState: {
+          pageStability: 'changed_without_target_transition',
+          readiness: 'blocked',
+          baseUrl: 'chrome://settings',
+          frameCount: 1,
+        },
+      }),
+    });
+
+    expect(report).toMatchObject({
+      deltaKind: 'restricted',
+      recommendation: 'stop',
+      changedRegions: ['access_state'],
+    });
+  });
+
+  it('returns blocked when the current snapshot readiness says the page cannot be used', () => {
+    const report = buildReadPagePageDeltaReport({
+      tabId: 100,
+      previousSnapshot: snapshot({ snapshotId: 'before' }),
+      currentSnapshot: snapshot({
+        snapshotId: 'after',
+        pageState: {
+          pageStability: 'runtime_degraded',
+          readiness: 'blocked',
+          baseUrl: 'example.test',
+          frameCount: 1,
+        },
+      }),
+    });
+
+    expect(report).toMatchObject({
+      deltaKind: 'blocked',
+      recommendation: 'refresh',
+      changedRegions: ['access_state'],
+    });
+  });
 });

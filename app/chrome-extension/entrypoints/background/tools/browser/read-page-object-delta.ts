@@ -341,6 +341,22 @@ function isFormStateObject(object: ReadPagePageObjectSummary): boolean {
   );
 }
 
+function classifyAccessDelta(
+  snapshot: ReadPageObjectSnapshot,
+): Pick<ReadPagePageDeltaReport, 'deltaKind' | 'recommendation'> | null {
+  if (
+    snapshot.pageType === 'unsupported_page' ||
+    snapshot.pageType === 'browser_internal_page' ||
+    snapshot.pageType === 'devtools_page'
+  ) {
+    return { deltaKind: 'restricted', recommendation: 'stop' };
+  }
+  if (snapshot.pageState.readiness === 'blocked') {
+    return { deltaKind: 'blocked', recommendation: 'refresh' };
+  }
+  return null;
+}
+
 export function resolveTargetObjectId(
   binding: PendingActionBinding | null,
   snapshot: ReadPageObjectSnapshot,
@@ -465,10 +481,14 @@ export function buildReadPagePageDeltaReport(params: {
     requestStartedDelta > 0 &&
     params.cdpSignals?.networkInFlightCount === 0;
   const consoleError = typeof errorCountDelta === 'number' && errorCountDelta > 0;
+  const accessDelta = classifyAccessDelta(params.currentSnapshot);
   let deltaKind: ReadPagePageDeltaReport['deltaKind'] = 'no_useful_change';
   let recommendation: ReadPagePageDeltaReport['recommendation'] = 'wait';
 
-  if (params.currentSnapshot.pageUrl !== previous.pageUrl) {
+  if (accessDelta) {
+    deltaKind = accessDelta.deltaKind;
+    recommendation = accessDelta.recommendation;
+  } else if (params.currentSnapshot.pageUrl !== previous.pageUrl) {
     deltaKind = 'url_changed';
     recommendation = 'proceed';
   } else if (routeChanged) {
@@ -503,7 +523,12 @@ export function buildReadPagePageDeltaReport(params: {
     beforeObservedAt: previous.observedAt,
     afterObservedAt: params.currentSnapshot.observedAt,
     deltaKind,
-    changedRegions: changedRegions.length > 0 ? changedRegions : ['read_page_object_snapshot'],
+    changedRegions:
+      changedRegions.length > 0
+        ? changedRegions
+        : accessDelta
+          ? ['access_state']
+          : ['read_page_object_snapshot'],
     changedObjects: objectDelta,
     ...(typeof requestStartedDelta === 'number'
       ? {
