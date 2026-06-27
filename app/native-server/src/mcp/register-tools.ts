@@ -123,6 +123,12 @@ import {
   mergeReadPagePayloadMetadata,
   readJsonObjectFromCallToolResult,
 } from './register-tool-result-json';
+import {
+  buildReadPageRequestKey,
+  extractReadPageRenderMode,
+  readReadPageMode,
+  shouldIncludeVerboseReadPageContext,
+} from './read-page-request-shape';
 import { attachObjectLibraryHintsToReadPageResult } from './read-page-object-library-hints';
 import { maybeRunAutoTaskFreshReadbackBeforeImpact } from './mcp-auto-fresh-readback';
 import { ensureStructuredLegacyActionResult } from './mcp-legacy-action-result';
@@ -1763,14 +1769,6 @@ function attachAiFacingDeltaContext(
   };
 }
 
-function shouldIncludeVerboseReadPageContext(
-  args: unknown,
-  requestedLayer: ReadPageRequestedLayer,
-): boolean {
-  const input = readObject(args);
-  return requestedLayer === 'L0+L1+L2' || readReadPageMode(input?.mode) === 'full';
-}
-
 function buildStructuredReadGate(
   payload: Record<string, unknown>,
   projection: BrowserPageThingProjection,
@@ -1781,110 +1779,6 @@ function buildStructuredReadGate(
     nowMs: Date.now(),
     gateId: `structured-read-gate:${projection.projectionId}`,
   });
-}
-
-function readReadPageMode(value: unknown): ReadPageMode {
-  return value === 'normal' || value === 'full' || value === 'compact' ? value : 'compact';
-}
-
-function buildReadPageRequestKey(args: unknown, requestedLayer: ReadPageRequestedLayer): string {
-  const input =
-    args && typeof args === 'object' && !Array.isArray(args)
-      ? (args as Record<string, unknown>)
-      : {};
-  const mode = readReadPageMode(input.mode);
-  const render = extractReadPageRenderMode(input) ?? 'json';
-  const filter = typeof input.filter === 'string' ? input.filter : 'all';
-  const depth =
-    typeof input.depth === 'number' && Number.isFinite(input.depth) ? input.depth : null;
-  const refId = typeof input.refId === 'string' ? input.refId : '';
-  const includeAuthArtifacts = input.includeAuthArtifacts === true;
-  const forceRefresh = input.forceRefresh === true;
-  const assistantGuidance = normalizeReadPageAssistantGuidanceForCacheKey(input.assistantGuidance);
-  return JSON.stringify({
-    requestedLayer,
-    mode,
-    render,
-    filter,
-    depth,
-    refId,
-    includeAuthArtifacts,
-    assistantGuidance,
-    forceRefresh,
-  });
-}
-
-function normalizeReadPageAssistantGuidanceForCacheKey(
-  value: unknown,
-): Record<string, unknown> | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-  const input = value as Record<string, unknown>;
-  const output: Record<string, unknown> = {};
-  if (
-    typeof input.taskKind === 'string' &&
-    ['auth', 'search', 'extract_content', 'unknown'].includes(input.taskKind)
-  ) {
-    output.taskKind = input.taskKind;
-  }
-  if (
-    typeof input.authPreference === 'string' &&
-    ['qr', 'otp', 'manual', 'auto'].includes(input.authPreference)
-  ) {
-    output.authPreference = input.authPreference;
-  }
-  if (Array.isArray(input.requestedObjects)) {
-    const requestedObjects = input.requestedObjects
-      .filter(
-        (item): item is string =>
-          typeof item === 'string' &&
-          [
-            'auth_surface',
-            'qr_image',
-            'phone_input',
-            'otp_input',
-            'search_input',
-            'result_cards',
-            'detail_metrics',
-          ].includes(item),
-      )
-      .slice(0, 8);
-    if (requestedObjects.length > 0) output.requestedObjects = [...new Set(requestedObjects)];
-  }
-  const target =
-    input.assistantProvidedTarget &&
-    typeof input.assistantProvidedTarget === 'object' &&
-    !Array.isArray(input.assistantProvidedTarget)
-      ? (input.assistantProvidedTarget as Record<string, unknown>)
-      : null;
-  if (target) {
-    const assistantProvidedTarget: Record<string, unknown> = {};
-    if (
-      typeof target.purpose === 'string' &&
-      ['auth_qr_image', 'click', 'fill', 'observe'].includes(target.purpose)
-    ) {
-      assistantProvidedTarget.purpose = target.purpose;
-    }
-    if (
-      typeof target.targetRef === 'string' &&
-      /^(?:ref|tgt)_[A-Za-z0-9:_-]{1,80}$/.test(target.targetRef)
-    ) {
-      assistantProvidedTarget.targetRef = target.targetRef;
-    }
-    if (typeof target.selector === 'string' && target.selector.trim().length > 0) {
-      assistantProvidedTarget.selector = target.selector.trim().slice(0, 500);
-    }
-    if (
-      typeof target.frameId === 'number' &&
-      Number.isInteger(target.frameId) &&
-      target.frameId >= 0
-    ) {
-      assistantProvidedTarget.frameId = target.frameId;
-    }
-    if (Object.keys(assistantProvidedTarget).length > 0) {
-      output.assistantProvidedTarget = assistantProvidedTarget;
-    }
-  }
-  return Object.keys(output).length > 0 ? output : null;
 }
 
 function buildAutoTabTaskContextKey(tabId: number): string {
@@ -2385,10 +2279,4 @@ function isReadPageObjectLifecycleSummary(value: unknown): value is ReadPageObje
     Array.isArray(object.changes) &&
     typeof object.claimBoundary === 'string'
   );
-}
-
-function extractReadPageRenderMode(input: unknown): 'json' | 'markdown' | null {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
-  const render = (input as Record<string, unknown>).render;
-  return render === 'json' || render === 'markdown' ? render : null;
 }
