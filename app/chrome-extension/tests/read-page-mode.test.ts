@@ -15,6 +15,7 @@ import {
 import { buildCandidateActions } from '@/entrypoints/background/tools/browser/read-page-candidate-actions';
 import { extractVisibleRegionRows } from '@/entrypoints/background/tools/browser/visible-region-rows';
 import { inferPageUnderstanding } from '@/entrypoints/background/tools/browser/read-page-understanding';
+import { collectVisibleSearchSurfaceActions } from '@/entrypoints/background/tools/browser/read-page-visible-search-surface-actions';
 import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
 
 const MODE_MINIMUM_FIELDS: Record<'compact' | 'normal' | 'full', string[]> = {
@@ -1403,7 +1404,7 @@ describe('read_page mode', () => {
       },
     ] as any);
 
-    const result = await (readPageTool as any).collectVisibleSearchSurfaceActions({
+    const result = await collectVisibleSearchSurfaceActions({
       tabId: 5228,
       currentUrl: 'https://example.test/search?q=ai',
       assistantGuidance: {

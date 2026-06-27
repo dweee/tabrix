@@ -15,7 +15,6 @@ import {
   type ReadPageRenderMode,
   type ReadPageRequestedLayer,
   type ReadPageSearchSurface,
-  type ReadPageSensingDiagnostic,
   type ReadPageWindowRuntimeState,
   type ReadPageBrowserPageObjectView,
   type BrowserPageThingProjection,
@@ -61,7 +60,6 @@ import {
   readWindowInteger,
 } from './read-page-input-normalizers';
 import { buildLoadReadiness, inferPageStability, normalizeFrameContext } from './read-page-state';
-import { scanVisibleResultCardsInPage } from './collect-result-cards';
 import {
   buildSearchSurface,
   extractFilterPanelLabelsFromVisibleText,
@@ -99,6 +97,7 @@ import {
 } from './read-page-visible-region-postprocess';
 import { inferUserActivityLevel } from './read-page-user-activity';
 import { shouldSampleVisibleText } from './read-page-visible-text-sampling';
+import { collectVisibleSearchSurfaceActions } from './read-page-visible-search-surface-actions';
 import {
   buildAuthCollaborationState,
   buildAuthQrArtifactRefs,
@@ -126,10 +125,8 @@ import {
   isCompactVisibleTextControlFallbackElement,
   isSearchToolbarFilterOpenLabel,
   isSearchToolbarRecoveredRef,
-  itemUrlMatchesReadPage,
   mergeHighValueObjectActionsIntoCandidateActions,
   mergeVisibleSearchSurfaceActions,
-  normalizeVisibleSearchSurfaceAction,
   prependRecoveredElementsToPageContent,
   promoteFilterPanelSelector,
   promoteSearchToolbarSelector,
@@ -159,10 +156,6 @@ interface ReadPageStats {
 }
 type PageType = ReadPagePageType;
 type PrimaryRegionConfidence = ReadPagePrimaryRegionConfidence;
-interface VisibleSearchSurfaceActionsResult {
-  actions: CandidateActionSeed[];
-  sensingDiagnostic?: ReadPageSensingDiagnostic;
-}
 
 interface ReadPageParams {
   filter?: 'interactive'; // when omitted, return all visible elements
@@ -699,54 +692,6 @@ class ReadPageTool extends BaseBrowserToolExecutor {
       if (fallback && fallback.success && Array.isArray(fallback.elements)) break;
     }
     return fallback && fallback.success && Array.isArray(fallback.elements) ? fallback : null;
-  }
-
-  private async collectVisibleSearchSurfaceActions(params: {
-    tabId: number;
-    currentUrl: string;
-    assistantGuidance?: ReadPageAssistantGuidance;
-    pageRole?: string;
-  }): Promise<VisibleSearchSurfaceActionsResult> {
-    if (!shouldRecoverSearchToolbarTargets(params.assistantGuidance, params.pageRole)) {
-      return { actions: [] };
-    }
-    try {
-      const results = await chrome.scripting.executeScript({
-        target: { tabId: params.tabId, allFrames: true },
-        func: scanVisibleResultCardsInPage,
-        world: 'MAIN',
-      } as any);
-      const scans = (Array.isArray(results) ? results : [])
-        .map((entry: any) => entry?.result)
-        .filter((scan: any) => scan && Array.isArray(scan.candidateActions));
-      const scan = scans
-        .filter((item: any) => !/^(about|chrome|edge|devtools):/i.test(item?.pageInfo?.url || ''))
-        .sort((left: any, right: any) => {
-          const urlMatchRight = itemUrlMatchesReadPage(right, params.currentUrl) ? 1 : 0;
-          const urlMatchLeft = itemUrlMatchesReadPage(left, params.currentUrl) ? 1 : 0;
-          if (urlMatchRight !== urlMatchLeft) return urlMatchRight - urlMatchLeft;
-          const actionDelta =
-            (right.candidateActions?.length ?? 0) - (left.candidateActions?.length ?? 0);
-          if (actionDelta !== 0) return actionDelta;
-          return (right.cards?.length ?? 0) - (left.cards?.length ?? 0);
-        })[0];
-      if (!scan) return { actions: [] };
-      const actions = (scan.candidateActions ?? [])
-        .map((action: any) => normalizeVisibleSearchSurfaceAction(action))
-        .filter(
-          (action: CandidateActionSeed | null): action is CandidateActionSeed => action !== null,
-        );
-      return { actions };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return {
-        actions: [],
-        sensingDiagnostic: {
-          source: 'visible_search_surface.scan',
-          message: `visible result card action scan failed: ${message.replace(/\s+/g, ' ').slice(0, 120)}`,
-        },
-      };
-    }
   }
 
   private async supplementAuthFormInteractiveControls(
@@ -1821,7 +1766,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
         assistantGuidance,
         frameId: requestedFrameId,
       });
-      const visibleSearchSurfaceActions = await this.collectVisibleSearchSurfaceActions({
+      const visibleSearchSurfaceActions = await collectVisibleSearchSurfaceActions({
         tabId,
         currentUrl,
         assistantGuidance,
@@ -2012,7 +1957,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
             assistantGuidance,
             frameId: requestedFrameId,
           });
-          const visibleSearchSurfaceActions = await this.collectVisibleSearchSurfaceActions({
+          const visibleSearchSurfaceActions = await collectVisibleSearchSurfaceActions({
             tabId,
             currentUrl,
             assistantGuidance,
