@@ -3,7 +3,6 @@ import { BaseBrowserToolExecutor } from '../base-browser';
 import {
   TOOL_NAMES,
   type BrowserPageStability,
-  type BrowserUserActivityLevel,
   type ReadPageCompactSnapshot,
   type ReadPageFrameContext,
   type ReadPageFullSnapshot,
@@ -98,6 +97,7 @@ import {
   reconcilePageUnderstandingWithVisibleRows,
   suppressVisibleRowsForContentDetail,
 } from './read-page-visible-region-postprocess';
+import { inferUserActivityLevel } from './read-page-user-activity';
 import {
   buildAuthCollaborationState,
   buildAuthQrArtifactRefs,
@@ -198,31 +198,6 @@ function delay(ms: number): Promise<void> {
 
 function getTabNavigationUrl(tab: Pick<chrome.tabs.Tab, 'url' | 'pendingUrl'>): string {
   return String(tab.url || tab.pendingUrl || '');
-}
-
-async function inferUserActivityLevel(input: {
-  isCurrentTabActive: boolean | null;
-  isCurrentWindowFocused: boolean | null;
-}): Promise<BrowserUserActivityLevel> {
-  // Fast path: user is directly viewing the tab
-  if (input.isCurrentTabActive === true && input.isCurrentWindowFocused === true) {
-    return 'active';
-  }
-  // Cannot determine — missing API data
-  if (input.isCurrentTabActive === null || input.isCurrentWindowFocused === null) {
-    return 'unknown';
-  }
-  // User is NOT viewing the tab — check system idle state
-  try {
-    if (typeof chrome?.idle?.queryState === 'function') {
-      const state = await chrome.idle.queryState(15);
-      if (state === 'active') return 'recent_input';
-    }
-  } catch (error) {
-    void error;
-    /* fall through to 'none' */
-  }
-  return 'none';
 }
 
 function shouldSampleVisibleText(input: {
