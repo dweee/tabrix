@@ -190,6 +190,7 @@ function hasVerifiedAiSuccessFeedback(trace: MemoryTrace): boolean {
   const sourceKind = readString(feedback?.sourceKind);
   const businessStatus = readString(feedback?.businessStatus);
   const summary = readString(feedback?.summary);
+  const experienceCandidate = readBoolean(feedback?.experienceCandidate);
   const confidence =
     typeof feedback?.confidence === 'number' && Number.isFinite(feedback.confidence)
       ? feedback.confidence
@@ -197,6 +198,7 @@ function hasVerifiedAiSuccessFeedback(trace: MemoryTrace): boolean {
   return (
     sourceKind === 'ai_feedback' &&
     businessStatus === 'achieved' &&
+    experienceCandidate !== false &&
     typeof confidence === 'number' &&
     confidence >= 0.9 &&
     typeof summary === 'string' &&

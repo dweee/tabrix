@@ -35,6 +35,7 @@ function verifiedExperienceFeedback(input: {
   confidence: number;
   reasonCode: string;
   summary: string;
+  experienceCandidate?: boolean;
 }) {
   return {
     sourceKind: 'ai_feedback',
@@ -43,6 +44,9 @@ function verifiedExperienceFeedback(input: {
     confidence: input.confidence,
     reasonCode: input.reasonCode,
     summary: input.summary,
+    ...(typeof input.experienceCandidate === 'boolean'
+      ? { experienceCandidate: input.experienceCandidate }
+      : {}),
   };
 }
 
@@ -1267,6 +1271,59 @@ describe('MkeExperienceProjector', () => {
     });
 
     const result = projector.projectIdleBatch({ nowIso: '2026-06-06T09:00:05.000Z' });
+
+    expect(result.savedExperienceCount).toBe(0);
+    expect(experience.findByScenario(`mke:example.test:${pageModelKey}`)).toEqual([]);
+  });
+
+  it('does not mine a recipe when AI marks a successful step as not reusable', () => {
+    const opened = openMemoryDb({ dbPath: ':memory:' });
+    const traces = new MemoryTraceRepository(opened.db);
+    const knowledge = new KnowledgeModelRepository(opened.db);
+    const experience = new ExperienceRecipeRepository(opened.db);
+    const projector = new MkeExperienceProjector(traces, knowledge, experience);
+
+    const collectTrace = traces.append({
+      traceId: 'trace-collect-success-not-reusable',
+      taskId: 'task-success-not-reusable',
+      toolName: 'chrome_collect_result_cards',
+      requestParams: { tabId: 9, minResults: 10, maxScrolls: 4, startFromTop: true },
+      requestAt: '2026-06-06T09:05:01.000Z',
+      response: {
+        payloadDigest: {
+          success: true,
+          selectedDataSource: 'visible_dom_result_cards',
+          observedResultCount: 10,
+          collection: { startFromTop: true },
+        },
+      },
+      responseAt: '2026-06-06T09:05:02.000Z',
+      durationMs: 1200,
+      toolSuccess: true,
+      businessSuccess: 'achieved',
+      aiFeedback: verifiedExperienceFeedback({
+        confidence: 0.98,
+        reasonCode: 'brittle_collection_path',
+        summary: 'The collection completed the task but should not be reused as experience.',
+        experienceCandidate: false,
+      }),
+      tabId: 9,
+      siteFamily: 'example.test',
+      pageUrlPattern: 'https://example.test/search',
+      pageRole: 'search_results',
+      pageState: 'complete',
+      createdAt: '2026-06-06T09:05:02.000Z',
+    });
+    const pageModelKey = buildMkePageModelKey(collectTrace)!;
+    addKnowledge({
+      knowledge,
+      siteFamily: 'example.test',
+      pageModelKey,
+      pageRole: 'search_results',
+      pageUrlPattern: 'https://example.test/search',
+    });
+
+    const result = projector.projectIdleBatch({ nowIso: '2026-06-06T09:05:05.000Z' });
 
     expect(result.savedExperienceCount).toBe(0);
     expect(experience.findByScenario(`mke:example.test:${pageModelKey}`)).toEqual([]);
