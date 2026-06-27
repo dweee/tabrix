@@ -8,6 +8,27 @@ import {
   type StableTargetRefEntry,
 } from './stable-target-ref-registry';
 
+function firstUsableLocator(
+  locatorChain: unknown,
+): Pick<CandidateActionTargetLocatorEntry, 'selector' | 'selectorType'> | undefined {
+  if (!Array.isArray(locatorChain)) return undefined;
+  const xpathLocator = locatorChain.find(
+    (locator: { type?: string; value?: string } | null | undefined) =>
+      locator?.type === 'xpath' && typeof locator.value === 'string' && locator.value.trim(),
+  );
+  const xpathSelector = typeof xpathLocator?.value === 'string' ? xpathLocator.value.trim() : '';
+  if (xpathSelector) {
+    return { selector: xpathSelector, selectorType: 'xpath' };
+  }
+
+  const cssLocator = locatorChain.find(
+    (locator: { type?: string; value?: string } | null | undefined) =>
+      locator?.type === 'css' && typeof locator.value === 'string' && locator.value.trim(),
+  );
+  const cssSelector = typeof cssLocator?.value === 'string' ? cssLocator.value.trim() : '';
+  return cssSelector ? { selector: cssSelector, selectorType: 'css' } : undefined;
+}
+
 export function recordReadPageTargetPublication(params: {
   tabId: number;
   highValueObjects?: readonly ReadPageHighValueObject[] | null;
@@ -34,18 +55,11 @@ export function recordReadPageTargetPublication(params: {
       const targetRef =
         typeof candidateAction?.targetRef === 'string' ? candidateAction.targetRef.trim() : '';
       if (!targetRef) continue;
-      const cssLocator = Array.isArray(candidateAction.locatorChain)
-        ? candidateAction.locatorChain.find(
-            (locator: { type?: string; value?: string } | null | undefined) =>
-              locator?.type === 'css',
-          )
-        : undefined;
-      const selector = typeof cssLocator?.value === 'string' ? cssLocator.value.trim() : '';
-      if (!selector) continue;
+      const locator = firstUsableLocator(candidateAction.locatorChain);
+      if (!locator) continue;
       entries.push({
         targetRef,
-        selector,
-        selectorType: 'css',
+        ...locator,
         ...(typeof candidateAction.frameId === 'number'
           ? { frameId: candidateAction.frameId }
           : typeof params.frameId === 'number'

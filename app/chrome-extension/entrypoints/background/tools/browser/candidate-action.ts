@@ -70,6 +70,7 @@ export interface ResolvedCandidateActionTarget {
     | 'candidate_locator_css'
     | 'candidate_locator_xpath'
     | 'candidate_snapshot_locator_css'
+    | 'candidate_snapshot_locator_xpath'
     | 'none'
     | 'unresolved_stable_target_ref';
   /**
@@ -193,7 +194,10 @@ function resolveCandidateActionTargetLocator(
     selector,
     selectorType: resolved?.selectorType || ('css' as const),
     ...(typeof frameId === 'number' ? { frameId } : {}),
-    source: 'candidate_snapshot_locator_css' as const,
+    source:
+      resolved?.selectorType === 'xpath'
+        ? ('candidate_snapshot_locator_xpath' as const)
+        : ('candidate_snapshot_locator_css' as const),
   };
 }
 

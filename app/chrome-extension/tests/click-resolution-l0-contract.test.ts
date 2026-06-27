@@ -23,6 +23,7 @@ import {
   __resetStableTargetRefRegistryForTests,
   getStableTargetRefRegistrySnapshot,
   lookupCandidateActionTargetLocatorEntry,
+  recordCandidateActionTargetLocatorsSnapshot,
   lookupStableTargetRef,
 } from '@/entrypoints/background/tools/browser/stable-target-ref-registry';
 import { resolveCandidateActionTarget } from '@/entrypoints/background/tools/browser/candidate-action';
@@ -254,5 +255,27 @@ describe('V25-04 click-resolution L0 contract', () => {
 
     expect(resolved.source).toBe('candidate_locator_xpath');
     expect(resolved.selectorType).toBe('xpath');
+  });
+
+  it('resolves a bare synthetic filter ref from the latest snapshot xpath locator', () => {
+    recordCandidateActionTargetLocatorsSnapshot(FIXTURE_TAB.id, [
+      {
+        targetRef: 'ref_filter_sort_c4ba7440',
+        selector: '//*[@role="button" and normalize-space(.)="最多收藏"]',
+        selectorType: 'xpath',
+      },
+    ]);
+
+    const resolved = resolveCandidateActionTarget({
+      explicitRef: 'ref_filter_sort_c4ba7440',
+      tabId: FIXTURE_TAB.id,
+      lookupCandidateActionTargetLocator: lookupCandidateActionTargetLocatorEntry,
+    });
+
+    expect(resolved).toMatchObject({
+      selector: '//*[@role="button" and normalize-space(.)="最多收藏"]',
+      selectorType: 'xpath',
+      source: 'candidate_snapshot_locator_xpath',
+    });
   });
 });

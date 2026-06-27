@@ -29,7 +29,7 @@ export interface StableTargetRefEntry {
 export interface CandidateActionTargetLocatorEntry {
   targetRef: string;
   selector: string;
-  selectorType?: 'css';
+  selectorType?: 'css' | 'xpath';
   frameId?: number;
 }
 
@@ -106,10 +106,11 @@ class StableTargetRefRegistry implements StableTargetRefLookup {
       const selector = entry.selector.trim();
       if (!targetRef || !selector) continue;
       if (!map.has(targetRef)) {
+        const selectorType = entry.selectorType === 'xpath' ? 'xpath' : 'css';
         map.set(targetRef, {
           targetRef,
           selector,
-          selectorType: 'css',
+          selectorType,
           ...(typeof entry.frameId === 'number' && Number.isFinite(entry.frameId)
             ? { frameId: entry.frameId }
             : {}),

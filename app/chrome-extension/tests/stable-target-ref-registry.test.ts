@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import type { ReadPageCandidateAction } from '@tabrix/shared';
 import {
   __resetStableTargetRefRegistryForTests,
   getStableTargetRefRegistrySnapshot,
@@ -8,6 +9,7 @@ import {
   recordStableTargetRefSnapshot,
   clearStableTargetRefTab,
 } from '@/entrypoints/background/tools/browser/stable-target-ref-registry';
+import { recordReadPageTargetPublication } from '@/entrypoints/background/tools/browser/read-page-object-publication';
 
 describe('B-011 stable-targetRef registry', () => {
   beforeEach(() => {
@@ -95,6 +97,54 @@ describe('B-011 stable-targetRef registry', () => {
       selector: 'button[data-action="publish"]',
       selectorType: 'css',
       frameId: 3,
+    });
+  });
+
+  it('preserves xpath candidate action locators for synthetic read_page refs', () => {
+    recordCandidateActionTargetLocatorsSnapshot(9, [
+      {
+        targetRef: 'ref_filter_time_range_84d3437b',
+        selector: '//*[@role="button" and normalize-space(.)="一周内"]',
+        selectorType: 'xpath',
+        frameId: 4,
+      },
+    ]);
+
+    expect(
+      lookupCandidateActionTargetLocatorEntry(9, 'ref_filter_time_range_84d3437b'),
+    ).toMatchObject({
+      targetRef: 'ref_filter_time_range_84d3437b',
+      selector: '//*[@role="button" and normalize-space(.)="一周内"]',
+      selectorType: 'xpath',
+      frameId: 4,
+    });
+  });
+
+  it('records read_page candidate action xpath before css fallback', () => {
+    recordReadPageTargetPublication({
+      tabId: 9,
+      candidateActions: [
+        {
+          id: 'ca_filter_sort',
+          actionType: 'click',
+          targetRef: 'ref_filter_sort_c4ba7440',
+          label: '最多收藏',
+          intent: 'filter.option_select',
+          confidence: 0.92,
+          matchReason: 'filter option visible in current panel',
+          locatorChain: [
+            { type: 'ref', value: 'ref_filter_sort_c4ba7440' },
+            { type: 'aria', value: '最多收藏' },
+            { type: 'css', value: 'body > div:nth-of-type(9) button:nth-of-type(5)' },
+            { type: 'xpath', value: '//*[@role="button" and normalize-space(.)="最多收藏"]' },
+          ],
+        } satisfies ReadPageCandidateAction,
+      ],
+    });
+
+    expect(lookupCandidateActionTargetLocatorEntry(9, 'ref_filter_sort_c4ba7440')).toMatchObject({
+      selector: '//*[@role="button" and normalize-space(.)="最多收藏"]',
+      selectorType: 'xpath',
     });
   });
 
