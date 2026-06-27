@@ -840,6 +840,7 @@ describe('candidateAction bridge', () => {
     const sendSpy = vi.spyOn(fillTool as any, 'sendMessageToTab').mockResolvedValue({
       success: true,
       message: 'Fill operation successful',
+      elementInfo: { valueState: 'non_empty' },
     });
 
     const result = await fillTool.execute({
@@ -867,6 +868,21 @@ describe('candidateAction bridge', () => {
         requiredNextAction: 'chrome_read_page_force_refresh_same_tab',
         sameTabVerificationRequired: true,
         businessSuccessProven: false,
+      },
+      postActionDelta: {
+        deltaKind: 'post_action_tool_delta',
+        actionKind: 'fill',
+        tabId: 4102,
+        observedOutcome: 'input_value_written',
+        changed: true,
+        changedSignals: ['input_state_observed'],
+        readbackStatus: 'fresh_read_required',
+        recommendation: 'chrome_read_page_force_refresh_same_tab',
+        businessSuccessProven: false,
+      },
+      inputWriteEvidence: {
+        valueState: 'non_empty',
+        proofStatus: 'input_state_observed',
       },
     });
     expect(payload.claimBoundary).toContain('does not prove form/search result state changed');

@@ -638,15 +638,19 @@ function buildBrowserActionPostActionDelta(input: {
   clickDiff?: ClickDiffSummary | null;
   verification?: ClickVerification | null;
   postActionReadback?: PostActionReadbackEvidence | null;
+  extraChangedSignals?: string[];
 }): BrowserActionPostActionDelta {
   const clickDiff = input.clickDiff ?? null;
   const verification = input.verification ?? null;
-  const changedSignals =
+  const clickChangedSignals =
     clickDiff?.kind === 'change'
       ? [
           clickDiff.newTabOpened || verification?.newTabOpened ? 'new_tab_opened' : null,
           clickDiff.beforeUnloadFired || verification?.navigationOccurred
             ? 'before_unload_fired'
+            : null,
+          clickDiff.urlDelta !== 'none' && clickDiff.urlDelta !== 'unavailable'
+            ? 'url_changed'
             : null,
           clickDiff.hashChanged ? 'hash_changed' : null,
           clickDiff.domChanged || verification?.domChanged ? 'dom_changed' : null,
@@ -655,6 +659,9 @@ function buildBrowserActionPostActionDelta(input: {
           clickDiff.stateChanged || verification?.stateChanged ? 'state_changed' : null,
         ].filter((entry): entry is string => Boolean(entry))
       : [];
+  const changedSignals = [
+    ...new Set([...clickChangedSignals, ...(input.extraChangedSignals ?? [])]),
+  ];
 
   return {
     deltaKind: 'post_action_tool_delta',
@@ -2169,9 +2176,11 @@ class FillTool extends BaseBrowserToolExecutor {
         dispatchedFillTarget = { ref: finalRef, selector: finalSelector };
       }
 
+      const actionId = `fill-${tabId}-${Date.now()}`;
+      const actionTargetRef = dispatchedFillTarget.ref ?? args.candidateAction?.targetRef ?? null;
       recordPendingActionBinding(tabId, {
-        actionId: `fill-${tabId}-${Date.now()}`,
-        targetRef: dispatchedFillTarget.ref ?? args.candidateAction?.targetRef ?? null,
+        actionId,
+        targetRef: actionTargetRef,
       });
       markBrowserWorldTabAiOperated(tabId, 'fill_or_select');
       const postActionReadback = buildPostActionReadbackEvidence({
@@ -2179,6 +2188,22 @@ class FillTool extends BaseBrowserToolExecutor {
         dispatchSucceeded: true,
         actionKind: 'fill',
         observedOutcome: 'input_value_written',
+      });
+      const inputWriteProofStatus =
+        result.elementInfo?.valueState === 'non_empty' ||
+        result.elementInfo?.valueState === 'empty' ||
+        typeof result.elementInfo?.checked === 'boolean'
+          ? 'input_state_observed'
+          : 'not_proven';
+      const postActionDelta = buildBrowserActionPostActionDelta({
+        actionId,
+        actionKind: 'fill',
+        tabId,
+        targetRef: actionTargetRef,
+        observedOutcome: 'input_value_written',
+        postActionReadback,
+        extraChangedSignals:
+          inputWriteProofStatus === 'input_state_observed' ? ['input_state_observed'] : [],
       });
       return {
         content: [
@@ -2191,18 +2216,14 @@ class FillTool extends BaseBrowserToolExecutor {
               targetBinding: buildTargetBinding(),
               businessVerification: buildBusinessVerification(),
               postActionReadback,
+              postActionDelta,
               inputWriteEvidence: {
                 valueState: result.elementInfo?.valueState ?? 'unknown',
                 checked:
                   typeof result.elementInfo?.checked === 'boolean'
                     ? result.elementInfo.checked
                     : null,
-                proofStatus:
-                  result.elementInfo?.valueState === 'non_empty' ||
-                  result.elementInfo?.valueState === 'empty' ||
-                  typeof result.elementInfo?.checked === 'boolean'
-                    ? 'input_state_observed'
-                    : 'not_proven',
+                proofStatus: inputWriteProofStatus,
                 claimBoundary:
                   'This evidence never returns the raw input value; it only reports whether the target state is empty/non-empty or checked.',
               },

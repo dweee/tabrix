@@ -333,7 +333,7 @@ describe('clickTool integration', () => {
       tabId: 4108,
       observedOutcome: 'spa_route_change',
       changed: true,
-      changedSignals: [],
+      changedSignals: ['url_changed'],
       urlDelta: 'same_origin',
       hashChanged: false,
       beforeUnloadFired: false,
