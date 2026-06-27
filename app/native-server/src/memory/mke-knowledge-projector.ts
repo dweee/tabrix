@@ -90,6 +90,36 @@ function isSnapshotTargetRef(targetRef: string | null): boolean {
   return /^(ref_|ref_text_|ref_fallback_)/i.test(targetRef);
 }
 
+const TRANSIENT_TARGET_SIGNAL_PATTERN =
+  /\b(visual[-_]?fallback|screenshot|coordinates?|coord|rect|center|bounding[-_]?box|viewport|pixel)\b/i;
+
+function hasTransientTargetSignal(value: unknown): boolean {
+  if (typeof value === 'string') return TRANSIENT_TARGET_SIGNAL_PATTERN.test(value);
+  if (Array.isArray(value)) return value.some(hasTransientTargetSignal);
+  if (!value || typeof value !== 'object') return false;
+  return Object.entries(value as Record<string, unknown>).some(
+    ([key, entry]) => TRANSIENT_TARGET_SIGNAL_PATTERN.test(key) || hasTransientTargetSignal(entry),
+  );
+}
+
+function hasTransientTargetEvidence(object: BrowserObject): boolean {
+  const facts = readObject(object.facts);
+  const targetability = readObject(object.targetability);
+  const actionTarget = readObject(facts?.actionTarget) ?? readObject(targetability?.actionTarget);
+  const sessionOnlyTarget =
+    readObject(facts?.sessionOnlyTarget) ?? readObject(targetability?.sessionOnlyTarget);
+  return (
+    hasTransientTargetSignal(facts?.sourceProvenance) ||
+    hasTransientTargetSignal(facts?.stableLocatorChain) ||
+    hasTransientTargetSignal(targetability?.sourceProvenance) ||
+    hasTransientTargetSignal(targetability?.stableLocatorChain) ||
+    hasTransientTargetSignal(actionTarget?.sourceProvenance) ||
+    hasTransientTargetSignal(actionTarget?.stableLocatorChain) ||
+    hasTransientTargetSignal(sessionOnlyTarget?.sourceProvenance) ||
+    hasTransientTargetSignal(sessionOnlyTarget?.stableLocatorChain)
+  );
+}
+
 const BLOCKED_PAGE_SIGNAL_PATTERN =
   /\b(captcha|recaptcha|challenge|verification|security[-_]?check|human[-_]?check|verify(uuid|type|biz)?|user[_-]?verification[_-]?required|login[_-]?required|auth[_-]?required|access[_-]?denied|restricted)\b|安全验证|人机验证|滑块验证|验证码|登录验证/i;
 
@@ -160,6 +190,7 @@ function isSessionScopedAction(object: BrowserObject, actionType: string): boole
   if (object.objectType === 'action_target') {
     const targetRef = typeof targetability?.targetRef === 'string' ? targetability.targetRef : null;
     if (isSnapshotTargetRef(targetRef)) return true;
+    if (hasTransientTargetEvidence(object)) return true;
     if (actionType !== 'click') return false;
     return Boolean(
       targetRef ||
@@ -173,6 +204,7 @@ function isSessionScopedAction(object: BrowserObject, actionType: string): boole
   }
   if (actionType !== 'click_result_card') return false;
   return Boolean(
+    hasTransientTargetEvidence(object) ||
     isPositionalSelector(selector) ||
     readObject(actionTarget?.center) ||
     readObject(actionTarget?.rect) ||

@@ -145,6 +145,102 @@ describe('MkeKnowledgeProjector', () => {
     expect(model.actionSurface).toMatchObject({ reusableActionKinds: ['click'] });
   });
 
+  it('does not mark visual or coordinate-derived targets reusable without a fresh read', () => {
+    const opened = openMemoryDb({ dbPath: ':memory:' });
+    const objects = new BrowserObjectRepository(opened.db);
+    const knowledge = new KnowledgeModelRepository(opened.db);
+    const projector = new MkeKnowledgeProjector(objects, knowledge);
+
+    objects.upsert({
+      siteFamily: 'example.test',
+      pageUrlPattern: 'https://example.test/search',
+      pageRole: 'search_results',
+      pageModelKey: 'page:example.test:search_results',
+      objectFingerprint: 'page:search',
+      objectType: 'page',
+      lifecycleState: 'running',
+      selectedDataSource: 'dom_json',
+      sourceRoute: 'read_page_required',
+      sourceFreshness: 'fresh',
+      sourceTraceIds: ['trace-visual-target'],
+      facts: { rawPayloadCopied: false },
+      updatedAt: '2026-06-06T01:10:01.000Z',
+    });
+    objects.upsert({
+      siteFamily: 'example.test',
+      pageUrlPattern: 'https://example.test/search',
+      pageRole: 'search_results',
+      pageModelKey: 'page:example.test:search_results',
+      objectFingerprint: 'action:search-input-visual-fallback',
+      objectType: 'action_target',
+      lifecycleState: 'observed',
+      canTabrixOperate: true,
+      actionTypes: ['fill'],
+      selectedDataSource: 'dom_json',
+      sourceRoute: 'read_page_candidate_actions',
+      sourceFreshness: 'fresh',
+      sourceTraceIds: ['trace-visual-target'],
+      facts: {
+        matchReason: 'search input recovered by visual fallback',
+        stableLocatorChain: ['visual_fallback:screenshot_region'],
+      },
+      targetability: {
+        targetRef: 'tgt_search_input',
+        stableLocatorChain: ['css:#search', 'rect:center'],
+      },
+      updatedAt: '2026-06-06T01:10:02.000Z',
+    });
+    objects.upsert({
+      siteFamily: 'example.test',
+      pageUrlPattern: 'https://example.test/search',
+      pageRole: 'search_results',
+      pageModelKey: 'page:example.test:search_results',
+      objectFingerprint: 'result-card:coordinate-click',
+      objectType: 'result_card',
+      lifecycleState: 'observed',
+      canTabrixOperate: true,
+      actionTypes: ['click_result_card'],
+      selectedDataSource: 'visible_dom_result_cards',
+      sourceRoute: 'read_page_result_cards',
+      sourceFreshness: 'fresh',
+      sourceTraceIds: ['trace-visual-target'],
+      facts: {
+        rank: 1,
+        sourceProvenance: ['dom', 'coordinates'],
+        stableLocatorChain: ['text_fingerprint:title', 'viewport_center'],
+      },
+      targetability: {
+        stableLocatorChain: ['ax:name', 'bounding_box:center'],
+      },
+      updatedAt: '2026-06-06T01:10:03.000Z',
+    });
+
+    const result = projector.projectIdleBatch({ nowIso: '2026-06-06T01:10:04.000Z' });
+    const model = knowledge.get(result.knowledgeIds[0])!;
+
+    expect(model.actionSurface).toMatchObject({
+      actionKindCounts: { click_result_card: 1, fill: 1 },
+      reusableActionKinds: [],
+      sessionScopedActionKinds: { click_result_card: 1, fill: 1 },
+    });
+    expect(model.objectGraph).toMatchObject({
+      resultCardSummary: {
+        clickableCount: 1,
+        stableClickTargetCount: 1,
+      },
+      pageDirectory: {
+        actionTargets: expect.arrayContaining([
+          expect.objectContaining({
+            actionType: 'fill',
+            matchReason: 'search input recovered by visual fallback',
+            stableLocatorCount: 1,
+            reusableWithoutFreshRead: false,
+          }),
+        ]),
+      },
+    });
+  });
+
   it('does not project knowledge from Memory traces when Object Library has no objects', () => {
     const opened = openMemoryDb({ dbPath: ':memory:' });
     const objects = new BrowserObjectRepository(opened.db);
