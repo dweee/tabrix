@@ -39,6 +39,18 @@ interface QrCandidateElement {
 }
 
 type ScoredVisualElementHint = ReadPageVisualElementHint & { score: number };
+type QrVisualElementFallbackResult =
+  | {
+      elements?: unknown;
+    }
+  | null
+  | undefined;
+
+export type QrVisualElementFallbackCollector = (options: {
+  selector: string;
+  includeCoordinates: true;
+  frameId?: number;
+}) => Promise<QrVisualElementFallbackResult>;
 
 export function hasQrVisibleContext(
   pageContent: string,
@@ -62,6 +74,22 @@ export function selectQrVisualElementHints(elements: unknown[]): ReadPageVisualE
     )
     .slice(0, 3)
     .map(({ score: _score, ...item }: ScoredVisualElementHint) => item);
+}
+
+export async function collectQrVisualElementHints(params: {
+  pageContent: string;
+  visibleTextContent?: string | null;
+  frameId?: number;
+  collectFallback: QrVisualElementFallbackCollector;
+}): Promise<ReadPageVisualElementHint[]> {
+  if (!hasQrVisibleContext(params.pageContent, params.visibleTextContent)) return [];
+  const fallback = await params.collectFallback({
+    selector: QR_VISUAL_ELEMENT_SELECTOR,
+    includeCoordinates: true,
+    frameId: params.frameId,
+  });
+  const elements = Array.isArray(fallback?.elements) ? fallback.elements : [];
+  return selectQrVisualElementHints(elements);
 }
 
 function finiteRect(rect: unknown): FiniteRect | null {

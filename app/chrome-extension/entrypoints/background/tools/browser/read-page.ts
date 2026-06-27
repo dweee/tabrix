@@ -114,11 +114,7 @@ import {
   extractGlobalMenuLabelsForTargetRecovery,
   type ReadPageVisualElementHint,
 } from './read-page-task-protocol';
-import {
-  hasQrVisibleContext,
-  QR_VISUAL_ELEMENT_SELECTOR,
-  selectQrVisualElementHints,
-} from './read-page-visual-elements';
+import { collectQrVisualElementHints } from './read-page-visual-elements';
 import {
   attachFallbackRefs,
   DEFAULT_FILTER_PANEL_TARGET_RECOVERY_LABELS,
@@ -764,22 +760,6 @@ class ReadPageTool extends BaseBrowserToolExecutor {
       frameId,
       collectInteractiveElementsFallback: this.collectInteractiveElementsFallback.bind(this),
     });
-  }
-
-  private async collectQrVisualElements(params: {
-    tabId: number;
-    pageContent: string;
-    visibleTextContent?: string | null;
-    frameId?: number;
-  }): Promise<ReadPageVisualElementHint[]> {
-    if (!hasQrVisibleContext(params.pageContent, params.visibleTextContent)) return [];
-    const fallback = await this.collectInteractiveElementsFallback(params.tabId, {
-      selector: QR_VISUAL_ELEMENT_SELECTOR,
-      includeCoordinates: true,
-      frameId: params.frameId,
-    });
-    const elements = Array.isArray(fallback?.elements) ? fallback.elements : [];
-    return selectQrVisualElementHints(elements);
   }
 
   private async recoverGlobalMenuTextTargets(params: {
@@ -1863,11 +1843,11 @@ class ReadPageTool extends BaseBrowserToolExecutor {
           : 'visible_search_surface_actions';
       }
       await this.supplementAuthFormInteractiveControls(tabId, basePayload, requestedFrameId);
-      basePayload.visualElements = await this.collectQrVisualElements({
-        tabId,
+      basePayload.visualElements = await collectQrVisualElementHints({
         pageContent: String(basePayload.pageContent || ''),
         visibleTextContent: basePayload.visibleTextContent,
         frameId: requestedFrameId,
+        collectFallback: (options) => this.collectInteractiveElementsFallback(tabId, options),
       });
       basePayload.fileInputBindings = await collectReadPageFileInputBindings(
         tabId,
@@ -2053,11 +2033,11 @@ class ReadPageTool extends BaseBrowserToolExecutor {
               ? `${basePayload.fallbackSource}+visible_search_surface_actions`
               : 'visible_search_surface_actions';
           }
-          basePayload.visualElements = await this.collectQrVisualElements({
-            tabId,
+          basePayload.visualElements = await collectQrVisualElementHints({
             pageContent: String(basePayload.pageContent || ''),
             visibleTextContent: basePayload.visibleTextContent,
             frameId: requestedFrameId,
+            collectFallback: (options) => this.collectInteractiveElementsFallback(tabId, options),
           });
           basePayload.fileInputBindings = await collectReadPageFileInputBindings(
             tabId,
