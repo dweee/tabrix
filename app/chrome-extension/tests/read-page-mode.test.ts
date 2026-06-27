@@ -2695,6 +2695,53 @@ describe('read_page mode', () => {
     expect(payload.fullSnapshot).toBeUndefined();
   });
 
+  it('reports partial object sensing when helper stats hit coverage limits without probe errors', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 52031,
+      windowId: 1,
+      active: true,
+      status: 'complete',
+      url: 'https://example.com/list',
+      title: 'List',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent:
+        '- heading "Inventory" [ref=ref_1] (x=200,y=120)\n- textbox "Search" [ref=ref_2] (x=280,y=180)\n- button "Open item" [ref=ref_3] (x=420,y=180)\n- link "Details" [ref=ref_4] (x=520,y=180)\n- generic "Row Item A" [ref=ref_5] (x=280,y=240)\n- generic "Row Item B" [ref=ref_6] (x=280,y=280)\n- generic "Row Item C" [ref=ref_7] (x=280,y=320)\n- generic "Status Ready" [ref=ref_8] (x=280,y=360)',
+      refMap: [
+        { ref: 'ref_2', selector: 'input[name=search]' },
+        { ref: 'ref_3', selector: 'button.open-item' },
+        { ref: 'ref_4', selector: 'a.details-link' },
+      ],
+      stats: {
+        processed: 200,
+        included: 80,
+        durationMs: 12,
+        coverageStatus: 'partial',
+        depthLimitReached: true,
+      },
+      viewport: { width: 1280, height: 720, dpr: 1 },
+      diagnostics: [],
+    });
+
+    const result = await readPageTool.execute({ mode: 'normal' });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+    expect(result.isError).toBe(false);
+    expectCommonSnapshotShape(payload, 'normal');
+    expect(payload.pageContext.sensingDiagnostics).toMatchObject({
+      source: 'accessibility_tree_helper',
+      coverageStatus: 'partial',
+      partialErrors: [
+        {
+          source: 'accessibility_tree_helper.depth_limit',
+          message: expect.stringContaining('configured depth limit'),
+        },
+      ],
+      claimBoundary: expect.stringContaining('partial evidence'),
+    });
+  });
+
   it('maps generic searchable list pages to search task mode in read_page output', async () => {
     vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
       id: 5204,
