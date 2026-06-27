@@ -38,7 +38,14 @@ export function shouldInvalidateReadAfterInteraction(toolName: string, args?: un
 
   if (toolName !== TOOL_NAMES.BROWSER.NAVIGATE) return false;
   if (!args || typeof args !== 'object' || Array.isArray(args)) return false;
-  return (args as Record<string, unknown>).refresh === true;
+  const navigateArgs = args as Record<string, unknown>;
+  const url = readString(navigateArgs.url);
+  return (
+    navigateArgs.refresh === true ||
+    readPositiveInteger(navigateArgs, 'tabId') !== null ||
+    url === 'back' ||
+    url === 'forward'
+  );
 }
 
 export function shouldRecordPageInteractionAfterResult(

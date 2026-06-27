@@ -7,6 +7,7 @@ import {
   markBrowserWorldTabAiOperated,
 } from '../../browser-world-inventory';
 import { preflightCloseTabs, type CloseTabsPreflightEvidence } from './close-tabs-preflight';
+import { recordPendingActionBinding } from './read-page-object-delta';
 
 // Default window dimensions
 const DEFAULT_WINDOW_WIDTH = 1280;
@@ -23,6 +24,133 @@ interface NavigateToolParams {
   windowId?: number;
   background?: boolean; // when true, do not activate tab or focus window
   settleTimeoutMs?: number;
+}
+
+type NavigationActionKind =
+  | 'navigate'
+  | 'navigate_existing_tab'
+  | 'activate_existing_tab'
+  | 'navigate_new_tab'
+  | 'navigate_new_window_tab'
+  | 'navigate_fallback_window_tab'
+  | 'refresh'
+  | 'history';
+
+type NavigationUrlDelta = 'none' | 'hash_only' | 'same_origin' | 'cross_origin' | 'unavailable';
+
+type NavigationPostActionDelta = {
+  deltaKind: 'post_action_tool_delta';
+  actionId: string | null;
+  actionKind: NavigationActionKind;
+  tabId: number | null;
+  targetRef: null;
+  observedOutcome: string | null;
+  changed: boolean;
+  changedSignals: string[];
+  urlDelta: NavigationUrlDelta | null;
+  hashChanged: boolean | null;
+  beforeUnloadFired: null;
+  readbackStatus: string | null;
+  recommendation: string | null;
+  businessSuccessProven: false;
+  claimBoundary: string[];
+};
+
+function createNavigationActionId(actionKind: NavigationActionKind, tabId?: number | null): string {
+  return `navigate-${actionKind}-${tabId ?? 'unknown'}-${Date.now()}`;
+}
+
+function recordNavigationPendingAction(tabId: number | null | undefined, actionId: string): void {
+  if (typeof tabId !== 'number' || !Number.isFinite(tabId)) return;
+  recordPendingActionBinding(tabId, {
+    actionId,
+    targetObjectId: null,
+    targetRef: null,
+  });
+}
+
+function classifyNavigationUrlDelta(
+  previousUrl?: string | null,
+  finalUrl?: string | null,
+): NavigationUrlDelta {
+  if (!previousUrl || !finalUrl) return 'unavailable';
+  if (previousUrl === finalUrl) return 'none';
+  try {
+    const previous = new URL(previousUrl);
+    const final = new URL(finalUrl);
+    const previousWithoutHash = `${previous.origin}${previous.pathname}${previous.search}`;
+    const finalWithoutHash = `${final.origin}${final.pathname}${final.search}`;
+    if (previousWithoutHash === finalWithoutHash && previous.hash !== final.hash) {
+      return 'hash_only';
+    }
+    return previous.origin === final.origin ? 'same_origin' : 'cross_origin';
+  } catch {
+    return normalizeComparableUrl(previousUrl) === normalizeComparableUrl(finalUrl)
+      ? 'none'
+      : 'unavailable';
+  }
+}
+
+export function buildNavigationPostActionDelta(input: {
+  actionId?: string | null;
+  actionKind: NavigationActionKind;
+  tabId?: number | null;
+  previousUrl?: string | null;
+  finalUrl?: string | null;
+  newTabOpened?: boolean;
+  settled?: boolean | null;
+  readbackStatus?: string | null;
+}): NavigationPostActionDelta {
+  const urlDelta = classifyNavigationUrlDelta(input.previousUrl, input.finalUrl);
+  const changedSignals = [
+    input.newTabOpened ? 'new_tab_opened' : null,
+    input.actionKind === 'activate_existing_tab' ? 'tab_activated' : null,
+    input.actionKind === 'refresh' ? 'page_reloaded' : null,
+    input.actionKind === 'history' ? 'history_navigation' : null,
+    urlDelta !== 'none' && urlDelta !== 'unavailable' ? 'url_changed' : null,
+    urlDelta === 'hash_only' ? 'hash_changed' : null,
+    input.settled === false ? 'navigation_unsettled' : null,
+  ].filter((entry): entry is string => Boolean(entry));
+  const uniqueChangedSignals = [...new Set(changedSignals)];
+  const observedOutcome =
+    input.newTabOpened === true
+      ? 'new_tab_opened'
+      : input.actionKind === 'activate_existing_tab'
+        ? 'activated_existing_tab'
+        : input.actionKind === 'refresh'
+          ? 'page_reloaded'
+          : input.settled === false
+            ? 'navigation_unsettled'
+            : urlDelta !== 'none' && urlDelta !== 'unavailable'
+              ? 'url_changed'
+              : 'navigation_completed';
+
+  return {
+    deltaKind: 'post_action_tool_delta',
+    actionId: input.actionId ?? null,
+    actionKind: input.actionKind,
+    tabId: input.tabId ?? null,
+    targetRef: null,
+    observedOutcome,
+    changed: uniqueChangedSignals.length > 0,
+    changedSignals: uniqueChangedSignals,
+    urlDelta,
+    hashChanged: urlDelta === 'hash_only',
+    beforeUnloadFired: null,
+    readbackStatus:
+      input.readbackStatus ??
+      (input.settled === false ? 'navigation_unsettled' : 'fresh_read_required'),
+    recommendation:
+      input.settled === false
+        ? 'wait_or_run_chrome_read_page_force_refresh_when_document_is_reachable'
+        : 'run_chrome_read_page_force_refresh_same_tab',
+    businessSuccessProven: false,
+    claimBoundary: [
+      'This is browser-observed navigation evidence, not AI business evaluation.',
+      'No site-specific interpretation or coordinate knowledge is included.',
+      'Historical targets must be revalidated by a fresh page read before reuse.',
+    ],
+  };
 }
 
 function buildNavigationReadinessFields(input: {
@@ -173,7 +301,8 @@ async function getPreferredWindowForUrl(
         window: await chrome.windows.get(candidateWindowId, { populate: false }),
         reason: 'same_site_existing_window',
       };
-    } catch {
+    } catch (error) {
+      void error;
       // Fall through to the normal last-focused window path.
     }
   }
@@ -287,6 +416,16 @@ class NavigateTool extends BaseBrowserToolExecutor {
 
         // Trigger auto-capture on refresh
         await this.triggerAutoCapture(updatedTab.id!, updatedTab.url);
+        const actionId = createNavigationActionId('refresh', updatedTab.id);
+        recordNavigationPendingAction(updatedTab.id, actionId);
+        const postActionDelta = buildNavigationPostActionDelta({
+          actionId,
+          actionKind: 'refresh',
+          tabId: updatedTab.id,
+          previousUrl,
+          finalUrl: updatedTab.url,
+          settled: settleResult.settled,
+        });
 
         return {
           content: [
@@ -303,6 +442,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
                 settleReason: settleResult.reason,
                 waitedMs: settleResult.waitedMs,
                 readyState: settleResult.readyState,
+                postActionDelta,
                 ...buildNavigationReadinessFields({
                   settled: settleResult.settled,
                   readyState: settleResult.readyState,
@@ -353,6 +493,16 @@ class NavigateTool extends BaseBrowserToolExecutor {
 
         // Trigger auto-capture on history navigation
         await this.triggerAutoCapture(updatedTab.id!, updatedTab.url);
+        const actionId = createNavigationActionId('history', updatedTab.id);
+        recordNavigationPendingAction(updatedTab.id, actionId);
+        const postActionDelta = buildNavigationPostActionDelta({
+          actionId,
+          actionKind: 'history',
+          tabId: updatedTab.id,
+          previousUrl,
+          finalUrl: updatedTab.url,
+          settled: settleResult.settled,
+        });
 
         return {
           content: [
@@ -369,6 +519,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
                 settleReason: settleResult.reason,
                 waitedMs: settleResult.waitedMs,
                 readyState: settleResult.readyState,
+                postActionDelta,
                 ...buildNavigationReadinessFields({
                   settled: settleResult.settled,
                   readyState: settleResult.readyState,
@@ -496,6 +647,19 @@ class NavigateTool extends BaseBrowserToolExecutor {
 
         // Trigger auto-capture on existing tab activation
         await this.triggerAutoCapture(updatedTab.id!, updatedTab.url);
+        const actionKind: NavigationActionKind = shouldNavigateExplicitTab
+          ? 'navigate_existing_tab'
+          : 'activate_existing_tab';
+        const actionId = createNavigationActionId(actionKind, updatedTab.id);
+        recordNavigationPendingAction(updatedTab.id, actionId);
+        const postActionDelta = buildNavigationPostActionDelta({
+          actionId,
+          actionKind,
+          tabId: updatedTab.id,
+          previousUrl,
+          finalUrl: updatedTab.url,
+          settled: settleResult.settled,
+        });
 
         return {
           content: [
@@ -518,6 +682,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
                 settleReason: settleResult.reason,
                 waitedMs: settleResult.waitedMs,
                 readyState: settleResult.readyState,
+                postActionDelta,
                 ...buildNavigationReadinessFields({
                   settled: settleResult.settled,
                   readyState: settleResult.readyState,
@@ -556,6 +721,19 @@ class NavigateTool extends BaseBrowserToolExecutor {
             const settleResult = await this.waitForTabSettled(firstTab.id, settleOptions);
             markBrowserWorldTabAiOperated(settleResult.tab.id, 'navigate_new_window_tab');
             await this.triggerAutoCapture(firstTab.id, settleResult.tab.url);
+            const actionId = createNavigationActionId(
+              'navigate_new_window_tab',
+              settleResult.tab.id,
+            );
+            recordNavigationPendingAction(settleResult.tab.id, actionId);
+            const postActionDelta = buildNavigationPostActionDelta({
+              actionId,
+              actionKind: 'navigate_new_window_tab',
+              tabId: settleResult.tab.id,
+              finalUrl: settleResult.tab.url,
+              newTabOpened: true,
+              settled: settleResult.settled,
+            });
 
             return {
               content: [
@@ -573,6 +751,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
                     settleReason: settleResult.reason,
                     waitedMs: settleResult.waitedMs,
                     readyState: settleResult.readyState,
+                    postActionDelta,
                     tabs: newWindow.tabs
                       ? newWindow.tabs.map((tab) => ({
                           tabId: tab.id,
@@ -633,6 +812,19 @@ class NavigateTool extends BaseBrowserToolExecutor {
               const finalNavigationUrl = getTabNavigationUrl(timeoutNavigationTab);
               const readyState =
                 timeoutNavigationTab.status === 'complete' ? 'complete' : 'interactive';
+              const actionId = createNavigationActionId(
+                'navigate_new_tab',
+                timeoutNavigationTab.id,
+              );
+              recordNavigationPendingAction(timeoutNavigationTab.id, actionId);
+              const postActionDelta = buildNavigationPostActionDelta({
+                actionId,
+                actionKind: 'navigate_new_tab',
+                tabId: timeoutNavigationTab.id,
+                finalUrl: finalNavigationUrl,
+                newTabOpened: true,
+                settled: false,
+              });
               return {
                 content: [
                   {
@@ -650,6 +842,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
                       settleReason: 'create_timeout_but_document_tab_found',
                       waitedMs: NAVIGATE_CREATE_TAB_TIMEOUT_MS,
                       readyState,
+                      postActionDelta,
                       ...buildNavigationReadinessFields({
                         settled: false,
                         readyState,
@@ -719,6 +912,17 @@ class NavigateTool extends BaseBrowserToolExecutor {
             );
           }
           const finalNavigationUrl = getTabNavigationUrl(settleResult?.tab || newTab);
+          const finalTabId = settleResult?.tab.id || newTab.id || null;
+          const actionId = createNavigationActionId('navigate_new_tab', finalTabId);
+          recordNavigationPendingAction(finalTabId, actionId);
+          const postActionDelta = buildNavigationPostActionDelta({
+            actionId,
+            actionKind: 'navigate_new_tab',
+            tabId: finalTabId,
+            finalUrl: finalNavigationUrl,
+            newTabOpened: true,
+            settled: settleResult?.settled ?? false,
+          });
 
           return {
             content: [
@@ -727,7 +931,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
                 text: JSON.stringify({
                   success: true,
                   message: 'Opened URL in new tab in existing window',
-                  tabId: settleResult?.tab.id || newTab.id,
+                  tabId: finalTabId,
                   windowId: targetWindow.id,
                   targetWindowReason,
                   requestedUrl: url,
@@ -737,6 +941,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
                   settleReason: settleResult?.reason || null,
                   waitedMs: settleResult?.waitedMs || 0,
                   readyState: settleResult?.readyState || null,
+                  postActionDelta,
                   ...buildNavigationReadinessFields({
                     settled: settleResult?.settled ?? false,
                     readyState: settleResult?.readyState || null,
@@ -770,6 +975,19 @@ class NavigateTool extends BaseBrowserToolExecutor {
               const settleResult = await this.waitForTabSettled(firstTab.id, settleOptions);
               markBrowserWorldTabAiOperated(settleResult.tab.id, 'navigate_fallback_window_tab');
               await this.triggerAutoCapture(firstTab.id, settleResult.tab.url);
+              const actionId = createNavigationActionId(
+                'navigate_fallback_window_tab',
+                settleResult.tab.id,
+              );
+              recordNavigationPendingAction(settleResult.tab.id, actionId);
+              const postActionDelta = buildNavigationPostActionDelta({
+                actionId,
+                actionKind: 'navigate_fallback_window_tab',
+                tabId: settleResult.tab.id,
+                finalUrl: settleResult.tab.url,
+                newTabOpened: true,
+                settled: settleResult.settled,
+              });
 
               return {
                 content: [
@@ -787,6 +1005,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
                       settleReason: settleResult.reason,
                       waitedMs: settleResult.waitedMs,
                       readyState: settleResult.readyState,
+                      postActionDelta,
                       tabs: fallbackWindow.tabs
                         ? fallbackWindow.tabs.map((tab) => ({
                             tabId: tab.id,
