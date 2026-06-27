@@ -1417,6 +1417,7 @@ export type ReadPagePageDeltaKind =
   | 'new_tab_opened'
   | 'object_appeared'
   | 'form_state_changed'
+  | 'target_state_changed'
   | 'network_completed'
   | 'console_error'
   | 'no_useful_change'
@@ -1473,6 +1474,22 @@ export interface ReadPageActionableTargetSummary {
   freshness: ReadPageObjectSnapshotFreshness;
 }
 
+export interface ReadPageTargetStateChangeSummary {
+  targetId: string;
+  objectId?: string | null;
+  changeKind: 'actionability' | 'visibility' | 'actionability_and_visibility';
+  beforeActionability?: ReadPageCandidateAction['actionability'];
+  afterActionability?: ReadPageCandidateAction['actionability'];
+  beforeVisibility?: Pick<
+    ReadPageTargetVisibility,
+    'domVisible' | 'inViewport' | 'centerHitTarget' | 'occluded'
+  >;
+  afterVisibility?: Pick<
+    ReadPageTargetVisibility,
+    'domVisible' | 'inViewport' | 'centerHitTarget' | 'occluded'
+  >;
+}
+
 export interface ReadPageObjectSnapshot {
   source: 'read_page_object_snapshot';
   snapshotId: string;
@@ -1510,6 +1527,10 @@ export interface ReadPagePageDeltaReport {
   navigationSignals?: {
     beforeUrl?: string | null;
     afterUrl?: string | null;
+  };
+  targetStateSignals?: {
+    changedTargetIds: string[];
+    changes: ReadPageTargetStateChangeSummary[];
   };
   networkSignals?: {
     requestStartedDelta?: number | null;

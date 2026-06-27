@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type {
   ReadPageCompactSnapshot,
+  ReadPageActionableTargetSummary,
   ReadPageLoadReadiness,
   ReadPageObjectSnapshot,
 } from '@tabrix/shared';
@@ -67,6 +68,32 @@ function snapshot(overrides: Partial<ReadPageObjectSnapshot> = {}): ReadPageObje
     objectCount: 0,
     actionableObjectCount: 0,
     claimBoundary: 'test fixture',
+    ...overrides,
+  };
+}
+
+function actionableTarget(
+  overrides: Partial<ReadPageActionableTargetSummary> = {},
+): ReadPageActionableTargetSummary {
+  return {
+    targetId: 'target_open_result',
+    objectId: 'card_1',
+    kind: 'button',
+    label: 'Open result',
+    targetRef: 'ref_result_1',
+    ref: 'ref_result_1',
+    sourceProvenance: 'dom',
+    locatorChain: [{ type: 'ref', value: 'ref_result_1' }],
+    actionability: 'actionable',
+    actionabilityReason: 'target is visible and enabled',
+    visibility: {
+      source: 'mixed',
+      domVisible: true,
+      inViewport: true,
+      centerHitTarget: true,
+      occluded: false,
+    },
+    freshness: 'fresh',
     ...overrides,
   };
 }
@@ -360,6 +387,145 @@ describe('read_page object snapshot and delta', () => {
         afterUrl: 'https://example.test/search?q=new',
       },
     });
+  });
+
+  it('reports actionable target state changes after a fresh read', () => {
+    const before = snapshot({
+      snapshotId: 'before',
+      objects: [
+        {
+          objectId: 'card_1',
+          kind: 'result_card',
+          label: 'Card',
+          objectType: 'result_card',
+          regionType: 'result_list',
+          sourceProvenance: ['dom'],
+          freshness: 'fresh',
+        },
+      ],
+      actionableTargets: [
+        actionableTarget({
+          actionability: 'blocked',
+          actionabilityReason: 'target is disabled while loading',
+          visibility: {
+            source: 'mixed',
+            domVisible: true,
+            inViewport: false,
+            centerHitTarget: null,
+            occluded: null,
+          },
+        }),
+      ],
+      objectCount: 1,
+      actionableObjectCount: 1,
+    });
+    const after = snapshot({
+      snapshotId: 'after',
+      observedAt: '2026-06-26T00:00:01.000Z',
+      objects: before.objects,
+      actionableTargets: [actionableTarget()],
+      objectCount: 1,
+      actionableObjectCount: 1,
+    });
+
+    expect(
+      buildReadPagePageDeltaReport({
+        tabId: 100,
+        previousSnapshot: before,
+        currentSnapshot: after,
+      }),
+    ).toMatchObject({
+      deltaKind: 'target_state_changed',
+      recommendation: 'proceed',
+      changedObjects: ['card_1'],
+      targetStateSignals: {
+        changedTargetIds: ['target_open_result'],
+        changes: [
+          {
+            targetId: 'target_open_result',
+            objectId: 'card_1',
+            changeKind: 'actionability_and_visibility',
+            beforeActionability: 'blocked',
+            afterActionability: 'actionable',
+            beforeVisibility: {
+              domVisible: true,
+              inViewport: false,
+              centerHitTarget: null,
+              occluded: null,
+            },
+            afterVisibility: {
+              domVisible: true,
+              inViewport: true,
+              centerHitTarget: true,
+              occluded: false,
+            },
+          },
+        ],
+      },
+    });
+  });
+
+  it('matches target state changes by stable target ref before object id', () => {
+    const before = snapshot({
+      snapshotId: 'before',
+      objects: [
+        {
+          objectId: 'card_1',
+          kind: 'result_card',
+          label: 'Card',
+          objectType: 'result_card',
+          regionType: 'result_list',
+          sourceProvenance: ['dom'],
+          freshness: 'fresh',
+        },
+      ],
+      actionableTargets: [
+        actionableTarget({
+          targetId: 'target_open_card',
+          targetRef: 'ref_open_card',
+          ref: 'ref_open_card',
+          actionability: 'actionable',
+        }),
+        actionableTarget({
+          targetId: 'target_like_card',
+          targetRef: 'ref_like_card',
+          ref: 'ref_like_card',
+          actionability: 'actionable',
+        }),
+      ],
+      objectCount: 1,
+      actionableObjectCount: 2,
+    });
+    const after = snapshot({
+      snapshotId: 'after',
+      observedAt: '2026-06-26T00:00:01.000Z',
+      objects: before.objects,
+      actionableTargets: [
+        actionableTarget({
+          targetId: 'target_open_card',
+          targetRef: 'ref_open_card',
+          ref: 'ref_open_card',
+          actionability: 'actionable',
+        }),
+        actionableTarget({
+          targetId: 'target_like_card',
+          targetRef: 'ref_like_card',
+          ref: 'ref_like_card',
+          actionability: 'blocked',
+          actionabilityReason: 'like action is disabled after click',
+        }),
+      ],
+      objectCount: 1,
+      actionableObjectCount: 2,
+    });
+
+    expect(
+      buildReadPagePageDeltaReport({
+        tabId: 100,
+        previousSnapshot: before,
+        currentSnapshot: after,
+      })?.targetStateSignals?.changedTargetIds,
+    ).toEqual(['target_like_card']);
   });
 
   it('returns restricted when the current snapshot is an unsupported browser surface', () => {

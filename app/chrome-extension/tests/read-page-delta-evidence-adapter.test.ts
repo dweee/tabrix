@@ -186,6 +186,49 @@ describe('derivePostActionDeltaEvidenceFromReadPageDelta', () => {
       });
     });
 
+    it('passes through target state changes into objectDelta', () => {
+      const evidence = derivePostActionDeltaEvidenceFromReadPageDelta(
+        makeReport({
+          deltaKind: 'target_state_changed',
+          changedObjects: ['obj-card-1'],
+          targetStateSignals: {
+            changedTargetIds: ['target-open-card'],
+            changes: [
+              {
+                targetId: 'target-open-card',
+                objectId: 'obj-card-1',
+                changeKind: 'visibility',
+                beforeVisibility: {
+                  domVisible: true,
+                  inViewport: false,
+                  centerHitTarget: null,
+                  occluded: null,
+                },
+                afterVisibility: {
+                  domVisible: true,
+                  inViewport: true,
+                  centerHitTarget: true,
+                  occluded: false,
+                },
+              },
+            ],
+          },
+        }),
+      );
+
+      expect(evidence.objectDelta).toMatchObject({
+        status: 'observed',
+        changedObjectIds: ['obj-card-1'],
+        targetStateChanges: [
+          {
+            targetId: 'target-open-card',
+            objectId: 'obj-card-1',
+            changeKind: 'visibility',
+          },
+        ],
+      });
+    });
+
     it('sets evidenceBoundary to source level (not real_browser)', () => {
       const evidence = derivePostActionDeltaEvidenceFromReadPageDelta(makeReport());
       expect(evidence.evidenceBoundary).toEqual({

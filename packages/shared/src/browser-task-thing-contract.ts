@@ -4,6 +4,7 @@ import type {
   ReadPageSelectedDataSource,
   ReadPagePageDeltaReport,
   ReadPagePageDeltaKind,
+  ReadPageTargetStateChangeSummary,
 } from './read-page-contract';
 
 export const BROWSER_TASK_THING_CONTRACT_VERSION = 'v1' as const;
@@ -449,6 +450,7 @@ export interface PostActionDeltaFocusSignal {
 export interface PostActionDeltaObjectSignal {
   status: PostActionDeltaSignalStatus;
   changedObjectIds: string[];
+  targetStateChanges?: ReadPageTargetStateChangeSummary[];
 }
 
 export interface PostActionDeltaNetworkSignalSummary {
@@ -854,6 +856,9 @@ export function buildPostActionDeltaEvidence(
     objectDelta: {
       status: input.objectDelta?.status ?? 'not_checked',
       changedObjectIds: input.objectDelta?.changedObjectIds ?? [],
+      ...(input.objectDelta?.targetStateChanges
+        ? { targetStateChanges: input.objectDelta.targetStateChanges }
+        : {}),
     },
     networkSignalSummary: {
       status: input.networkSignalSummary?.status ?? 'not_checked',
@@ -959,6 +964,9 @@ export function derivePostActionDeltaEvidenceFromReadPageDelta(
     objectDelta: {
       status: objectDeltaStatus,
       changedObjectIds: report.changedObjects,
+      ...(report.targetStateSignals?.changes
+        ? { targetStateChanges: report.targetStateSignals.changes }
+        : {}),
     },
     networkSignalSummary: {
       status: networkStatus,

@@ -6,6 +6,7 @@ import type {
   BrowserSourceFreshness,
   BuildPostActionDeltaEvidenceInput,
   PostActionDeltaEvidence,
+  PostActionDeltaObjectSignal,
   ReadPageCandidateActionIntent,
   ReadPageRegion,
 } from '@tabrix/shared';
@@ -201,6 +202,54 @@ function readSafeIdentifier(value: unknown): string | null {
   return /^[A-Za-z0-9:._-]{1,160}$/.test(trimmed) ? trimmed : null;
 }
 
+function readVisibilityState(
+  value: unknown,
+):
+  | NonNullable<PostActionDeltaObjectSignal['targetStateChanges']>[number]['beforeVisibility']
+  | undefined {
+  const input = readObject(value);
+  if (!input) return undefined;
+  return {
+    domVisible: readBoolean(input, 'domVisible') ?? false,
+    inViewport: readBoolean(input, 'inViewport') ?? false,
+    centerHitTarget: readBoolean(input, 'centerHitTarget'),
+    occluded: readBoolean(input, 'occluded'),
+  };
+}
+
+function readTargetStateChanges(
+  value: unknown,
+): NonNullable<PostActionDeltaObjectSignal['targetStateChanges']> | undefined {
+  if (!Array.isArray(value)) return undefined;
+  type TargetStateChange = NonNullable<PostActionDeltaObjectSignal['targetStateChanges']>[number];
+  const changes: TargetStateChange[] = [];
+  for (const entry of value) {
+    const input = readObject(entry);
+    if (!input) continue;
+    const targetId = readSafeIdentifier(input.targetId);
+    const changeKind = readSafeIdentifier(input.changeKind);
+    if (
+      !targetId ||
+      (changeKind !== 'actionability' &&
+        changeKind !== 'visibility' &&
+        changeKind !== 'actionability_and_visibility')
+    ) {
+      continue;
+    }
+    changes.push({
+      targetId,
+      objectId: readSafeIdentifier(input.objectId),
+      changeKind,
+      beforeActionability: readSafeIdentifier(input.beforeActionability) ?? undefined,
+      afterActionability: readSafeIdentifier(input.afterActionability) ?? undefined,
+      beforeVisibility: readVisibilityState(input.beforeVisibility),
+      afterVisibility: readVisibilityState(input.afterVisibility),
+    });
+    if (changes.length >= 20) break;
+  }
+  return changes.length > 0 ? changes : undefined;
+}
+
 export function shouldInvalidateReadAfterWindowFocusChange(
   toolName: string,
   args: unknown,
@@ -267,6 +316,7 @@ export function buildPostActionDeltaSignalsFromEvidence(
               | NonNullable<BuildPostActionDeltaEvidenceInput['objectDelta']>['status']
               | null) ?? undefined,
           changedObjectIds: readStringArray(objectDelta.changedObjectIds),
+          targetStateChanges: readTargetStateChanges(objectDelta.targetStateChanges),
         }
       : undefined,
     networkSignalSummary: networkSignalSummary

@@ -14,6 +14,7 @@ import {
   type ReadPagePageObjectSummary,
   type ReadPagePageType,
   type ReadPageReadinessVerdict,
+  type ReadPageTargetStateChangeSummary,
 } from '@tabrix/shared';
 import type { CandidateActionSeed } from './read-page-candidate-actions';
 
@@ -353,6 +354,85 @@ function classifyAccessDelta(
   return null;
 }
 
+function getActionableTargetStableKey(target: ReadPageActionableTargetSummary): string {
+  if (typeof target.targetRef === 'string' && target.targetRef.length > 0) {
+    return `targetRef:${target.targetRef}`;
+  }
+  if (typeof target.ref === 'string' && target.ref.length > 0) {
+    return `ref:${target.ref}`;
+  }
+  if (typeof target.objectId === 'string' && target.objectId.length > 0) {
+    return `object:${target.objectId}`;
+  }
+  return `target:${target.targetId}`;
+}
+
+function summarizeVisibilityState(
+  target: ReadPageActionableTargetSummary,
+): ReadPageTargetStateChangeSummary['beforeVisibility'] | undefined {
+  if (!target.visibility) return undefined;
+  return {
+    domVisible: target.visibility.domVisible,
+    inViewport: target.visibility.inViewport,
+    centerHitTarget: target.visibility.centerHitTarget,
+    occluded: target.visibility.occluded,
+  };
+}
+
+function visibilityStateChanged(
+  before: ReturnType<typeof summarizeVisibilityState>,
+  after: ReturnType<typeof summarizeVisibilityState>,
+): boolean {
+  if (!before && !after) return false;
+  if (!before || !after) return true;
+  return (
+    before.domVisible !== after.domVisible ||
+    before.inViewport !== after.inViewport ||
+    before.centerHitTarget !== after.centerHitTarget ||
+    before.occluded !== after.occluded
+  );
+}
+
+function collectTargetStateChanges(
+  previousTargets: readonly ReadPageActionableTargetSummary[],
+  currentTargets: readonly ReadPageActionableTargetSummary[],
+): ReadPageTargetStateChangeSummary[] {
+  const previousByKey = new Map<string, ReadPageActionableTargetSummary>();
+  for (const target of previousTargets) {
+    previousByKey.set(getActionableTargetStableKey(target), target);
+  }
+
+  const changes: ReadPageTargetStateChangeSummary[] = [];
+  for (const currentTarget of currentTargets) {
+    const previousTarget = previousByKey.get(getActionableTargetStableKey(currentTarget));
+    if (!previousTarget) continue;
+
+    const actionabilityChanged =
+      previousTarget.actionability !== currentTarget.actionability ||
+      previousTarget.actionabilityReason !== currentTarget.actionabilityReason;
+    const beforeVisibility = summarizeVisibilityState(previousTarget);
+    const afterVisibility = summarizeVisibilityState(currentTarget);
+    const visibilityChanged = visibilityStateChanged(beforeVisibility, afterVisibility);
+    if (!actionabilityChanged && !visibilityChanged) continue;
+
+    changes.push({
+      targetId: currentTarget.targetId || previousTarget.targetId,
+      objectId: currentTarget.objectId ?? previousTarget.objectId ?? null,
+      changeKind:
+        actionabilityChanged && visibilityChanged
+          ? 'actionability_and_visibility'
+          : actionabilityChanged
+            ? 'actionability'
+            : 'visibility',
+      beforeActionability: previousTarget.actionability,
+      afterActionability: currentTarget.actionability,
+      beforeVisibility,
+      afterVisibility,
+    });
+  }
+  return changes;
+}
+
 export function resolveTargetObjectId(
   binding: PendingActionBinding | null,
   snapshot: ReadPageObjectSnapshot,
@@ -380,6 +460,16 @@ export function buildReadPagePageDeltaReport(params: {
   const appearedObjectIds = [...afterObjectIds].filter((id) => !beforeObjectIds.has(id));
   const disappearedObjectIds = [...beforeObjectIds].filter((id) => !afterObjectIds.has(id));
   const objectDelta = [...appearedObjectIds, ...disappearedObjectIds];
+  const targetStateChanges = collectTargetStateChanges(
+    previous.actionableTargets,
+    params.currentSnapshot.actionableTargets,
+  );
+  const targetStateChangedObjectIds = targetStateChanges
+    .map((change) => change.objectId)
+    .filter((id): id is string => typeof id === 'string' && id.length > 0);
+  const changedObjectsWithTargetState = [
+    ...new Set([...objectDelta, ...targetStateChangedObjectIds]),
+  ];
   const currentObjectById = new Map(
     params.currentSnapshot.objects.map((object) => [object.objectId, object]),
   );
@@ -502,6 +592,9 @@ export function buildReadPagePageDeltaReport(params: {
   } else if (formStateChanged) {
     deltaKind = 'form_state_changed';
     recommendation = 'proceed';
+  } else if (targetStateChanges.length > 0) {
+    deltaKind = 'target_state_changed';
+    recommendation = 'proceed';
   } else if (changedObjectSummary > 0) {
     deltaKind = 'object_appeared';
     recommendation = 'proceed';
@@ -525,11 +618,19 @@ export function buildReadPagePageDeltaReport(params: {
         : accessDelta
           ? ['access_state']
           : ['read_page_object_snapshot'],
-    changedObjects: objectDelta,
+    changedObjects: changedObjectsWithTargetState,
     navigationSignals: {
       beforeUrl: previous.pageUrl,
       afterUrl: params.currentSnapshot.pageUrl,
     },
+    ...(targetStateChanges.length > 0
+      ? {
+          targetStateSignals: {
+            changedTargetIds: targetStateChanges.map((change) => change.targetId),
+            changes: targetStateChanges,
+          },
+        }
+      : {}),
     ...(typeof requestStartedDelta === 'number'
       ? {
           networkSignals: {
