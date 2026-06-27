@@ -92,11 +92,8 @@ import {
   filterToolsByPolicy,
   isToolAllowed,
 } from './tool-registry-filters';
-import {
-  readTabrixToolMetadata,
-  stripTabrixToolMetadata,
-  withTabrixMetadataSchema,
-} from './tabrix-metadata-envelope';
+import { readTabrixToolMetadata, stripTabrixToolMetadata } from './tabrix-metadata-envelope';
+import { buildMcpToolListResponse } from './mcp-tool-list';
 import {
   applyPreviousBusinessFeedback,
   createMkeMemoryTraceRecorder,
@@ -184,13 +181,7 @@ async function invokeExtensionCommand(
 
 export const setupTools = (server: McpServer) => {
   // List tools handler
-  server.setRequestHandler(ListToolsRequestSchema, async () => {
-    const byEnv = filterToolsByEnvironment(TOOL_SCHEMAS);
-    const byPolicy = filterToolsByPolicy(byEnv);
-    return {
-      tools: byPolicy.map(withTabrixMetadataSchema),
-    };
-  });
+  server.setRequestHandler(ListToolsRequestSchema, async () => buildMcpToolListResponse());
 
   // Call tool handler
   server.setRequestHandler(CallToolRequestSchema, async (request) =>

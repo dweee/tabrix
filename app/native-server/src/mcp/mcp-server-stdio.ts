@@ -9,14 +9,12 @@ import {
   ListResourcesRequestSchema,
   ListPromptsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { TOOL_SCHEMAS } from '@tabrix/shared';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import { logger } from '../logging/logger';
-import { filterToolsByEnvironment, filterToolsByPolicy } from './tool-registry-filters';
-import { withTabrixMetadataSchema } from './tabrix-metadata-envelope';
+import { buildMcpToolListResponse } from './mcp-tool-list';
 
 const stdioLogger = logger.child('stdio-mcp');
 
@@ -86,11 +84,7 @@ export const ensureMcpClient = async () => {
 
 export const setupTools = (server: Server) => {
   // List tools handler
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: filterToolsByPolicy(filterToolsByEnvironment(TOOL_SCHEMAS)).map(
-      withTabrixMetadataSchema,
-    ),
-  }));
+  server.setRequestHandler(ListToolsRequestSchema, async () => buildMcpToolListResponse());
 
   // Call tool handler
   server.setRequestHandler(CallToolRequestSchema, async (request) =>
