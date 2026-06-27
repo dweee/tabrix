@@ -39,7 +39,11 @@
  *     persistence is `off`).
  */
 
-export type DispatcherInputSource = 'live_snapshot' | 'memory_snapshot' | 'fallback_zero';
+export type DispatcherInputSource =
+  | 'live_snapshot'
+  | 'memory_snapshot'
+  | 'object_library_snapshot'
+  | 'fallback_zero';
 
 export type DispatcherInputFallbackCause =
   | 'persistence_off'
@@ -70,6 +74,7 @@ export interface PageContextProvider {
 }
 
 export interface PageSnapshotLike {
+  contextSource?: Exclude<DispatcherInputSource, 'fallback_zero'>;
   fullReadByteLength?: number | null;
   protocolL0Blob?: string | null;
   protocolL1Blob?: string | null;
@@ -137,7 +142,7 @@ function estimateFullReadByteLength(snap: PageSnapshotLike): number {
 
 function projectSnapshot(
   snap: PageSnapshotLike,
-  source: 'live_snapshot' | 'memory_snapshot',
+  source: Exclude<DispatcherInputSource, 'fallback_zero'>,
 ): PageContextLookupResult {
   return {
     source,
@@ -182,11 +187,11 @@ export class LivePageContextProvider implements PageContextProvider {
       const url = normalizeUrl(input.url ?? null);
       if (url) {
         const live = this.reader.findLatestForUrl(url);
-        if (live) return projectSnapshot(live, 'live_snapshot');
+        if (live) return projectSnapshot(live, live.contextSource ?? 'live_snapshot');
       }
       if (requestedPageRole) {
         const byRole = this.reader.findLatestForPageRole(requestedPageRole);
-        if (byRole) return projectSnapshot(byRole, 'memory_snapshot');
+        if (byRole) return projectSnapshot(byRole, byRole.contextSource ?? 'memory_snapshot');
       }
       // NO global "newest snapshot anywhere" fallback: an unrelated page's
       // complexity is not honest dispatcher input. Surface a precise cause so

@@ -100,6 +100,25 @@ describe('LivePageContextProvider — lookup order', () => {
     expect(result.fullReadByteLength).toBe(40_000);
   });
 
+  test('preserves explicit object_library_snapshot source without calling it live', () => {
+    const snap = makeSnap({
+      contextSource: 'object_library_snapshot',
+      candidateActionCount: 3,
+      highValueObjectCount: 5,
+    });
+    const provider = new LivePageContextProvider({
+      reader: makeReader({
+        findLatestForUrl: (url) => (url === 'https://example.com/issues' ? snap : undefined),
+      }),
+    });
+
+    const result = provider.getContext({ url: 'https://example.com/issues' });
+
+    expect(result.source).toBe('object_library_snapshot');
+    expect(result.candidateActionsCount).toBe(3);
+    expect(result.hvoCount).toBe(5);
+  });
+
   test('falls back to memory_snapshot when only pageRole matches', () => {
     const snap = makeSnap({
       url: 'https://other.example/repo',

@@ -36,6 +36,8 @@ import type { ChooseContextDecisionSnapshot } from '../execution/skip-read-orche
 import type { LayerSourceRoute, TabrixChooseContextResult } from '@tabrix/shared';
 import { resolveApiKnowledgeCandidate } from '../api/api-knowledge';
 import { handleMemoryRecordAiFeedback } from './native-memory-feedback-handler';
+import type { BrowserObject, BrowserObjectRepository } from '../memory/db';
+import { normalizeUrlPattern } from '../memory/mke-memory-sanitizer';
 
 type AcceptanceApiFault = 'network_timeout' | 'semantic_mismatch';
 
@@ -73,6 +75,103 @@ function createTaskPageContextReader(
   };
 }
 
+type ObjectLibraryContextRepository = Pick<BrowserObjectRepository, 'listReusableForPage'>;
+
+function createObjectLibraryPageContextReader(
+  browserObjects: ObjectLibraryContextRepository | null | undefined,
+  rawArgs: unknown,
+): PageSnapshotReader | null {
+  if (!browserObjects) return null;
+  const argsObj = readObjectArg(rawArgs);
+  const requestedPageRole =
+    typeof argsObj.pageRole === 'string' && argsObj.pageRole.trim().length > 0
+      ? argsObj.pageRole.trim()
+      : 'page';
+
+  const lookup = (url: string | null, pageRole: string) => {
+    const urlFields = normalizeUrlPattern(url, {
+      allowPersonalBrowserStateStorage: false,
+    });
+    if (!urlFields.siteFamily) return undefined;
+    const pageModelKey = `page:${urlFields.siteFamily}:${pageRole || 'page'}`;
+    const objects = browserObjects.listReusableForPage({
+      siteFamily: urlFields.siteFamily,
+      pageModelKey,
+      rootRoute: urlFields.rootRoute,
+      currentRoute: urlFields.currentRoute,
+      pageUrlPattern: urlFields.pattern,
+      limit: 24,
+    });
+    return projectObjectLibraryPageContext(objects, pageRole);
+  };
+
+  return {
+    findLatestForUrl(url: string) {
+      return lookup(url, requestedPageRole);
+    },
+    findLatestForPageRole(pageRole: string) {
+      const url = typeof argsObj.url === 'string' ? argsObj.url : null;
+      return lookup(url, pageRole);
+    },
+  };
+}
+
+function createCompositePageContextReader(
+  readers: Array<PageSnapshotReader | null | undefined>,
+): PageSnapshotReader | null {
+  const activeReaders = readers.filter((reader): reader is PageSnapshotReader => Boolean(reader));
+  if (activeReaders.length === 0) return null;
+  return {
+    findLatestForUrl(url: string) {
+      for (const reader of activeReaders) {
+        const snapshot = reader.findLatestForUrl(url);
+        if (snapshot) return snapshot;
+      }
+      return undefined;
+    },
+    findLatestForPageRole(pageRole: string) {
+      for (const reader of activeReaders) {
+        const snapshot = reader.findLatestForPageRole(pageRole);
+        if (snapshot) return snapshot;
+      }
+      return undefined;
+    },
+  };
+}
+
+function projectObjectLibraryPageContext(
+  objects: BrowserObject[],
+  pageRole: string,
+): ReturnType<PageSnapshotReader['findLatestForUrl']> {
+  const eligibleObjects = objects.filter(isObjectLibraryContextEligible);
+  if (eligibleObjects.length === 0) return undefined;
+  let candidateActionCount = 0;
+  for (const object of eligibleObjects) {
+    const hasActionTypes = Array.isArray(object.actionTypes) && object.actionTypes.length > 0;
+    if (
+      hasActionTypes ||
+      object.objectType === 'action_target' ||
+      object.objectType === 'result_card'
+    ) {
+      candidateActionCount += 1;
+    }
+  }
+  return {
+    contextSource: 'object_library_snapshot',
+    candidateActionCount,
+    highValueObjectCount: eligibleObjects.length,
+    pageRole,
+  };
+}
+
+function isObjectLibraryContextEligible(object: BrowserObject): boolean {
+  if (object.archivedAt || object.closedAt) return false;
+  if (object.redactionState !== 'redacted') return false;
+  if (object.canTabrixOperate === false) return false;
+  const freshness = typeof object.sourceFreshness === 'string' ? object.sourceFreshness : '';
+  return !['stale', 'expired', 'needs_refresh'].includes(freshness);
+}
+
 export interface NativeToolHandlerDeps {
   sessionManager: Pick<
     SessionManager,
@@ -82,6 +181,7 @@ export interface NativeToolHandlerDeps {
     | 'flushAndProjectMkeIdle'
     | 'flushAndProjectMkeAfterAiFeedback'
     | 'revokeMkeExperienceForTrace'
+    | 'browserObjects'
   > & {
     memoryTraces?: SessionManager['memoryTraces'];
     findReusableMkeExperienceRecipes?: SessionManager['findReusableMkeExperienceRecipes'];
@@ -127,11 +227,11 @@ function readObjectArg(args: unknown): Record<string, unknown> {
 }
 
 const handleTabrixChooseContext: NativeToolHandler = async (args, deps) => {
-  // The old `memory_page_snapshots` table is retired. Until chooser context is
-  // backed by Object Library live facts, surface an explicit fallback-zero
-  // input instead of reading stale snapshot rows.
   const pageContext = createLivePageContextProvider(
-    createTaskPageContextReader(deps.taskContext ?? null),
+    createCompositePageContextReader([
+      createTaskPageContextReader(deps.taskContext ?? null),
+      createObjectLibraryPageContextReader(deps.sessionManager.browserObjects, args),
+    ]),
   );
   // Wrap the synchronous chooser with the direct-api-executor so a
   // high-confidence read-only `knowledge_supported_read` route may

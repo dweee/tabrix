@@ -23,6 +23,9 @@ function makeDeps(
     revokeMkeExperienceForTrace: jest.Mock;
     findReusableMkeExperienceRecipes: jest.Mock;
     findLatestMkeKnowledgeModel: jest.Mock;
+    browserObjects: {
+      listReusableForPage: jest.Mock;
+    } | null;
   }> = {},
 ): NativeToolHandlerDeps {
   const flushAndProjectMkeAfterAiFeedback =
@@ -68,6 +71,9 @@ function makeDeps(
         }),
       findReusableMkeExperienceRecipes: overrides.findReusableMkeExperienceRecipes,
       findLatestMkeKnowledgeModel: overrides.findLatestMkeKnowledgeModel,
+      get browserObjects() {
+        return overrides.browserObjects ?? null;
+      },
     } as unknown as NativeToolHandlerDeps['sessionManager'],
   };
 }
@@ -582,6 +588,124 @@ describe('native-tool-handlers · tabrix_choose_context (B-018 v1)', () => {
     expect(body.tokenEstimateFullRead).toBe(10_000);
     expect(body.tokensSavedEstimate).toBeGreaterThan(9_000);
     expect(body.dispatcherInputSource).toBe('live_snapshot');
+  });
+
+  it('uses Object Library page facts as chooser dispatcher input when no task read baseline exists', async () => {
+    const handler = getChooseHandler();
+    const listReusableForPage = jest.fn().mockReturnValue([
+      {
+        objectType: 'action_target',
+        actionTypes: ['submit_search'],
+        redactionState: 'redacted',
+        sourceFreshness: 'fresh',
+        canTabrixOperate: true,
+        targetability: {
+          targetRef: 'historical-ref-must-not-leak',
+          coordinates: { x: 120, y: 240 },
+        },
+      },
+      {
+        objectType: 'result_card',
+        actionTypes: ['open_detail'],
+        redactionState: 'redacted',
+        sourceFreshness: 'fresh',
+        canTabrixOperate: true,
+        facts: {
+          rawBody: 'secret raw body must not leak',
+          Authorization: 'Bearer secret',
+          Cookie: 'session=secret',
+        },
+      },
+      {
+        objectType: 'region',
+        actionTypes: [],
+        redactionState: 'redacted',
+        sourceFreshness: 'fresh',
+        canTabrixOperate: true,
+      },
+      {
+        objectType: 'action_target',
+        actionTypes: ['click'],
+        redactionState: 'redacted',
+        sourceFreshness: 'stale',
+        canTabrixOperate: true,
+      },
+      {
+        objectType: 'action_target',
+        actionTypes: ['click'],
+        redactionState: 'redacted',
+        sourceFreshness: 'fresh',
+        canTabrixOperate: false,
+      },
+    ]);
+
+    const result = await handler(
+      {
+        intent: '内容站搜索并整理前10条结果',
+        url: 'https://content.example/search?q=ai',
+        pageRole: 'search_results',
+      },
+      makeDeps({
+        browserObjects: { listReusableForPage },
+      }),
+    );
+
+    expect(result.isError).toBe(false);
+    const body = callTextPayload(result);
+    expect(body.strategy).toBe('read_page_required');
+    expect(body.dispatcherInputSource).toBe('object_library_snapshot');
+    const serialized = JSON.stringify(body);
+    expect(serialized).not.toContain('historical-ref-must-not-leak');
+    expect(serialized).not.toContain('secret raw body must not leak');
+    expect(serialized).not.toContain('Bearer secret');
+    expect(serialized).not.toContain('session=secret');
+    expect(listReusableForPage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        siteFamily: 'content.example',
+        pageModelKey: 'page:content.example:search_results',
+        limit: 24,
+      }),
+    );
+  });
+
+  it('prefers the current task read baseline over Object Library historical facts', async () => {
+    const handler = getChooseHandler();
+    const listReusableForPage = jest.fn().mockReturnValue(
+      Array.from({ length: 24 }, () => ({
+        objectType: 'action_target',
+        actionTypes: ['click'],
+      })),
+    );
+
+    const result = await handler(
+      {
+        intent: '内容站搜索并整理前10条结果',
+        url: 'https://content.example/search?q=ai',
+        pageRole: 'search_results',
+      },
+      {
+        ...makeDeps({
+          browserObjects: { listReusableForPage },
+        }),
+        taskContext: {
+          peekReadPageContextMeasurement: () => ({
+            url: 'https://content.example/search?q=ai',
+            pageRole: 'search_results',
+            fullReadByteLength: 40_000,
+            candidateActionsCount: 2,
+            highValueObjectCount: 1,
+          }),
+          peekVisibleRegionRowsEvidence: () => null,
+          noteUrlChange: jest.fn(),
+          noteChooseContextDecision: jest.fn(),
+        } as unknown as TaskSessionContext,
+      },
+    );
+
+    expect(result.isError).toBe(false);
+    const body = callTextPayload(result);
+    expect(body.dispatcherInputSource).toBe('live_snapshot');
+    expect(body.tokenEstimateFullRead).toBe(10_000);
   });
 
   it('does not enter direct API without observed Knowledge even when fault injection is present', async () => {
