@@ -1231,34 +1231,6 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
       );
       const normalized = normalizeToolCallResult(name, resultWithPolicyAndActionEvidence);
       const toolResultFailed = resultWithPolicyAndActionEvidence.isError === true;
-      sessionManager.completeStep(session.sessionId, step.stepId, {
-        status: 'completed',
-        resultSummary: normalized.stepSummary,
-        artifactRefs:
-          postResult.extraArtifactRefs.length > 0 ? postResult.extraArtifactRefs : undefined,
-        operationLog:
-          name === 'chrome_read_page'
-            ? {
-                ...(operationLogHint ?? {}),
-                requestedLayer:
-                  operationLogHint?.requestedLayer ??
-                  extractRequestedLayer(outgoingArgs) ??
-                  READ_PAGE_DEFAULT_LAYER,
-                selectedDataSource: operationLogHint?.selectedDataSource ?? 'dom_json',
-                resultKind:
-                  operationLogHint?.resultKind ??
-                  (toolResultFailed ? 'read_page_failed' : 'read_page'),
-                success: operationLogHint?.success ?? (toolResultFailed ? false : undefined),
-                decisionReason:
-                  operationLogHint?.decisionReason ??
-                  (toolResultFailed ? 'read_page_tool_error' : undefined),
-              }
-            : undefined,
-      });
-      sessionManager.finishSession(session.sessionId, {
-        status: 'completed',
-        summary: normalized.executionResult.summary,
-      });
       const finalToolResultBase =
         name === 'chrome_read_page' &&
         !shouldIncludeVerboseReadPageContext(
@@ -1279,11 +1251,46 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
               },
             )
           : finalToolResultBase;
-      return recordAndAttachMkeMemoryTrace(finalToolResult, {
-        requestParams: outgoingArgs,
-        resultSummary: normalized.stepSummary,
-        errorCode: toolResultFailed ? 'tool_result_error' : null,
-        browserContextKey: taskContextAttachment.taskContextKey,
+      return finishAndRecordToolCallResult({
+        sessionManager,
+        sessionId: session.sessionId,
+        stepId: step.stepId,
+        step: {
+          status: 'completed',
+          resultSummary: normalized.stepSummary,
+          artifactRefs:
+            postResult.extraArtifactRefs.length > 0 ? postResult.extraArtifactRefs : undefined,
+          operationLog:
+            name === 'chrome_read_page'
+              ? {
+                  ...(operationLogHint ?? {}),
+                  requestedLayer:
+                    operationLogHint?.requestedLayer ??
+                    extractRequestedLayer(outgoingArgs) ??
+                    READ_PAGE_DEFAULT_LAYER,
+                  selectedDataSource: operationLogHint?.selectedDataSource ?? 'dom_json',
+                  resultKind:
+                    operationLogHint?.resultKind ??
+                    (toolResultFailed ? 'read_page_failed' : 'read_page'),
+                  success: operationLogHint?.success ?? (toolResultFailed ? false : undefined),
+                  decisionReason:
+                    operationLogHint?.decisionReason ??
+                    (toolResultFailed ? 'read_page_tool_error' : undefined),
+                }
+              : undefined,
+        },
+        session: {
+          status: 'completed',
+          summary: normalized.executionResult.summary,
+        },
+        result: finalToolResult,
+        recordTrace: recordAndAttachMkeMemoryTrace,
+        trace: {
+          requestParams: outgoingArgs,
+          resultSummary: normalized.stepSummary,
+          errorCode: toolResultFailed ? 'tool_result_error' : null,
+          browserContextKey: taskContextAttachment.taskContextKey,
+        },
       });
     } else {
       const responseError = String(response.error || 'Unknown tool error');
@@ -1299,45 +1306,49 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
             false,
           );
       const result = createErrorResult(JSON.stringify(failurePayload));
-      sessionManager.completeStep(session.sessionId, step.stepId, {
-        status: 'failed',
-        errorCode: bridgeFailure
-          ? bridgeFailure.code.toLowerCase()
-          : isBridgeError
-            ? 'browser_bridge_not_ready'
-            : 'tool_call_error',
-        errorSummary: bridgeFailure ? bridgeFailure.message : responseError,
-        resultSummary: `Tool ${name} failed`,
-        operationLog:
-          name === 'chrome_read_page'
-            ? {
-                ...(operationLogHint ?? {}),
-                requestedLayer:
-                  operationLogHint?.requestedLayer ??
-                  extractRequestedLayer(outgoingArgs) ??
-                  READ_PAGE_DEFAULT_LAYER,
-                selectedDataSource: operationLogHint?.selectedDataSource ?? 'dom_json',
-                resultKind: 'read_page_failed',
-                decisionReason:
-                  operationLogHint?.decisionReason ??
-                  (bridgeFailure ? bridgeFailure.code : 'tool_call_error'),
-                success: false,
-              }
-            : undefined,
-      });
-      sessionManager.finishSession(session.sessionId, {
-        status: 'failed',
-        summary: `Tool ${name} failed`,
-      });
-      return recordAndAttachMkeMemoryTrace(result, {
-        requestParams: outgoingArgs,
-        resultSummary: `Tool ${name} failed`,
-        errorCode: bridgeFailure
-          ? bridgeFailure.code.toLowerCase()
-          : isBridgeError
-            ? 'browser_bridge_not_ready'
-            : 'tool_call_error',
-        browserContextKey: taskContextAttachment.taskContextKey,
+      const errorCode = bridgeFailure
+        ? bridgeFailure.code.toLowerCase()
+        : isBridgeError
+          ? 'browser_bridge_not_ready'
+          : 'tool_call_error';
+      return finishAndRecordToolCallResult({
+        sessionManager,
+        sessionId: session.sessionId,
+        stepId: step.stepId,
+        step: {
+          status: 'failed',
+          errorCode,
+          errorSummary: bridgeFailure ? bridgeFailure.message : responseError,
+          resultSummary: `Tool ${name} failed`,
+          operationLog:
+            name === 'chrome_read_page'
+              ? {
+                  ...(operationLogHint ?? {}),
+                  requestedLayer:
+                    operationLogHint?.requestedLayer ??
+                    extractRequestedLayer(outgoingArgs) ??
+                    READ_PAGE_DEFAULT_LAYER,
+                  selectedDataSource: operationLogHint?.selectedDataSource ?? 'dom_json',
+                  resultKind: 'read_page_failed',
+                  decisionReason:
+                    operationLogHint?.decisionReason ??
+                    (bridgeFailure ? bridgeFailure.code : 'tool_call_error'),
+                  success: false,
+                }
+              : undefined,
+        },
+        session: {
+          status: 'failed',
+          summary: `Tool ${name} failed`,
+        },
+        result,
+        recordTrace: recordAndAttachMkeMemoryTrace,
+        trace: {
+          requestParams: outgoingArgs,
+          resultSummary: `Tool ${name} failed`,
+          errorCode,
+          browserContextKey: taskContextAttachment.taskContextKey,
+        },
       });
     }
   } catch (error: any) {
@@ -1350,19 +1361,26 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
         ),
       ),
     );
-    sessionManager.completeStep(session.sessionId, step.stepId, {
-      status: 'failed',
-      errorCode: 'tool_call_exception',
-      errorSummary: error.message,
-      resultSummary: `Tool ${name} threw an exception`,
-    });
-    sessionManager.finishSession(session.sessionId, {
-      status: 'failed',
-      summary: `Tool ${name} threw an exception`,
-    });
-    return recordAndAttachMkeMemoryTrace(result, {
-      resultSummary: `Tool ${name} threw an exception`,
-      errorCode: 'tool_call_exception',
+    return finishAndRecordToolCallResult({
+      sessionManager,
+      sessionId: session.sessionId,
+      stepId: step.stepId,
+      step: {
+        status: 'failed',
+        errorCode: 'tool_call_exception',
+        errorSummary: error.message,
+        resultSummary: `Tool ${name} threw an exception`,
+      },
+      session: {
+        status: 'failed',
+        summary: `Tool ${name} threw an exception`,
+      },
+      result,
+      recordTrace: recordAndAttachMkeMemoryTrace,
+      trace: {
+        resultSummary: `Tool ${name} threw an exception`,
+        errorCode: 'tool_call_exception',
+      },
     });
   }
 };
