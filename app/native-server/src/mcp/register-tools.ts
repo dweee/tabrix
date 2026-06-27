@@ -97,7 +97,7 @@ import {
   applyPreviousBusinessFeedback,
   createMkeMemoryTraceRecorder,
 } from './mcp-tool-memory-trace';
-import { finishToolCallLifecycle } from './mcp-tool-call-lifecycle';
+import { finishAndRecordToolCallResult, finishToolCallLifecycle } from './mcp-tool-call-lifecycle';
 import {
   attachReadPagePayloadMetadata,
   mergeReadPagePayloadMetadata,
@@ -251,7 +251,7 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
       const result = createErrorResult(
         `Tool "${name}" is disabled or not available in the current server configuration.`,
       );
-      finishToolCallLifecycle({
+      return finishAndRecordToolCallResult({
         sessionManager,
         sessionId: session.sessionId,
         stepId: step.stepId,
@@ -265,16 +265,18 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
           status: 'failed',
           summary: `Tool ${name} rejected by configuration`,
         },
-      });
-      return recordAndAttachMkeMemoryTrace(result, {
-        errorCode: 'tool_not_available',
-        resultSummary: 'Tool rejected by current configuration',
+        result,
+        recordTrace: recordAndAttachMkeMemoryTrace,
+        trace: {
+          errorCode: 'tool_not_available',
+          resultSummary: 'Tool rejected by current configuration',
+        },
       });
     }
 
     if (!isToolAllowedByPolicy(name, process.env)) {
       const result = createPolicyDeniedResult(name);
-      finishToolCallLifecycle({
+      return finishAndRecordToolCallResult({
         sessionManager,
         sessionId: session.sessionId,
         stepId: step.stepId,
@@ -288,10 +290,12 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
           status: 'failed',
           summary: `Tool ${name} rejected by Tabrix Policy`,
         },
-      });
-      return recordAndAttachMkeMemoryTrace(result, {
-        errorCode: 'policy_denied_p3',
-        resultSummary: 'Tool rejected by Tabrix Policy',
+        result,
+        recordTrace: recordAndAttachMkeMemoryTrace,
+        trace: {
+          errorCode: 'policy_denied_p3',
+          resultSummary: 'Tool rejected by Tabrix Policy',
+        },
       });
     }
 
