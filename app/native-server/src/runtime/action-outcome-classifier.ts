@@ -129,6 +129,7 @@ const KNOWN_SIGNAL_KINDS: ReadonlySet<ActionSignalKind> = new Set<ActionSignalKi
   'tab_created',
   'dom_region_changed',
   'network_completed',
+  'network_failed',
   'dialog_opened',
 ]);
 
@@ -150,6 +151,7 @@ function chooseVerdict(_actionKind: ActionKind, signals: ActionSignal[]): Verdic
   let hasDomRegion = false;
   let hasScopedDomRegion = false;
   let hasNetwork = false;
+  let hasNetworkFailure = false;
   let hasDialog = false;
   let unknownCount = 0;
 
@@ -172,6 +174,9 @@ function chooseVerdict(_actionKind: ActionKind, signals: ActionSignal[]): Verdic
       case 'network_completed':
         hasNetwork = true;
         break;
+      case 'network_failed':
+        hasNetworkFailure = true;
+        break;
       case 'dialog_opened':
         hasDialog = true;
         break;
@@ -182,6 +187,7 @@ function chooseVerdict(_actionKind: ActionKind, signals: ActionSignal[]): Verdic
   if (hasNavigation && !hasNewTab) verdictBuckets.push('navigated_same_tab');
   if (hasNewTab) verdictBuckets.push('navigated_new_tab');
   if (hasDialog) verdictBuckets.push('modal_opened');
+  if (hasNetworkFailure) verdictBuckets.push('error_observed');
   if (
     hasDomRegion &&
     (hasScopedDomRegion || hasNetwork) &&
@@ -236,6 +242,7 @@ function chooseVerdict(_actionKind: ActionKind, signals: ActionSignal[]): Verdic
   // spa_partial_update + network) lifts the score to 0.95.
   if (single === 'navigated_same_tab' && hasDomRegion) confidence = 0.95;
   if (single === 'spa_partial_update' && hasNetwork) confidence = 0.95;
+  if (single === 'error_observed') confidence = 0.9;
 
   // Each unknown stray signal subtracts a fixed amount, floored at
   // ACTION_OUTCOME_MIN_AMBIGUOUS_CONFIDENCE so the verdict never

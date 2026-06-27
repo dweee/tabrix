@@ -151,6 +151,22 @@ describe('action-outcome-classifier — classifyActionOutcome', () => {
     expect(out.observedSignalKinds).toEqual(['dialog_opened', 'lifecycle_committed']);
   });
 
+  it('classifies a network_failed signal as error_observed', () => {
+    const env = makeEnvelope({
+      signals: [
+        makeSignal({
+          kind: 'network_failed',
+          host: 'example.test',
+          pathPattern: '/api/items',
+        }),
+      ],
+    });
+    const out = classifyActionOutcome(env, { now });
+    expect(out.outcome).toBe('error_observed');
+    expect(out.outcomeConfidence).toBeCloseTo(0.9, 5);
+    expect(out.observedSignalKinds).toEqual(['network_failed']);
+  });
+
   it('returns ambiguous when only network fires (every page emits ambient XHR)', () => {
     const env = makeEnvelope({
       signals: [
@@ -247,6 +263,7 @@ describe('action-outcome-classifier — isKnownActionSignalKind', () => {
       'tab_created',
       'dom_region_changed',
       'network_completed',
+      'network_failed',
       'dialog_opened',
     ];
     for (const k of known) expect(isKnownActionSignalKind(k)).toBe(true);

@@ -469,6 +469,7 @@ export type ActionSignalKind =
   | 'tab_created'
   | 'dom_region_changed'
   | 'network_completed'
+  | 'network_failed'
   | 'dialog_opened'
   | 'unknown';
 
@@ -477,6 +478,7 @@ export const ACTION_SIGNAL_KINDS = [
   'tab_created',
   'dom_region_changed',
   'network_completed',
+  'network_failed',
   'dialog_opened',
   'unknown',
 ] as const satisfies ReadonlyArray<ActionSignalKind>;
@@ -513,6 +515,7 @@ export type ActionOutcome =
   | 'navigated_new_tab'
   | 'spa_partial_update'
   | 'modal_opened'
+  | 'error_observed'
   | 'no_observed_change'
   | 'multiple_signals'
   | 'ambiguous'
@@ -523,6 +526,7 @@ export const ACTION_OUTCOMES = [
   'navigated_new_tab',
   'spa_partial_update',
   'modal_opened',
+  'error_observed',
   'no_observed_change',
   'multiple_signals',
   'ambiguous',

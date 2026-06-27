@@ -220,6 +220,22 @@ export function attachActionOutcomeObserver(
     );
   }
 
+  function onWebRequestErrorOccurred(details: chrome.webRequest.WebResponseErrorDetails): void {
+    if (typeof details.tabId !== 'number' || details.tabId < 0) return;
+    const t = details.type as string;
+    if (t !== 'xmlhttprequest' && t !== 'fetch') return;
+    const summary = summariseHostAndPath(details.url);
+    if (!summary) return;
+    pushSignalRaw(
+      details.tabId,
+      makeSignal('network_failed', {
+        observedAtMs: details.timeStamp ?? now(),
+        host: summary.host,
+        pathPattern: summary.pathPattern,
+      }),
+    );
+  }
+
   // Defensive event-bus binding (mirrors lifecycle/network-fact observers).
   type AnyEventHook = {
     addListener: (listener: any, ...args: any[]) => void;
@@ -256,11 +272,16 @@ export function attachActionOutcomeObserver(
 
   const wn = (chrome as any)?.webNavigation as { onCommitted?: AnyEventHook } | undefined;
   const tabs = (chrome as any)?.tabs as { onCreated?: AnyEventHook } | undefined;
-  const wr = (chrome as any)?.webRequest as { onCompleted?: AnyEventHook } | undefined;
+  const wr = (chrome as any)?.webRequest as
+    | { onCompleted?: AnyEventHook; onErrorOccurred?: AnyEventHook }
+    | undefined;
 
   tryBind(wn?.onCommitted, onCommitted, 'webNavigation.onCommitted');
   tryBind(tabs?.onCreated, onTabCreated, 'tabs.onCreated');
   tryBind(wr?.onCompleted, onWebRequestCompleted, 'webRequest.onCompleted', {
+    urls: ['<all_urls>'],
+  });
+  tryBind(wr?.onErrorOccurred, onWebRequestErrorOccurred, 'webRequest.onErrorOccurred', {
     urls: ['<all_urls>'],
   });
 
