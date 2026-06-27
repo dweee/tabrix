@@ -148,6 +148,11 @@ interface VisibleSearchSurfaceActionsResult {
   actions: CandidateActionSeed[];
   sensingDiagnostic?: ReadPageSensingDiagnostic;
 }
+interface SyntheticRefBindingResult {
+  attempted: number;
+  bound: number;
+  sensingDiagnostic?: ReadPageSensingDiagnostic;
+}
 
 interface ReadPageParams {
   filter?: 'interactive'; // when omitted, return all visible elements
@@ -1052,7 +1057,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
     tabId: number,
     refMap: Array<{ ref?: unknown; selector?: unknown } | null>,
     frameId?: number,
-  ): Promise<number> {
+  ): Promise<SyntheticRefBindingResult> {
     const entries = refMap
       .map((entry) => ({
         ref: typeof entry?.ref === 'string' ? entry.ref.trim() : '',
@@ -1065,7 +1070,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
             entry.ref.startsWith('ref_text_control_')) &&
           entry.selector,
       );
-    if (entries.length === 0) return 0;
+    if (entries.length === 0) return { attempted: 0, bound: 0 };
 
     try {
       const result = await chrome.scripting.executeScript({
@@ -1084,18 +1089,55 @@ class ReadPageTool extends BaseBrowserToolExecutor {
               bound += 1;
             }
             return { bound };
-          } catch {
-            return { bound: 0 };
+          } catch (error) {
+            return {
+              bound: 0,
+              error: error instanceof Error ? error.message : String(error),
+            };
           }
         },
         args: [entries],
       } as any);
-      const resultValue = result?.[0]?.result as { bound?: unknown } | undefined;
+      const resultValue = result?.[0]?.result as { bound?: unknown; error?: unknown } | undefined;
       const bound = resultValue?.bound;
-      return typeof bound === 'number' && Number.isFinite(bound) ? bound : 0;
-    } catch {
-      return 0;
+      const safeBound = typeof bound === 'number' && Number.isFinite(bound) ? bound : 0;
+      if (safeBound >= entries.length) {
+        return { attempted: entries.length, bound: safeBound };
+      }
+      const errorMessage =
+        typeof resultValue?.error === 'string' && resultValue.error.trim()
+          ? `: ${resultValue.error.replace(/\s+/g, ' ').slice(0, 100)}`
+          : '';
+      return {
+        attempted: entries.length,
+        bound: safeBound,
+        sensingDiagnostic: {
+          source: errorMessage ? 'target_ref_binding.failed' : 'target_ref_binding.partial',
+          message: `recovered target refs bound ${safeBound}/${entries.length}${errorMessage}`,
+        },
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        attempted: entries.length,
+        bound: 0,
+        sensingDiagnostic: {
+          source: 'target_ref_binding.failed',
+          message: `recovered target ref binding failed: ${message.replace(/\s+/g, ' ').slice(0, 120)}`,
+        },
+      };
     }
+  }
+
+  private appendSyntheticRefBindingDiagnostic(
+    basePayload: Record<string, any>,
+    binding: SyntheticRefBindingResult,
+  ): void {
+    if (!binding.sensingDiagnostic) return;
+    basePayload.sensingDiagnostics = appendObjectSensingDiagnostic(
+      basePayload.sensingDiagnostics,
+      binding.sensingDiagnostic,
+    );
   }
 
   private async sampleVisibleTextContent(tabId: number, frameId?: number): Promise<string | null> {
@@ -1416,7 +1458,12 @@ class ReadPageTool extends BaseBrowserToolExecutor {
     const recoveredRefMap = buildFallbackRefMap(recovered).map((entry, index) =>
       entry ? { ...entry, ref: `ref_text_control_${offset + index + 1}` } : null,
     );
-    await this.bindSyntheticRefsToSelectors(params.tabId, recoveredRefMap, params.frameId);
+    const binding = await this.bindSyntheticRefsToSelectors(
+      params.tabId,
+      recoveredRefMap,
+      params.frameId,
+    );
+    this.appendSyntheticRefBindingDiagnostic(params.basePayload, binding);
     const recoveredWithRefs = attachFallbackRefs(recovered, recoveredRefMap);
 
     params.basePayload.elements = [...recoveredWithRefs, ...existingElements].slice(0, 150);
@@ -1545,7 +1592,12 @@ class ReadPageTool extends BaseBrowserToolExecutor {
     const recoveredRefMap = buildFallbackRefMap(recovered).map((entry, index) =>
       entry ? { ...entry, ref: `ref_text_search_toolbar_${offset + index + 1}` } : null,
     );
-    await this.bindSyntheticRefsToSelectors(params.tabId, recoveredRefMap, params.frameId);
+    const binding = await this.bindSyntheticRefsToSelectors(
+      params.tabId,
+      recoveredRefMap,
+      params.frameId,
+    );
+    this.appendSyntheticRefBindingDiagnostic(params.basePayload, binding);
     const recoveredWithRefs = attachFallbackRefs(recovered, recoveredRefMap);
 
     params.basePayload.elements = [...recoveredWithRefs, ...existingElements].slice(0, 150);
@@ -1664,7 +1716,12 @@ class ReadPageTool extends BaseBrowserToolExecutor {
     const recoveredRefMap = buildFallbackRefMap(recovered).map((entry, index) =>
       entry ? { ...entry, ref: `ref_text_filter_panel_${offset + index + 1}` } : null,
     );
-    await this.bindSyntheticRefsToSelectors(params.tabId, recoveredRefMap, params.frameId);
+    const binding = await this.bindSyntheticRefsToSelectors(
+      params.tabId,
+      recoveredRefMap,
+      params.frameId,
+    );
+    this.appendSyntheticRefBindingDiagnostic(params.basePayload, binding);
     const recoveredWithRefs = attachFallbackRefs(recovered, recoveredRefMap);
 
     params.basePayload.elements = [...recoveredWithRefs, ...existingElements].slice(0, 150);

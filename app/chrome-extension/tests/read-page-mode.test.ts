@@ -1536,6 +1536,65 @@ describe('read_page mode', () => {
     });
   });
 
+  it('reports partial sensing when recovered visible text controls cannot bind target refs', async () => {
+    vi.spyOn(chrome.scripting, 'executeScript').mockResolvedValue([
+      { result: { bound: 0 } },
+    ] as any);
+    vi.spyOn(readPageTool as any, 'collectInteractiveElementsFallback').mockImplementation(
+      async (_tabId: number, options: { textQuery?: string }) => {
+        if (options.textQuery !== '上传图文') return { success: true, elements: [] };
+        return {
+          success: true,
+          elements: [
+            {
+              type: 'text',
+              role: 'tab',
+              selector: 'body > main > div.creator-tabs > span.title',
+              text: '上传图文',
+              isInteractive: true,
+              coordinates: {
+                x: 188,
+                y: 92,
+                rect: { x: 148, y: 72, width: 80, height: 32 },
+              },
+            },
+          ],
+        };
+      },
+    );
+    const basePayload: any = {
+      visibleTextContent: ['上传视频', '上传图文', '支持上传的图片大小，', '发布笔记'].join('\n'),
+      elements: [],
+      refMap: [],
+      count: 0,
+    };
+
+    const recovered = await (readPageTool as any).recoverVisibleTextControlTargets({
+      tabId: 5331,
+      basePayload,
+      frameId: 11,
+    });
+
+    expect(recovered).toBe(true);
+    expect(basePayload.sensingDiagnostics).toMatchObject({
+      coverageStatus: 'partial',
+      partialErrors: expect.arrayContaining([
+        expect.objectContaining({
+          source: 'target_ref_binding.partial',
+          message: 'recovered target refs bound 0/1',
+        }),
+      ]),
+    });
+    expect(basePayload.elements).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          ref: expect.stringMatching(/^ref_text_control_/),
+          selector: 'body > main > div.creator-tabs > span.title',
+        }),
+      ]),
+    );
+  });
+
   it('keeps recovered visible text controls actionable when the page already has navigation controls', () => {
     const pageContent = [
       '- button "首页" [ref=ref_1]',
