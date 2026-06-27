@@ -51,8 +51,21 @@ interface RecipeBasis {
 const REPLAYABLE_ACTION_TOOLS = new Set([
   'chrome_collect_result_cards',
   'chrome_click_element',
+  'chrome_close_tabs',
   'chrome_fill_or_select',
   'chrome_navigate',
+]);
+const TEMPLATE_BLOCKING_UNTEMPLATED_TOOLS = new Set([
+  'chrome_bookmark_add',
+  'chrome_bookmark_delete',
+  'chrome_computer',
+  'chrome_file_upload',
+  'chrome_handle_dialog',
+  'chrome_handle_download',
+  'chrome_javascript',
+  'chrome_keyboard',
+  'chrome_network_request',
+  'chrome_switch_tab',
 ]);
 const MAX_REPLAYABLE_ACTION_DURATION_MS = 30_000;
 const UNREPLAYABLE_FALLBACK_PATTERN =
@@ -556,6 +569,7 @@ function buildRecipeBasis(
 ): RecipeBasis | null {
   const feedbackRequiredTraces = group.traces.filter(shouldRequestAiFeedbackForTrace);
   if (feedbackRequiredTraces.some((trace) => !isBusinessAchieved(trace))) return null;
+  if (feedbackRequiredTraces.some(isBlockingUntemplatedTaskStep)) return null;
   const sourceTraces = group.traces.filter(isBusinessAchieved);
 
   const replayableActionTraces = group.traces.filter(
@@ -638,6 +652,10 @@ function countRecipeRejectionSignals(
   counters.rejectedBusinessFailureTraceCount = feedbackRequiredTraces.filter(
     (trace) => hasVerifiedAiSuccessFeedback(trace) && !isBusinessAchieved(trace),
   ).length;
+  const blockingUntemplatedTraceCount = feedbackRequiredTraces.filter(
+    isBlockingUntemplatedTaskStep,
+  ).length;
+  counters.rejectedUnreplayableQualityTraceCount += blockingUntemplatedTraceCount;
 
   const replayableActionTraces = group.traces.filter(
     (trace) =>
@@ -645,7 +663,7 @@ function countRecipeRejectionSignals(
       trace.toolSuccess === true &&
       isBusinessAchieved(trace),
   );
-  counters.rejectedUnreplayableQualityTraceCount = replayableActionTraces.filter(
+  counters.rejectedUnreplayableQualityTraceCount += replayableActionTraces.filter(
     (trace) => !hasReplayableQuality(trace),
   ).length;
   const actionTraces = replayableActionTraces.filter(hasReplayableQuality);
@@ -670,6 +688,15 @@ function countRecipeRejectionSignals(
   });
   if (!knowledge) counters.missingKnowledgeSequenceCount = 1;
   return counters;
+}
+
+function isBlockingUntemplatedTaskStep(trace: MemoryTrace): boolean {
+  return (
+    trace.toolSuccess === true &&
+    isBusinessAchieved(trace) &&
+    !REPLAYABLE_ACTION_TOOLS.has(trace.toolName) &&
+    TEMPLATE_BLOCKING_UNTEMPLATED_TOOLS.has(trace.toolName)
+  );
 }
 
 function buildRecipeInput(

@@ -306,6 +306,129 @@ describe('MkeExperienceProjector', () => {
     });
   });
 
+  it('rejects successful paths with task-critical steps that are not yet templated', () => {
+    const opened = openMemoryDb({ dbPath: ':memory:' });
+    const traces = new MemoryTraceRepository(opened.db);
+    const knowledge = new KnowledgeModelRepository(opened.db);
+    const experience = new ExperienceRecipeRepository(opened.db);
+    const projector = new MkeExperienceProjector(traces, knowledge, experience);
+
+    try {
+      const readTrace = traces.append({
+        traceId: 'trace-keyboard-read',
+        taskId: 'task-keyboard-submit',
+        toolName: 'chrome_read_page',
+        requestParams: { tabId: 9 },
+        requestAt: '2026-06-06T03:30:01.000Z',
+        response: { payloadDigest: { summary: { quality: 'usable' } } },
+        responseAt: '2026-06-06T03:30:02.000Z',
+        durationMs: 1000,
+        toolSuccess: true,
+        aiFeedback: verifiedExperienceFeedback({
+          confidence: 0.93,
+          reasonCode: 'ai_verified_search_box',
+          summary: 'AI verified that the page read found the search box needed for this task.',
+        }),
+        tabId: 9,
+        siteFamily: 'example.test',
+        pageUrlPattern: 'https://example.test/search',
+        pageRole: 'search_results',
+        pageState: 'ready',
+        createdAt: '2026-06-06T03:30:02.000Z',
+      });
+      addKnowledge({
+        knowledge,
+        siteFamily: 'example.test',
+        pageModelKey: buildMkePageModelKey(readTrace)!,
+        pageRole: 'search_results',
+        pageUrlPattern: 'https://example.test/search',
+      });
+      traces.append({
+        traceId: 'trace-keyboard-fill',
+        taskId: 'task-keyboard-submit',
+        toolName: 'chrome_fill_or_select',
+        requestParams: { tabId: 9, ref: 'search-input', value: '[redacted]' },
+        requestAt: '2026-06-06T03:30:03.000Z',
+        response: { payloadDigest: { success: true } },
+        responseAt: '2026-06-06T03:30:04.000Z',
+        durationMs: 1000,
+        toolSuccess: true,
+        aiFeedback: verifiedExperienceFeedback({
+          confidence: 0.94,
+          reasonCode: 'ai_verified_query_fill',
+          summary: 'AI verified the query text was entered into the intended search field.',
+        }),
+        tabId: 9,
+        siteFamily: 'example.test',
+        pageUrlPattern: 'https://example.test/search',
+        pageRole: 'search_results',
+        pageState: 'ready',
+        createdAt: '2026-06-06T03:30:04.000Z',
+      });
+      traces.append({
+        traceId: 'trace-keyboard-enter',
+        taskId: 'task-keyboard-submit',
+        toolName: 'chrome_keyboard',
+        requestParams: { tabId: 9, key: 'Enter' },
+        requestAt: '2026-06-06T03:30:05.000Z',
+        response: { payloadDigest: { success: true } },
+        responseAt: '2026-06-06T03:30:06.000Z',
+        durationMs: 1000,
+        toolSuccess: true,
+        aiFeedback: verifiedExperienceFeedback({
+          confidence: 0.95,
+          reasonCode: 'ai_verified_keyboard_submit',
+          summary: 'AI verified that pressing Enter submitted the search query.',
+        }),
+        tabId: 9,
+        siteFamily: 'example.test',
+        pageUrlPattern: 'https://example.test/search',
+        pageRole: 'search_results',
+        pageState: 'ready',
+        createdAt: '2026-06-06T03:30:06.000Z',
+      });
+      traces.append({
+        traceId: 'trace-keyboard-collect',
+        taskId: 'task-keyboard-submit',
+        toolName: 'chrome_collect_result_cards',
+        requestParams: { tabId: 9, minResults: 10 },
+        requestAt: '2026-06-06T03:30:07.000Z',
+        response: {
+          payloadDigest: {
+            success: true,
+            observedResultCount: 10,
+            selectedDataSource: 'visible_dom_result_cards',
+          },
+        },
+        responseAt: '2026-06-06T03:30:08.000Z',
+        durationMs: 1000,
+        toolSuccess: true,
+        aiFeedback: verifiedExperienceFeedback({
+          confidence: 0.94,
+          reasonCode: 'ai_verified_result_cards',
+          summary: 'AI verified that result-card collection returned the requested card set.',
+        }),
+        tabId: 9,
+        siteFamily: 'example.test',
+        pageUrlPattern: 'https://example.test/search',
+        pageRole: 'search_results',
+        pageState: 'complete',
+        createdAt: '2026-06-06T03:30:08.000Z',
+      });
+
+      const result = projector.projectIdleBatch({ nowIso: '2026-06-06T03:30:09.000Z' });
+
+      expect(result).toMatchObject({
+        processedTraceCount: 4,
+        rejectedUnreplayableQualityTraceCount: 1,
+        savedExperienceCount: 0,
+      });
+      expect(experience.count()).toBe(0);
+    } finally {
+      opened.db.close();
+    }
+  });
+
   it('rejects a path when a task-meaningful browser sensing step is not AI-reviewed', () => {
     const opened = openMemoryDb({ dbPath: ':memory:' });
     const traces = new MemoryTraceRepository(opened.db);
