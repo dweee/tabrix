@@ -1023,8 +1023,15 @@
    */
   function traverse(el, depth, cfg, out, refMap, state) {
     const maxDepth = cfg && typeof cfg.maxDepth === 'number' ? cfg.maxDepth : MAX_DEPTH;
-    if (depth > maxDepth || !el || !el.tagName) return;
-    if (state.processed >= MAX_NODES) return;
+    if (depth > maxDepth) {
+      state.depthLimitReached = true;
+      return;
+    }
+    if (!el || !el.tagName) return;
+    if (state.processed >= MAX_NODES) {
+      state.nodeLimitReached = true;
+      return;
+    }
     if (state.visited.has(el)) return;
     state.visited.add(el);
     const include = shouldInclude(el, cfg) || depth === 0;
@@ -1072,8 +1079,9 @@
         if (disabled) line += ` disabled`;
         const cs = window.getComputedStyle(/** @type {HTMLElement} */ (el));
         if (cs && cs.pointerEvents === 'none') line += ` pe=none`;
-      } catch (_) {
-        /* ignore style issues */
+      } catch (error) {
+        state.styleProbeErrorCount = (state.styleProbeErrorCount || 0) + 1;
+        recordDiagnostic('accessibility_tree.style_state', error);
       }
       out.push(line);
       state.included++;
@@ -1096,16 +1104,26 @@
         if (matchSource) refEntry.matchSource = matchSource;
         if (actionability) refEntry.actionability = actionability;
         refMap.push(refEntry);
+      } else if (isInteractive(el) && refMap.length >= REF_MAP_LIMIT) {
+        state.refMapLimitReached = true;
       }
     }
-    if (state.processed >= MAX_NODES) return;
+    if (state.processed >= MAX_NODES) {
+      state.nodeLimitReached = true;
+      return;
+    }
     // Traverse light DOM children
     if (/** @type {HTMLElement} */ (el).children && depth < maxDepth) {
       const children = /** @type {HTMLElement} */ (el).children;
       for (let i = 0; i < children.length; i++) {
-        if (state.processed >= MAX_NODES) break;
+        if (state.processed >= MAX_NODES) {
+          state.nodeLimitReached = true;
+          break;
+        }
         traverse(children[i], include ? depth + 1 : depth, cfg, out, refMap, state);
       }
+    } else if (/** @type {HTMLElement} */ (el).children?.length > 0 && depth >= maxDepth) {
+      state.depthLimitReached = true;
     }
     // Traverse shadow DOM roots (limited by maxDepth and MAX_NODES)
     try {
@@ -1113,12 +1131,16 @@
       if (anyEl && anyEl.shadowRoot && depth < maxDepth) {
         const srChildren = anyEl.shadowRoot.children || [];
         for (let i = 0; i < srChildren.length; i++) {
-          if (state.processed >= MAX_NODES) break;
+          if (state.processed >= MAX_NODES) {
+            state.nodeLimitReached = true;
+            break;
+          }
           traverse(srChildren[i], include ? depth + 1 : depth, cfg, out, refMap, state);
         }
       }
-    } catch (_) {
-      /* ignore shadow errors */
+    } catch (error) {
+      state.shadowTraversalErrorCount = (state.shadowTraversalErrorCount || 0) + 1;
+      recordDiagnostic('accessibility_tree.shadow_traversal', error);
     }
   }
 
@@ -1142,7 +1164,16 @@
       }
 
       const refMap = [];
-      const state = { processed: 0, included: 0, visited: new WeakSet() };
+      const state = {
+        processed: 0,
+        included: 0,
+        visited: new WeakSet(),
+        nodeLimitReached: false,
+        refMapLimitReached: false,
+        depthLimitReached: false,
+        styleProbeErrorCount: 0,
+        shadowTraversalErrorCount: 0,
+      };
 
       // Determine root element (body or refId-specified element)
       let focus = null;
@@ -1193,6 +1224,19 @@
           processed: state.processed,
           included: state.included,
           durationMs: Math.round(end - start),
+          coverageStatus:
+            state.nodeLimitReached ||
+            state.refMapLimitReached ||
+            state.depthLimitReached ||
+            state.styleProbeErrorCount > 0 ||
+            state.shadowTraversalErrorCount > 0
+              ? 'partial'
+              : 'complete',
+          nodeLimitReached: state.nodeLimitReached,
+          refMapLimitReached: state.refMapLimitReached,
+          depthLimitReached: state.depthLimitReached,
+          styleProbeErrorCount: state.styleProbeErrorCount,
+          shadowTraversalErrorCount: state.shadowTraversalErrorCount,
         },
         diagnostics: Array.isArray(window[DIAGNOSTICS_KEY])
           ? window[DIAGNOSTICS_KEY].slice(-25)

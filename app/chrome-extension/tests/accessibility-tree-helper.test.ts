@@ -330,6 +330,82 @@ describe('accessibility-tree auth control map', () => {
     );
   });
 
+  it('marks object sensing as partial when shadow traversal fails', () => {
+    document.body.innerHTML = `
+      <main>
+        <button id="save">Save</button>
+        <div id="shadow-host"></div>
+      </main>
+    `;
+    Array.from(document.querySelectorAll('*')).forEach((element, index) => {
+      makeVisible(element, { left: 10, top: 10 + index * 36, width: 120, height: 28 });
+    });
+    const host = document.getElementById('shadow-host') as HTMLDivElement;
+    Object.defineProperty(host, 'shadowRoot', {
+      configurable: true,
+      get: () => {
+        throw new Error('shadow probe failed');
+      },
+    });
+
+    const result = (
+      window as Window & {
+        __generateAccessibilityTree: (
+          filter: string,
+          options: { maxDepth: number },
+        ) => {
+          pageContent: string;
+          stats: Record<string, unknown>;
+          diagnostics: Array<Record<string, unknown>>;
+        };
+      }
+    ).__generateAccessibilityTree('interactive', { maxDepth: 8 });
+
+    expect(result.pageContent).toContain('Save');
+    expect(result.stats).toMatchObject({
+      coverageStatus: 'partial',
+      shadowTraversalErrorCount: expect.any(Number),
+    });
+    expect(result.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: 'accessibility_tree.shadow_traversal',
+          message: 'shadow probe failed',
+        }),
+      ]),
+    );
+  });
+
+  it('marks object sensing as partial when max depth truncates children', () => {
+    document.body.innerHTML = `
+      <main id="root">
+        <section id="level-1">
+          <section id="level-2">
+            <button id="deep-action">Deep action</button>
+          </section>
+        </section>
+      </main>
+    `;
+    Array.from(document.querySelectorAll('*')).forEach((element, index) => {
+      makeVisible(element, { left: 10, top: 10 + index * 36, width: 160, height: 28 });
+    });
+
+    const result = (
+      window as Window & {
+        __generateAccessibilityTree: (
+          filter: string,
+          options: { maxDepth: number },
+        ) => { pageContent: string; stats: Record<string, unknown> };
+      }
+    ).__generateAccessibilityTree('interactive', { maxDepth: 1 });
+
+    expect(result.pageContent).not.toContain('Deep action');
+    expect(result.stats).toMatchObject({
+      coverageStatus: 'partial',
+      depthLimitReached: true,
+    });
+  });
+
   it('recovers generic dynamic surface text targets as actionable refs', () => {
     document.body.innerHTML = `
       <main>
