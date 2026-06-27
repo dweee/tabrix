@@ -1441,6 +1441,18 @@ export interface ReadPageActionableTargetSummary {
   targetRef?: string | null;
   ref?: string | null;
   sourceProvenance: ReadPageObjectSnapshotSourceProvenance;
+  sourceProvenanceDetail?: ReadPageObjectSnapshotSourceProvenance[];
+  locatorChain?: ReadPageCandidateActionLocator[];
+  intent?: ReadPageCandidateActionIntent;
+  intentBoundary?: string;
+  matchReason?: string;
+  actionability?: ReadPageCandidateAction['actionability'];
+  actionabilityReason?: string;
+  visibility?: ReadPageTargetVisibility;
+  nextRequiredTool?: string;
+  nextRequiredSelector?: string;
+  nextRequiredSelectorSource?: string;
+  nextRequiredCheck?: string;
   freshness: ReadPageObjectSnapshotFreshness;
 }
 

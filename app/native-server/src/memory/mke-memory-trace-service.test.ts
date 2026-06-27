@@ -1939,9 +1939,24 @@ describe('MkeMemoryTraceService', () => {
                 targetRef,
                 actionType: 'input',
                 label: 'Search',
-                actionability: true,
+                actionability: 'actionable',
+                actionabilityReason: 'visible input is enabled',
                 intent: 'search.enter_query',
+                intentBoundary: 'Search input only; submit separately.',
                 matchReason: 'visible_search_input',
+                visibility: {
+                  source: 'mixed',
+                  domVisible: true,
+                  inViewport: true,
+                  centerHitTarget: true,
+                  occluded: false,
+                  reason: 'dom_and_cdp_box_model',
+                },
+                nextRequiredTool: 'chrome_keyboard',
+                nextRequiredSelector: 'input[aria-label="Search"]',
+                nextRequiredSelectorSource: 'candidate_action_locator',
+                nextRequiredCheck: 'Search query should be visible before submitting.',
+                sourceProvenanceDetail: ['dom', 'cdp', 'ax'],
                 locatorChain: [
                   { type: 'ref', value: targetRef },
                   { type: 'css', value: 'input[aria-label="Search"]' },
@@ -1970,11 +1985,37 @@ describe('MkeMemoryTraceService', () => {
         targetRef: 'ref_search_input_b',
         identityKey:
           'input:search.enter_query:Search:visible_search_input:css=input[aria-label="Search"]',
+        actionTarget: {
+          targetRef: 'ref_search_input_b',
+          locatorChain: [
+            { type: 'ref', value: 'ref_search_input_b' },
+            { type: 'css', value: 'input[aria-label="Search"]' },
+          ],
+          nextRequiredTool: 'chrome_keyboard',
+          nextRequiredSelector: 'input[aria-label="Search"]',
+          nextRequiredSelectorSource: 'candidate_action_locator',
+          nextRequiredCheck: 'Search query should be visible before submitting.',
+        },
+        execution: {
+          actionability: 'actionable',
+          actionabilityReason: 'visible input is enabled',
+          visibility: {
+            source: 'mixed',
+            domVisible: true,
+            inViewport: true,
+            centerHitTarget: true,
+            occluded: false,
+          },
+        },
       });
       expect(actionTargets[0]?.facts).toMatchObject({
         intent: 'search.enter_query',
         label: 'Search',
         stableLocatorChain: ['css=input[aria-label="Search"]'],
+        sourceProvenance: ['dom', 'cdp', 'ax'],
+        expectedResult: 'Search query should be visible before submitting.',
+        actionability: 'actionable',
+        actionabilityReason: 'visible input is enabled',
       });
       expect(actionTargets[0]?.sourceTraceIds).toHaveLength(2);
     } finally {

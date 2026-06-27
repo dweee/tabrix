@@ -139,6 +139,40 @@ function collectSourceProvenance(params: {
   return [...sources];
 }
 
+function collectActionSourceProvenance(
+  action: CandidateActionSeed,
+): ReadPageObjectSnapshot['sourceProvenance'] {
+  const sources = new Set<ReadPageObjectSnapshot['sourceProvenance'][number]>();
+  const locatorTypes = new Set(
+    (action.locatorChain ?? [])
+      .map((locator) => String(locator.type || '').toLowerCase())
+      .filter(Boolean),
+  );
+  if (locatorTypes.has('css') || locatorTypes.has('xpath') || locatorTypes.has('ref')) {
+    sources.add('dom');
+  }
+  if (
+    locatorTypes.has('aria') ||
+    String(action.matchReason || '')
+      .toLowerCase()
+      .includes('ax')
+  ) {
+    sources.add('ax');
+  }
+  const visibilitySource = String(action.visibility?.source || '').toLowerCase();
+  if (visibilitySource === 'cdp' || visibilitySource === 'mixed') sources.add('cdp');
+  if (visibilitySource === 'dom' || visibilitySource === 'mixed') sources.add('dom');
+  if (
+    String(action.matchReason || '')
+      .toLowerCase()
+      .includes('visible')
+  ) {
+    sources.add('visible_text');
+  }
+  if (sources.size === 0) sources.add('unknown');
+  return [...sources];
+}
+
 export function buildReadPageSnapshotSourceStats(params: {
   tabId: number;
   currentUrl: string;
@@ -233,6 +267,7 @@ export function buildReadPageSnapshotSourceStats(params: {
   }
   const actionableTargets: ReadPageActionableTargetSummary[] = actionList.map((action) => {
     const targetRef = typeof action.targetRef === 'string' ? action.targetRef.trim() : '';
+    const sourceProvenanceDetail = collectActionSourceProvenance(action);
     return {
       targetId:
         action.id ??
@@ -241,7 +276,19 @@ export function buildReadPageSnapshotSourceStats(params: {
       kind: (action.actionType || 'click') as ReadPageActionableTargetSummary['kind'],
       targetRef: action.targetRef,
       ref: action.targetRef,
-      sourceProvenance: action.locatorChain?.length ? 'dom' : 'unknown',
+      sourceProvenance: sourceProvenanceDetail[0] ?? 'unknown',
+      sourceProvenanceDetail,
+      locatorChain: action.locatorChain,
+      intent: action.intent,
+      intentBoundary: action.intentBoundary,
+      matchReason: action.matchReason,
+      actionability: action.actionability,
+      actionabilityReason: action.actionabilityReason,
+      visibility: action.visibility,
+      nextRequiredTool: action.nextRequiredTool,
+      nextRequiredSelector: action.nextRequiredSelector,
+      nextRequiredSelectorSource: action.nextRequiredSelectorSource,
+      nextRequiredCheck: action.nextRequiredCheck,
       freshness: 'fresh',
       objectId: objectIdByRef.get(targetRef) ?? null,
     };
