@@ -754,7 +754,7 @@ function formatAiBusinessStatus(trace: MkeMemoryTraceSummary): string {
   const feedbackStatus = formatAiBusinessStatusValue(value);
   if (feedbackStatus) return feedbackStatus;
   if (trace.aiFeedbackState === 'pending' || trace.aiFeedbackRequired === true) return '待AI评价';
-  return '已记录';
+  return '无需AI评价';
 }
 
 function formatAiBusinessStatusValue(value: string | null | undefined): string | null {

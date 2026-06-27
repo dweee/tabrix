@@ -166,7 +166,7 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain("return '待AI评价'");
     expect(tabSource).toContain("trace.aiFeedbackState === 'pending'");
     expect(tabSource).toContain('trace.aiFeedbackRequired === true');
-    expect(tabSource).toContain("return '已记录'");
+    expect(tabSource).toContain("return '无需AI评价'");
     expect(tabSource).not.toContain("return '业务通过'");
     expect(tabSource).not.toContain("return '待AI回写'");
   });
