@@ -71,7 +71,6 @@ import {
 import { buildReadPageWarningResult } from './read-page-warning-result';
 import { buildReadPageSkipResult } from './read-page-skip-result';
 import {
-  buildReadPageContextMeasurement,
   evaluateReadPageTargetBinding,
   shouldPreferVisibleRowsForMarkdownAiContext,
   shouldRecordDomRegionRowsReadback,
@@ -116,6 +115,7 @@ import {
 import { attachObjectLibraryHintsToReadPageResult } from './read-page-object-library-hints';
 import { attachAiFacingDeltaContext } from './read-page-ai-facing-delta-context';
 import { attachAiFacingOwnershipRuntime } from './read-page-ai-facing-ownership-context';
+import { recordSuccessfulReadPageCall } from './read-page-success-recorder';
 import { maybeRunAutoTaskFreshReadbackBeforeImpact } from './mcp-auto-fresh-readback';
 import { ensureStructuredLegacyActionResult } from './mcp-legacy-action-result';
 import {
@@ -989,27 +989,6 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
           });
         }
       }
-      const recordSuccessfulReadPage = (
-        source: 'unknown' | 'dom_region_rows',
-        targetRefs?: ReadonlyArray<string> | null,
-      ): void => {
-        if (readPageRecorded || name !== 'chrome_read_page' || !taskContext) return;
-        if (postResult.rawResult.isError === true) return;
-        const requestedLayer =
-          forcedReadPageLayer ?? extractRequestedLayer(args) ?? READ_PAGE_DEFAULT_LAYER;
-        const readPageRequestKey = buildReadPageRequestKey(args, requestedLayer);
-        taskContext.noteReadPage({
-          layer: requestedLayer,
-          source,
-          requestKey: readPageRequestKey,
-          targetRefs,
-          contextMeasurement: buildReadPageContextMeasurement(
-            readJsonObjectFromCallToolResult(postResult.rawResult),
-            requestedLayer,
-          ),
-        });
-        readPageRecorded = true;
-      };
       if (name === 'chrome_read_page' && taskContext && rawResultWithEvidence.isError !== true) {
         const readPagePayload = readJsonObjectFromCallToolResult(rawResultWithEvidence);
         const visibleRows =
@@ -1043,12 +1022,18 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
             readPageRenderMode !== 'markdown' &&
             routerDecision.selectedDataSource === 'dom_region_rows'
           ) {
-            recordSuccessfulReadPage(
-              'dom_region_rows',
-              visibleRows.rows
+            readPageRecorded = recordSuccessfulReadPageCall({
+              alreadyRecorded: readPageRecorded,
+              toolName: name,
+              taskContext,
+              rawResult: postResult.rawResult,
+              args,
+              forcedReadPageLayer,
+              source: 'dom_region_rows',
+              targetRefs: visibleRows.rows
                 .map((row) => row.targetRef)
                 .filter((ref): ref is string => typeof ref === 'string' && ref.length > 0),
-            );
+            });
             const layerContract = mapDataSourceToLayerContract({
               dataSource: 'dom_region_rows',
               requestedLayer,
@@ -1162,7 +1147,15 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
       // bridge-confirmed reads (failed reads do NOT consume the budget).
       // dom_region_rows may replace the payload, but it is still one
       // bridge-confirmed read_page call.
-      recordSuccessfulReadPage('unknown');
+      readPageRecorded = recordSuccessfulReadPageCall({
+        alreadyRecorded: readPageRecorded,
+        toolName: name,
+        taskContext,
+        rawResult: postResult.rawResult,
+        args,
+        forcedReadPageLayer,
+        source: 'unknown',
+      });
       if (name === 'chrome_close_tabs' && taskContext && rawResultWithEvidence.isError !== true) {
         const closedTabIds = extractClosedTabIdsFromCallToolResult(rawResultWithEvidence);
         const invalidTabIds = extractInvalidTabIdsFromCallToolResult(rawResultWithEvidence);
