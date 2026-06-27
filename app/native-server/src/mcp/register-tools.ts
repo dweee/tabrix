@@ -26,7 +26,6 @@ import { readApiKnowledgeEndpointPlan } from '../api/api-knowledge';
 import { mapDataSourceToLayerContract } from '../execution/layer-contract';
 import { routeDataSource } from '../execution/data-source-router';
 import { runPostProcessor } from './tool-post-processors';
-import { getNativeToolHandler } from './native-tool-handlers';
 import {
   callWithBridgeRecovery,
   getBridgeSnapshot,
@@ -104,7 +103,7 @@ import {
   mergeReadPagePayloadMetadata,
   readJsonObjectFromCallToolResult,
 } from './register-tool-result-json';
-import { summarizeNativeToolErrorResult } from './tool-result-summary';
+import { dispatchNativeToolIfAvailable } from './native-tool-dispatch';
 import {
   buildReadPageRequestKey,
   extractReadPageRenderMode,
@@ -319,63 +318,18 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
       taskContextKeySource: externalTaskKeyEarly ? 'external_task_key' : 'internal_task_id',
     };
 
-    // Native-handled tools short-circuit the extension round-trip — see
-    // `mcp/native-tool-handlers.ts`.
-    const nativeHandler = getNativeToolHandler(name);
-    if (nativeHandler) {
-      const nativeResult = await nativeHandler(args, {
-        sessionManager,
-        // Carries the `TaskSessionContext` the `tabrix_choose_context`
-        // handler writes into via `noteChooseContextDecision`. `null`
-        // for tools outside the auto-key set when there is no live
-        // external context.
-        taskContext: taskContextEarly,
-      });
-      if (nativeResult.isError) {
-        const errorSummary = summarizeNativeToolErrorResult(
-          nativeResult,
-          `Native tool ${name} failed`,
-        );
-        finishToolCallLifecycle({
-          sessionManager,
-          sessionId: session.sessionId,
-          stepId: step.stepId,
-          step: {
-            status: 'failed',
-            errorCode: 'native_tool_error',
-            errorSummary,
-            resultSummary: `Native tool ${name} failed`,
-          },
-          session: {
-            status: 'failed',
-            summary: `Native tool ${name} failed`,
-          },
-        });
-        return recordAndAttachMkeMemoryTrace(nativeResult, {
-          requestParams: args,
-          resultSummary: `Native tool ${name} failed`,
-          errorCode: 'native_tool_error',
-          browserContextKey: taskContextAttachment.taskContextKey,
-        });
-      }
-      finishToolCallLifecycle({
-        sessionManager,
-        sessionId: session.sessionId,
-        stepId: step.stepId,
-        step: {
-          status: 'completed',
-          resultSummary: `Native tool ${name} completed`,
-        },
-        session: {
-          status: 'completed',
-          summary: `Native tool ${name} completed`,
-        },
-      });
-      return recordAndAttachMkeMemoryTrace(nativeResult, {
-        requestParams: args,
-        resultSummary: `Native tool ${name} completed`,
-        browserContextKey: taskContextAttachment.taskContextKey,
-      });
+    const nativeDispatch = await dispatchNativeToolIfAvailable({
+      name,
+      args,
+      sessionManager,
+      taskContext: taskContextEarly,
+      taskContextAttachment,
+      session,
+      step,
+      recordAndAttachMkeMemoryTrace,
+    });
+    if (nativeDispatch.handled) {
+      return nativeDispatch.result;
     }
 
     // Primary Tab Controller hook. When
