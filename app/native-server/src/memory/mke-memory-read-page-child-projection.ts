@@ -19,6 +19,24 @@ import {
   readString,
 } from './mke-memory-value-readers';
 
+const REUSABLE_OBJECT_SOURCE_PROVENANCE = new Set(['dom', 'ax', 'cdp', 'visible_text', 'api']);
+
+function normalizeReusableObjectSourceProvenance(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toLowerCase();
+  return REUSABLE_OBJECT_SOURCE_PROVENANCE.has(normalized) ? normalized : null;
+}
+
+function reusableObjectSourceProvenance(values: unknown[]): string[] {
+  return [
+    ...new Set(
+      values
+        .map(normalizeReusableObjectSourceProvenance)
+        .filter((entry): entry is string => Boolean(entry)),
+    ),
+  ].slice(0, 8);
+}
+
 export function recordReadPageRegionAndActionObjects(input: {
   trace: MemoryTrace;
   payload: Record<string, unknown>;
@@ -156,7 +174,7 @@ export function recordReadPageRegionAndActionObjects(input: {
             containerKind: readString(child.containerKind),
             role: readString(child.role),
             label: readString(child.label),
-            sourceProvenance: readArray(child.sourceProvenance),
+            sourceProvenance: reusableObjectSourceProvenance(readArray(child.sourceProvenance)),
             reason: readString(child.reason),
           },
           'browser_object',
@@ -241,11 +259,11 @@ export function recordReadPageRegionAndActionObjects(input: {
           intent: readString(action.intent),
           label: readString(action.label, action.text, action.accessibleName, action.name),
           stableLocatorChain: normalizeStableLocatorChain(action.locatorChain),
-          sourceProvenance: readArray(action.sourceProvenanceDetail).length
-            ? readArray(action.sourceProvenanceDetail)
-            : [readString(action.sourceProvenance)].filter((source): source is string =>
-                Boolean(source),
-              ),
+          sourceProvenance: reusableObjectSourceProvenance(
+            readArray(action.sourceProvenanceDetail).length
+              ? readArray(action.sourceProvenanceDetail)
+              : [readString(action.sourceProvenance)],
+          ),
           expectedResult: readString(action.nextRequiredCheck),
           matchReason: readString(action.matchReason),
           actionability: readString(action.actionability),
