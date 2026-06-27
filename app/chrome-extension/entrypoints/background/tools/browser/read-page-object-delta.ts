@@ -526,6 +526,10 @@ export function buildReadPagePageDeltaReport(params: {
           ? ['access_state']
           : ['read_page_object_snapshot'],
     changedObjects: objectDelta,
+    navigationSignals: {
+      beforeUrl: previous.pageUrl,
+      afterUrl: params.currentSnapshot.pageUrl,
+    },
     ...(typeof requestStartedDelta === 'number'
       ? {
           networkSignals: {

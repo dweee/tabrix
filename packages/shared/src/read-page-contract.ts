@@ -1507,6 +1507,10 @@ export interface ReadPagePageDeltaReport {
   deltaKind: ReadPagePageDeltaKind;
   changedRegions: string[];
   changedObjects: string[];
+  navigationSignals?: {
+    beforeUrl?: string | null;
+    afterUrl?: string | null;
+  };
   networkSignals?: {
     requestStartedDelta?: number | null;
     failedRequestDelta?: number | null;

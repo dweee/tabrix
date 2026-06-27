@@ -150,6 +150,42 @@ describe('derivePostActionDeltaEvidenceFromReadPageDelta', () => {
       expect(evidence.focusDelta.status).toBe('unknown');
     });
 
+    it('maps read-page URL signals into observed navigationDelta', () => {
+      const evidence = derivePostActionDeltaEvidenceFromReadPageDelta(
+        makeReport({
+          deltaKind: 'url_changed',
+          navigationSignals: {
+            beforeUrl: 'https://example.test/search?q=old',
+            afterUrl: 'https://example.test/search?q=new',
+          },
+        }),
+      );
+
+      expect(evidence.navigationDelta).toEqual({
+        status: 'observed',
+        beforeUrl: 'https://example.test/search?q=old',
+        afterUrl: 'https://example.test/search?q=new',
+      });
+    });
+
+    it('maps unchanged read-page URL signals into not_observed navigationDelta', () => {
+      const evidence = derivePostActionDeltaEvidenceFromReadPageDelta(
+        makeReport({
+          deltaKind: 'no_useful_change',
+          navigationSignals: {
+            beforeUrl: 'https://example.test/search?q=same',
+            afterUrl: 'https://example.test/search?q=same',
+          },
+        }),
+      );
+
+      expect(evidence.navigationDelta).toEqual({
+        status: 'not_observed',
+        beforeUrl: 'https://example.test/search?q=same',
+        afterUrl: 'https://example.test/search?q=same',
+      });
+    });
+
     it('sets evidenceBoundary to source level (not real_browser)', () => {
       const evidence = derivePostActionDeltaEvidenceFromReadPageDelta(makeReport());
       expect(evidence.evidenceBoundary).toEqual({

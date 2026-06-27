@@ -339,6 +339,29 @@ describe('read_page object snapshot and delta', () => {
     });
   });
 
+  it('carries before and after URL signals when the page URL changes', () => {
+    const report = buildReadPagePageDeltaReport({
+      tabId: 100,
+      previousSnapshot: snapshot({
+        snapshotId: 'before',
+        pageUrl: 'https://example.test/search?q=old',
+      }),
+      currentSnapshot: snapshot({
+        snapshotId: 'after',
+        pageUrl: 'https://example.test/search?q=new',
+      }),
+    });
+
+    expect(report).toMatchObject({
+      deltaKind: 'url_changed',
+      recommendation: 'proceed',
+      navigationSignals: {
+        beforeUrl: 'https://example.test/search?q=old',
+        afterUrl: 'https://example.test/search?q=new',
+      },
+    });
+  });
+
   it('returns restricted when the current snapshot is an unsupported browser surface', () => {
     const report = buildReadPagePageDeltaReport({
       tabId: 100,

@@ -925,6 +925,12 @@ export function derivePostActionDeltaEvidenceFromReadPageDelta(
 
   const networkStatus: PostActionDeltaSignalStatus =
     report.networkSignals?.requestStartedDelta != null ? 'observed' : 'not_checked';
+  const navigationStatus: PostActionDeltaSignalStatus =
+    report.navigationSignals?.beforeUrl && report.navigationSignals?.afterUrl
+      ? report.navigationSignals.beforeUrl !== report.navigationSignals.afterUrl
+        ? 'observed'
+        : 'not_observed'
+      : 'unknown';
 
   return {
     watchId: `watch:${report.afterSnapshotId}`,
@@ -941,9 +947,9 @@ export function derivePostActionDeltaEvidenceFromReadPageDelta(
     invalidatedRefs: [],
     refreshedRefs: [],
     navigationDelta: {
-      status: 'unknown',
-      beforeUrl: null,
-      afterUrl: null,
+      status: navigationStatus,
+      beforeUrl: report.navigationSignals?.beforeUrl ?? null,
+      afterUrl: report.navigationSignals?.afterUrl ?? null,
     },
     focusDelta: {
       status: 'unknown',
