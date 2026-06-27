@@ -38,9 +38,7 @@ import {
 } from './tool-call-results';
 import { logger } from '../logging/logger';
 import {
-  extractClosedTabIdsFromCallToolResult,
   extractCreatedTabForUrlFromCallToolResult,
-  extractInvalidTabIdsFromCallToolResult,
   extractTabIdFromCallToolResult,
   extractRequestedLayer,
   READ_PAGE_DEFAULT_LAYER,
@@ -108,10 +106,7 @@ import {
   extractReadPageRenderMode,
   shouldIncludeVerboseReadPageContext,
 } from './read-page-request-shape';
-import {
-  buildAutoTabTaskContextKey,
-  extractVisibleRegionRowsDataFromPayload,
-} from './read-page-visible-region-rows';
+import { extractVisibleRegionRowsDataFromPayload } from './read-page-visible-region-rows';
 import { attachObjectLibraryHintsToReadPageResult } from './read-page-object-library-hints';
 import { attachAiFacingDeltaContext } from './read-page-ai-facing-delta-context';
 import { attachAiFacingOwnershipRuntime } from './read-page-ai-facing-ownership-context';
@@ -119,7 +114,6 @@ import { recordSuccessfulReadPageCall } from './read-page-success-recorder';
 import { maybeRunAutoTaskFreshReadbackBeforeImpact } from './mcp-auto-fresh-readback';
 import { ensureStructuredLegacyActionResult } from './mcp-legacy-action-result';
 import {
-  maybeRecordCloseTabsSuccessLifecycleArtifact,
   maybeRecordReadPageFailureLifecycleArtifact,
   maybeRecordStructuredReadGateLifecycleArtifact,
 } from './mcp-tool-lifecycle-artifacts';
@@ -131,7 +125,6 @@ import {
   readNonNegativeInteger,
   readNullableBoolean,
   readNumber,
-  readNumericArray,
   readObject,
   readPositiveInteger,
   readSafeReuseRecord,
@@ -140,10 +133,10 @@ import {
   readUnknownArray,
 } from './register-tool-value-readers';
 import {
-  recordPrimaryTabCleanupOutcome,
   recordPrimaryTabNavigationOutcome,
   resolvePrimaryTabOutgoingArgs,
 } from './primary-tab-outgoing-args';
+import { recordCloseTabsSuccessPostprocess } from './close-tabs-postprocess';
 import { bridgeRuntimeState } from '../server/bridge-state';
 import { bridgeCommandChannel } from '../server/bridge-command-channel';
 import { getDefaultPrimaryTabController } from '../runtime/primary-tab-controller';
@@ -1157,27 +1150,12 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
         source: 'unknown',
       });
       if (name === 'chrome_close_tabs' && taskContext && rawResultWithEvidence.isError !== true) {
-        const closedTabIds = extractClosedTabIdsFromCallToolResult(rawResultWithEvidence);
-        const invalidTabIds = extractInvalidTabIdsFromCallToolResult(rawResultWithEvidence);
-        recordPrimaryTabCleanupOutcome({ closedTabIds, primaryTabController });
-        for (const closedTabId of closedTabIds) {
-          taskContext.releaseRunOwnedTab(closedTabId);
-          sessionManager.releaseExternalTaskContext(buildAutoTabTaskContextKey(closedTabId));
-        }
-        for (const invalidTabId of invalidTabIds) {
-          taskContext.releaseRunOwnedTab(invalidTabId);
-          sessionManager.releaseExternalTaskContext(buildAutoTabTaskContextKey(invalidTabId));
-        }
-        taskContext.noteCleanup({
-          action: 'chrome_close_tabs',
-          targetIds: readNumericArray(args, 'tabIds'),
-        });
-        maybeRecordCloseTabsSuccessLifecycleArtifact({
+        recordCloseTabsSuccessPostprocess({
           args,
           result: rawResultWithEvidence,
-          closedTabIds,
-          invalidTabIds,
           taskContext,
+          sessionManager,
+          primaryTabController,
           startedAtMs: toolCallStartedAtMs,
           endedAtMs: Date.now(),
         });
