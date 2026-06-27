@@ -414,25 +414,32 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
           liveObserved,
           taskTotals: totals,
         });
-        sessionManager.completeStep(session.sessionId, step.stepId, {
-          status: 'completed',
-          resultSummary: 'chrome_read_page fulfilled via current-task observed API data',
-          operationLog,
-        });
-        sessionManager.finishSession(session.sessionId, {
-          status: 'completed',
-          summary: 'chrome_read_page fulfilled via current-task observed API data',
-        });
         const finalApiCallResult = shouldIncludeVerboseReadPageContext(
           args,
           extractRequestedLayer(args) ?? READ_PAGE_DEFAULT_LAYER,
         )
           ? apiCallResult
           : stripReadPageDiagnosticNoiseFromJsonResult(apiCallResult);
-        return recordAndAttachMkeMemoryTrace(finalApiCallResult, {
-          requestParams: outgoingArgs,
-          resultSummary: 'chrome_read_page fulfilled via current-task observed API data',
-          browserContextKey: taskContextAttachment.taskContextKey,
+        return finishAndRecordToolCallResult({
+          sessionManager,
+          sessionId: session.sessionId,
+          stepId: step.stepId,
+          step: {
+            status: 'completed',
+            resultSummary: 'chrome_read_page fulfilled via current-task observed API data',
+            operationLog,
+          },
+          session: {
+            status: 'completed',
+            summary: 'chrome_read_page fulfilled via current-task observed API data',
+          },
+          result: finalApiCallResult,
+          recordTrace: recordAndAttachMkeMemoryTrace,
+          trace: {
+            requestParams: outgoingArgs,
+            resultSummary: 'chrome_read_page fulfilled via current-task observed API data',
+            browserContextKey: taskContextAttachment.taskContextKey,
+          },
         });
       }
       const liveObservedEvidence = taskContext.peekLiveObservedApiEvidence();
@@ -535,19 +542,27 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
                 endpointSource: cachedDirect?.endpointSource ?? 'observed',
                 taskTotals: totals,
               });
-              sessionManager.completeStep(session.sessionId, step.stepId, {
-                status: 'completed',
-                resultSummary: `chrome_read_page fulfilled via ${skipPlan.sourceKind} (saved ~${tokenSavings.tokensSavedEstimate} tok)`,
-                operationLog,
-              });
-              sessionManager.finishSession(session.sessionId, {
-                status: 'completed',
-                summary: `chrome_read_page fulfilled via ${skipPlan.sourceKind}`,
-              });
-              return recordAndAttachMkeMemoryTrace(apiCallResult, {
-                requestParams: outgoingArgs,
-                resultSummary: `chrome_read_page fulfilled via ${skipPlan.sourceKind} (saved ~${tokenSavings.tokensSavedEstimate} tok)`,
-                browserContextKey: taskContextAttachment.taskContextKey,
+              const resultSummary = `chrome_read_page fulfilled via ${skipPlan.sourceKind} (saved ~${tokenSavings.tokensSavedEstimate} tok)`;
+              return finishAndRecordToolCallResult({
+                sessionManager,
+                sessionId: session.sessionId,
+                stepId: step.stepId,
+                step: {
+                  status: 'completed',
+                  resultSummary,
+                  operationLog,
+                },
+                session: {
+                  status: 'completed',
+                  summary: `chrome_read_page fulfilled via ${skipPlan.sourceKind}`,
+                },
+                result: apiCallResult,
+                recordTrace: recordAndAttachMkeMemoryTrace,
+                trace: {
+                  requestParams: outgoingArgs,
+                  resultSummary,
+                  browserContextKey: taskContextAttachment.taskContextKey,
+                },
               });
             }
             const fallbackCause = normalizeApiFallbackCause(apiResult.reason);
@@ -584,19 +599,27 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
               skipPlan,
               taskTotals: totals,
             });
-            sessionManager.completeStep(session.sessionId, step.stepId, {
-              status: 'completed',
-              resultSummary: `chrome_read_page skipped via ${skipPlan.sourceKind} (saved ~${skipPlan.tokensSavedEstimate} tok)`,
-              operationLog,
-            });
-            sessionManager.finishSession(session.sessionId, {
-              status: 'completed',
-              summary: `chrome_read_page skipped via ${skipPlan.sourceKind}`,
-            });
-            return recordAndAttachMkeMemoryTrace(skipResult, {
-              requestParams: outgoingArgs,
-              resultSummary: `chrome_read_page skipped via ${skipPlan.sourceKind} (saved ~${skipPlan.tokensSavedEstimate} tok)`,
-              browserContextKey: taskContextAttachment.taskContextKey,
+            const resultSummary = `chrome_read_page skipped via ${skipPlan.sourceKind} (saved ~${skipPlan.tokensSavedEstimate} tok)`;
+            return finishAndRecordToolCallResult({
+              sessionManager,
+              sessionId: session.sessionId,
+              stepId: step.stepId,
+              step: {
+                status: 'completed',
+                resultSummary,
+                operationLog,
+              },
+              session: {
+                status: 'completed',
+                summary: `chrome_read_page skipped via ${skipPlan.sourceKind}`,
+              },
+              result: skipResult,
+              recordTrace: recordAndAttachMkeMemoryTrace,
+              trace: {
+                requestParams: outgoingArgs,
+                resultSummary,
+                browserContextKey: taskContextAttachment.taskContextKey,
+              },
             });
           }
         }
