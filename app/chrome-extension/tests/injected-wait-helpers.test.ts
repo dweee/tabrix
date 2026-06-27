@@ -202,6 +202,44 @@ describe('injected state-driven waits', () => {
     );
   });
 
+  it('wait helper does not treat text visibility probe failures as disappearance', async () => {
+    document.body.innerHTML = '<div id="status">处理中</div>';
+    const status = document.getElementById('status') as HTMLDivElement;
+    setRect(status, { left: 20, top: 20, width: 96, height: 32 });
+    const originalGetComputedStyle = window.getComputedStyle;
+    window.getComputedStyle = vi.fn((element: Element) => {
+      if (element === status) {
+        throw new Error('style probe failed');
+      }
+      return originalGetComputedStyle.call(window, element);
+    }) as typeof window.getComputedStyle;
+
+    const listener = installInjectedHelper(
+      'inject-scripts/wait-helper.js',
+      '__WAIT_HELPER_INITIALIZED__',
+    );
+    try {
+      const response = await sendRequest(listener, {
+        action: 'waitForText',
+        text: '处理中',
+        appear: false,
+        timeout: 10,
+      });
+
+      expect(response.success).toBe(false);
+      expect(response.reason).toBe('timeout');
+      expect(response.diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            source: 'visibility_check_failed',
+          }),
+        ]),
+      );
+    } finally {
+      window.getComputedStyle = originalGetComputedStyle;
+    }
+  });
+
   it('keyboard focus readiness returns immediately once focus is observable', async () => {
     document.body.innerHTML = '<input id="name" type="text" />';
     const input = document.getElementById('name') as HTMLInputElement;

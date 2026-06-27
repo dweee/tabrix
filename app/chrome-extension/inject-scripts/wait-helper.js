@@ -20,7 +20,7 @@
     diagnostics.push({ source, message: describeError(error) });
   }
 
-  function isVisible(el) {
+  function isVisible(el, diagnostics) {
     try {
       if (!(el instanceof Element)) return false;
       const style = getComputedStyle(el);
@@ -29,7 +29,8 @@
       const rect = el.getBoundingClientRect();
       if (rect.width <= 0 || rect.height <= 0) return false;
       return true;
-    } catch {
+    } catch (error) {
+      recordDiagnostic(diagnostics, 'visibility_check_failed', error);
       return false;
     }
   }
@@ -41,26 +42,30 @@
       .toLowerCase();
   }
 
-  function matchesText(el, needle, diagnostics) {
+  function candidateHasText(el, needle) {
     const t = normalize(needle);
     if (!t) return false;
+    const aria = el.getAttribute('aria-label');
+    if (aria && normalize(aria).includes(t)) return true;
+    const title = el.getAttribute('title');
+    if (title && normalize(title).includes(t)) return true;
+    const alt = el.getAttribute('alt');
+    if (alt && normalize(alt).includes(t)) return true;
+    const placeholder = el.getAttribute('placeholder');
+    if (placeholder && normalize(placeholder).includes(t)) return true;
+    // input/textarea value
+    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+      const value = el.value || el.getAttribute('value');
+      if (value && normalize(value).includes(t)) return true;
+    }
+    const text = el.innerText || el.textContent || '';
+    return normalize(text).includes(t);
+  }
+
+  function matchesText(el, needle, diagnostics) {
     try {
-      if (!isVisible(el)) return false;
-      const aria = el.getAttribute('aria-label');
-      if (aria && normalize(aria).includes(t)) return true;
-      const title = el.getAttribute('title');
-      if (title && normalize(title).includes(t)) return true;
-      const alt = el.getAttribute('alt');
-      if (alt && normalize(alt).includes(t)) return true;
-      const placeholder = el.getAttribute('placeholder');
-      if (placeholder && normalize(placeholder).includes(t)) return true;
-      // input/textarea value
-      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
-        const value = el.value || el.getAttribute('value');
-        if (value && normalize(value).includes(t)) return true;
-      }
-      const text = el.innerText || el.textContent || '';
-      if (normalize(text).includes(t)) return true;
+      if (!candidateHasText(el, needle)) return false;
+      return isVisible(el, diagnostics);
     } catch (error) {
       recordDiagnostic(diagnostics, 'matches_text_failed', error);
     }
@@ -122,7 +127,14 @@
             }
           } else {
             // wait for disappearance
-            if (!match) {
+            const hasInconclusiveTextProbe = diagnostics.some(
+              (entry) =>
+                entry &&
+                (entry.source === 'visibility_check_failed' ||
+                  entry.source === 'matches_text_failed' ||
+                  entry.source === 'wait_for_text_check_failed'),
+            );
+            if (!match && !hasInconclusiveTextProbe) {
               done({ success: true, matched: null, tookMs: Date.now() - start });
             }
           }
