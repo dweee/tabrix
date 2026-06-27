@@ -88,6 +88,7 @@ export type SkipReadFallbackUsed = 'none' | 'dom_compact' | 'dom_full';
 export type SkipReadFallbackCause =
   | ''
   | 'api_layer_not_available'
+  | 'current_page_validation_required'
   | 'budget_exhausted'
   | 'experience_reuse_fallback_to_read_page'
   | 'unknown_source_route';
@@ -125,6 +126,16 @@ export interface ChooseContextDecisionSnapshot {
     dataPurpose?: string;
     /** Redacted request params for the internal reader. */
     params?: Record<string, string>;
+  } | null;
+  /**
+   * Current-page validation captured when choose_context recorded this
+   * decision. Historical Knowledge/Experience can guide planning, but only
+   * a fresh current page snapshot may authorize a skip-read path.
+   */
+  currentPageValidation?: {
+    factSnapshotVerdict: 'fresh' | 'stale' | 'missing' | 'unknown';
+    readinessVerdict: 'ready' | 'document_loading' | 'empty' | 'error_or_blocked' | 'unknown';
+    source: string;
   } | null;
   chosenSource?: DataSourceRouterChosenSource;
   dataSource?: DataSourceRouterChosenSource;
@@ -423,6 +434,23 @@ function planKnowledgeBacked(
       executionMode,
     };
   }
+
+  if (!hasFreshCurrentPageValidation(decision)) {
+    return {
+      action: 'fallback_required',
+      readPageAvoided: false,
+      sourceKind: 'dom_json',
+      sourceRoute: decision.sourceRoute,
+      tokensSavedEstimate: 0,
+      fallbackUsed: 'dom_compact',
+      fallbackEntryLayer,
+      fallbackCause: 'current_page_validation_required',
+      requiresApiCall: false,
+      diagnostic:
+        'fallback_required: knowledge_supported_read needs a fresh current-page validation before skipping chrome_read_page',
+      executionMode,
+    };
+  }
   return {
     action: 'skip',
     readPageAvoided: true,
@@ -436,6 +464,14 @@ function planKnowledgeBacked(
     diagnostic: `skip: knowledge_call_api family ${cap.family} available; bypassing chrome_read_page`,
     executionMode,
   };
+}
+
+function hasFreshCurrentPageValidation(decision: ChooseContextDecisionSnapshot): boolean {
+  const validation = decision.currentPageValidation;
+  return (
+    validation?.factSnapshotVerdict === 'fresh' &&
+    (validation.readinessVerdict === 'ready' || validation.readinessVerdict === 'empty')
+  );
 }
 
 function forwardPlan(args: {

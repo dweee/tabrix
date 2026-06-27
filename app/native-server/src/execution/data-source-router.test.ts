@@ -40,6 +40,8 @@ describe('DataSourceRouter (V26-09 legacy back-compat)', () => {
       tokenEstimateFullRead: 4096,
       tokensSavedEstimate: 4032,
       apiCandidateAvailable: true,
+      factSnapshotVerdict: 'fresh',
+      readinessVerdict: 'ready',
       dispatcherInputSource: null,
     });
 
@@ -67,6 +69,28 @@ describe('DataSourceRouter (V26-09 legacy back-compat)', () => {
     expect(decision.decisionRuleId).toBe('R_KNOWLEDGE_SUPPORTED_LEGACY');
     expect(decision.selectedDataSource).toBe('api_list');
     expect(decision.publicSurfaceDelta).toBe('none');
+  });
+
+  it('does not route historical API knowledge without fresh current-page validation', () => {
+    const decision = routeDataSource({
+      strategy: 'knowledge_light',
+      sourceRoute: 'knowledge_supported_read',
+      chosenLayer: 'L0',
+      layerDispatchReason: 'knowledge_supports_summary',
+      tokenEstimateChosen: 64,
+      tokenEstimateFullRead: 4096,
+      tokensSavedEstimate: 4032,
+      apiCandidateAvailable: true,
+      dispatcherInputSource: null,
+    });
+
+    expect(decision).toMatchObject({
+      dataSource: 'dom_json',
+      chosenSource: 'dom_json',
+      decisionRuleId: 'R_DOM_DEFAULT',
+      factSnapshotVerdict: 'unknown',
+      readinessVerdict: 'unknown',
+    });
   });
 
   it('keeps markdown as a reading surface with compact DOM fallback', () => {
@@ -123,6 +147,8 @@ describe('DataSourceRouter (V26-09 legacy back-compat)', () => {
         chosenLayer: 'L0',
         layerDispatchReason: 'knowledge_supports_summary',
         apiCandidateAvailable: true,
+        factSnapshotVerdict: 'fresh',
+        readinessVerdict: 'ready',
         dispatcherInputSource: null,
       });
 
@@ -330,6 +356,21 @@ describe('DataSourceRouter — V27-09 truth table', () => {
       expect(decision.confidence).toBeLessThan(0.6);
     },
   );
+
+  it('knowledge_supported_read compatibility path demotes when caller supplies unknown current-page validation', () => {
+    const decision = routeDataSource({
+      sourceRoute: 'knowledge_supported_read',
+      chosenLayer: 'L0',
+      apiCandidateAvailable: true,
+      dispatcherInputSource: 'object_library_snapshot',
+      factSnapshotVerdict: 'unknown',
+      readinessVerdict: 'unknown',
+    });
+    expect(decision.decisionRuleId).toBe('R_FACTS_STALE_DEMOTE_DOM');
+    expect(decision.dataSource).toBe('dom_json');
+    expect(decision.decisionReason).toBe('facts_stale_or_missing_demote_to_dom');
+    expect(decision.readinessVerdict).toBe('unknown');
+  });
 
   it('readiness=empty + sufficient endpoint lineage marks empty-as-success api_list (R_EMPTY_RESULT_API_CONFIRMED)', () => {
     const decision = routeDataSource({
@@ -886,6 +927,8 @@ describe('DataSourceRouter — truth table coverage', () => {
         sourceRoute: 'knowledge_supported_read',
         chosenLayer: 'L0',
         apiCandidateAvailable: true,
+        factSnapshotVerdict: 'fresh',
+        readinessVerdict: 'ready',
       }).decisionRuleId,
     R_DOM_DEFAULT: () =>
       routeDataSource({

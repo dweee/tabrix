@@ -628,12 +628,13 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
           // back to `'L0+L1+L2'`.
           forcedReadPageLayer = skipPlan.fallbackEntryLayer;
           if (skipPlan.sourceRoute === 'knowledge_supported_read') {
+            const fallbackCause = normalizeApiFallbackCause(skipPlan.fallbackCause);
             apiFallbackEvidence = {
               kind: 'read_page_fallback',
               readPageAvoided: false,
               sourceKind: 'dom_json',
               sourceRoute: skipPlan.sourceRoute,
-              fallbackCause: 'api_unavailable',
+              fallbackCause,
               fallbackUsed: 'dom_compact',
               fallbackEntryLayer: 'L0+L1',
               apiTelemetry: {

@@ -78,6 +78,8 @@ describe('LivePageContextProvider — lookup order', () => {
     expect(result.hvoCount).toBe(4);
     expect(result.pageRole).toBe('workspace_item_list');
     expect(result.fullReadByteLength).toBe(40 + 60 + 100);
+    expect(result.factSnapshotVerdict).toBe('fresh');
+    expect(result.readinessVerdict).toBe('ready');
     expect(result.fallbackCause).toBeUndefined();
   });
 
@@ -117,6 +119,8 @@ describe('LivePageContextProvider — lookup order', () => {
     expect(result.source).toBe('object_library_snapshot');
     expect(result.candidateActionsCount).toBe(3);
     expect(result.hvoCount).toBe(5);
+    expect(result.factSnapshotVerdict).toBe('unknown');
+    expect(result.readinessVerdict).toBe('unknown');
   });
 
   test('falls back to memory_snapshot when only pageRole matches', () => {
@@ -137,6 +141,8 @@ describe('LivePageContextProvider — lookup order', () => {
     expect(result.source).toBe('memory_snapshot');
     expect(result.candidateActionsCount).toBe(2);
     expect(result.hvoCount).toBe(1);
+    expect(result.factSnapshotVerdict).toBe('unknown');
+    expect(result.readinessVerdict).toBe('unknown');
     expect(result.fallbackCause).toBeUndefined();
   });
 
@@ -197,6 +203,8 @@ describe('LivePageContextProvider — fallback_zero shapes', () => {
       hvoCount: 0,
       fullReadByteLength: 0,
       pageRole: 'role_x',
+      factSnapshotVerdict: 'unknown',
+      readinessVerdict: 'unknown',
       fallbackCause: 'persistence_off',
     });
   });

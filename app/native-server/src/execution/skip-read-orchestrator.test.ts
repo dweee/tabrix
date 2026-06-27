@@ -33,6 +33,13 @@ const KNOWLEDGE_DECISION: ChooseContextDecisionSnapshot = Object.freeze({
   fullReadTokenEstimate: 8192,
 });
 
+const FRESH_VALIDATION: NonNullable<ChooseContextDecisionSnapshot['currentPageValidation']> =
+  Object.freeze({
+    factSnapshotVerdict: 'fresh',
+    readinessVerdict: 'ready',
+    source: 'live_snapshot',
+  });
+
 const READ_REQUIRED_DECISION: ChooseContextDecisionSnapshot = Object.freeze({
   sourceRoute: 'read_page_required',
   chosenLayer: 'L0+L1',
@@ -92,11 +99,26 @@ describe('planSkipRead — api_list / knowledge_supported_read', () => {
     expect(plan.fallbackCause).toBe('api_layer_not_available');
   });
 
-  it('knowledge_supported_read with apiCapability.available=true → skip via api_list (forward-compat for V26-08)', () => {
+  it('knowledge_supported_read with apiCapability.available=true but no current page validation → fallback_required', () => {
     const plan = planSkipRead({
       decision: {
         ...KNOWLEDGE_DECISION,
         apiCapability: { available: true, family: 'observed_search_results' },
+      },
+      taskCtx: FRESH_CTX,
+    });
+    expect(plan.action).toBe('fallback_required');
+    expect(plan.fallbackCause).toBe('current_page_validation_required');
+    expect(plan.readPageAvoided).toBe(false);
+    expect(plan.requiresApiCall).toBe(false);
+  });
+
+  it('knowledge_supported_read with apiCapability.available=true + fresh current page validation → skip via api_list', () => {
+    const plan = planSkipRead({
+      decision: {
+        ...KNOWLEDGE_DECISION,
+        apiCapability: { available: true, family: 'observed_search_results' },
+        currentPageValidation: FRESH_VALIDATION,
       },
       taskCtx: FRESH_CTX,
     });
@@ -169,6 +191,7 @@ describe('planSkipRead — budget / fallback layer hard rules', () => {
       decision: {
         ...KNOWLEDGE_DECISION,
         apiCapability: { available: true, family: 'observed_search_results' },
+        currentPageValidation: FRESH_VALIDATION,
         fullReadTokenEstimate: -1,
       },
       taskCtx: FRESH_CTX,
@@ -180,6 +203,7 @@ describe('planSkipRead — budget / fallback layer hard rules', () => {
       decision: {
         ...KNOWLEDGE_DECISION,
         apiCapability: { available: true, family: 'observed_search_results' },
+        currentPageValidation: FRESH_VALIDATION,
         fullReadTokenEstimate: Number.NaN,
       },
       taskCtx: FRESH_CTX,
@@ -196,6 +220,7 @@ describe('escalateAfterSkipFailure — never widens to L0+L1+L2', () => {
       decision: {
         ...KNOWLEDGE_DECISION,
         apiCapability: { available: true, family: 'observed_search_results' },
+        currentPageValidation: FRESH_VALIDATION,
       },
       taskCtx: FRESH_CTX,
     });
@@ -228,6 +253,7 @@ describe('planSkipRead — orchestrator never returns synthetic read_page payloa
       decision: {
         ...KNOWLEDGE_DECISION,
         apiCapability: { available: true, family: 'observed_search_results' },
+        currentPageValidation: FRESH_VALIDATION,
       },
       taskCtx: FRESH_CTX,
     }) as Record<string, unknown>;

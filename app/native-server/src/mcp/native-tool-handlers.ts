@@ -386,6 +386,7 @@ function persistChooseContextDecision(
             telemetry: result.directApiExecution.apiTelemetry,
           }
         : null,
+    currentPageValidation: extractCurrentPageValidation(result),
   };
   const routerFields = result as TabrixChooseContextRouterTelemetry;
   if (routerFields.chosenSource) snapshot.chosenSource = routerFields.chosenSource;
@@ -396,6 +397,37 @@ function persistChooseContextDecision(
   }
   if (routerFields.fallbackPlan) snapshot.fallbackPlan = routerFields.fallbackPlan;
   taskContext.noteChooseContextDecision(snapshot);
+}
+
+function extractCurrentPageValidation(
+  result: TabrixChooseContextResult,
+): ChooseContextDecisionSnapshot['currentPageValidation'] {
+  const router = result as TabrixChooseContextRouterTelemetry & {
+    factSnapshotVerdict?: unknown;
+    readinessVerdict?: unknown;
+    dispatcherInputSource?: unknown;
+  };
+  const factSnapshotVerdict =
+    router.factSnapshotVerdict === 'fresh' ||
+    router.factSnapshotVerdict === 'stale' ||
+    router.factSnapshotVerdict === 'missing' ||
+    router.factSnapshotVerdict === 'unknown'
+      ? router.factSnapshotVerdict
+      : 'unknown';
+  const readinessVerdict =
+    router.readinessVerdict === 'ready' ||
+    router.readinessVerdict === 'document_loading' ||
+    router.readinessVerdict === 'empty' ||
+    router.readinessVerdict === 'error_or_blocked' ||
+    router.readinessVerdict === 'unknown'
+      ? router.readinessVerdict
+      : 'unknown';
+  return {
+    factSnapshotVerdict,
+    readinessVerdict,
+    source:
+      typeof router.dispatcherInputSource === 'string' ? router.dispatcherInputSource : 'unknown',
+  };
 }
 
 const handleTabrixChooseContextRecordOutcome: NativeToolHandler = (args, deps) => {

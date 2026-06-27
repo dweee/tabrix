@@ -80,6 +80,8 @@ export interface TabrixChooseContextRouterTelemetry {
   fallbackPlan?: DataSourceFallbackPlan;
   dispatcherInputSource?: string;
   costEstimate?: DataSourceCostEstimate;
+  factSnapshotVerdict?: 'fresh' | 'stale' | 'missing' | 'unknown';
+  readinessVerdict?: 'ready' | 'document_loading' | 'empty' | 'error_or_blocked' | 'unknown';
 }
 
 type TabrixChooseContextResultWithRouter = TabrixChooseContextResult &
@@ -792,7 +794,10 @@ export function runTabrixChooseContext(
     apiCandidateAvailable: !!apiCandidate,
     dispatcherInputSource: dispatcherInputs?.source ?? null,
     taskIntent: domRegionRowsEvidence ? mapIntentHintToRouterTaskIntent(intentHint) : undefined,
-    readinessVerdict: domRegionRowsEvidence ? 'ready' : undefined,
+    factSnapshotVerdict:
+      dispatcherInputs?.factSnapshotVerdict ?? (domRegionRowsEvidence ? 'fresh' : undefined),
+    readinessVerdict:
+      dispatcherInputs?.readinessVerdict ?? (domRegionRowsEvidence ? 'ready' : undefined),
     domRegionRowsEvidence,
   });
   const knowledgeEndpointFamily = knowledgeCatalog?.site ?? null;
@@ -925,6 +930,8 @@ export function runTabrixChooseContext(
     fallbackPlan: routerDecision.fallbackPlan,
     dispatcherInputSource: routerDecision.dispatcherInputSource,
     costEstimate: routerDecision.costEstimate,
+    factSnapshotVerdict: routerDecision.factSnapshotVerdict,
+    readinessVerdict: routerDecision.readinessVerdict,
   };
   return result;
 }
@@ -1158,6 +1165,22 @@ export async function runTabrixChooseContextWithDirectApi(
   try {
     parsed = parseTabrixChooseContextInput(rawArgs);
   } catch {
+    return result;
+  }
+
+  const currentPageContext = deps.pageContext
+    ? deps.pageContext.getContext({
+        url: parsed.input.url ?? null,
+        pageRole: parsed.input.pageRole ?? null,
+      })
+    : null;
+  if (
+    currentPageContext?.factSnapshotVerdict !== 'fresh' ||
+    !(
+      currentPageContext.readinessVerdict === 'ready' ||
+      currentPageContext.readinessVerdict === 'empty'
+    )
+  ) {
     return result;
   }
 

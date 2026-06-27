@@ -65,6 +65,14 @@ export interface PageContextLookupResult {
   hvoCount: number;
   fullReadByteLength: number;
   pageRole: string | null;
+  /**
+   * Closed-enum verdict for whether this context came from the current page.
+   * Only an exact same-task URL snapshot is fresh. Object-library and role-only
+   * snapshots are planning hints and must not authorize read skipping.
+   */
+  factSnapshotVerdict: 'fresh' | 'stale' | 'missing' | 'unknown';
+  /** Conservative readiness verdict for the snapshot above. */
+  readinessVerdict: 'ready' | 'document_loading' | 'empty' | 'error_or_blocked' | 'unknown';
   /** Set only when `source === 'fallback_zero'`. */
   fallbackCause?: DispatcherInputFallbackCause;
 }
@@ -113,6 +121,8 @@ const FALLBACK_ZERO = (
   hvoCount: 0,
   fullReadByteLength: 0,
   pageRole,
+  factSnapshotVerdict: 'unknown',
+  readinessVerdict: 'unknown',
   fallbackCause: cause,
 });
 
@@ -144,6 +154,8 @@ function projectSnapshot(
   snap: PageSnapshotLike,
   source: Exclude<DispatcherInputSource, 'fallback_zero'>,
 ): PageContextLookupResult {
+  const fullReadByteLength = estimateFullReadByteLength(snap);
+  const isFreshCurrentPageSnapshot = source === 'live_snapshot' && fullReadByteLength > 0;
   return {
     source,
     candidateActionsCount:
@@ -154,8 +166,10 @@ function projectSnapshot(
       typeof snap.highValueObjectCount === 'number' && Number.isFinite(snap.highValueObjectCount)
         ? snap.highValueObjectCount
         : 0,
-    fullReadByteLength: estimateFullReadByteLength(snap),
+    fullReadByteLength,
     pageRole: typeof snap.pageRole === 'string' && snap.pageRole.length > 0 ? snap.pageRole : null,
+    factSnapshotVerdict: isFreshCurrentPageSnapshot ? 'fresh' : 'unknown',
+    readinessVerdict: isFreshCurrentPageSnapshot ? 'ready' : 'unknown',
   };
 }
 

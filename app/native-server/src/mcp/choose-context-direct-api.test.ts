@@ -99,6 +99,20 @@ function observedSearchEndpoint(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function freshPageContext(pageRole: string | null = null) {
+  return {
+    getContext: () => ({
+      source: 'live_snapshot' as const,
+      candidateActionsCount: 4,
+      hvoCount: 2,
+      fullReadByteLength: 50_000,
+      pageRole,
+      factSnapshotVerdict: 'fresh' as const,
+      readinessVerdict: 'ready' as const,
+    }),
+  };
+}
+
 describe('runTabrixChooseContextWithDirectApi', () => {
   it('non-knowledge_supported_read route is bit-identical to the synchronous chooser', async () => {
     const sync = runTabrixChooseContext({ intent: 'do something' }, { knowledgeApi: null });
@@ -140,6 +154,7 @@ describe('runTabrixChooseContextWithDirectApi', () => {
       { intent: WORKSPACE_SEARCH_INTENT, url: 'https://code.example/search' },
       {
         knowledgeApi: observedKnowledgeApi([observedSearchEndpoint()]),
+        pageContext: freshPageContext(),
         directApiFetchFn: fetchSpy,
       },
     );
@@ -159,6 +174,33 @@ describe('runTabrixChooseContextWithDirectApi', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
+  it('high-confidence endpoint without fresh current page validation does not execute direct API', async () => {
+    const fetchSpy = jsonFetch(200, WORKSPACE_SEARCH_BODY);
+    const wrapped = await runTabrixChooseContextWithDirectApi(
+      { intent: WORKSPACE_SEARCH_INTENT, url: 'https://code.example/search' },
+      {
+        knowledgeApi: observedKnowledgeApi([observedSearchEndpoint()]),
+        pageContext: {
+          getContext: () => ({
+            source: 'object_library_snapshot',
+            candidateActionsCount: 4,
+            hvoCount: 2,
+            fullReadByteLength: 0,
+            pageRole: 'item_list',
+            factSnapshotVerdict: 'unknown',
+            readinessVerdict: 'unknown',
+          }),
+        },
+        directApiFetchFn: fetchSpy,
+      },
+    );
+
+    expect(wrapped.status).toBe('ok');
+    expect(wrapped.sourceRoute).toBe('knowledge_supported_read');
+    expect(wrapped.directApiExecution).toBeUndefined();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it('derives API row limit from task wording for observed endpoints', async () => {
     const fetchSpy = jsonFetch(200, { items: [{ name: 'CI' }, { name: 'Nightly' }] });
     const wrapped = await runTabrixChooseContextWithDirectApi(
@@ -169,6 +211,7 @@ describe('runTabrixChooseContextWithDirectApi', () => {
       },
       {
         knowledgeApi: observedKnowledgeApi([observedSearchEndpoint()]),
+        pageContext: freshPageContext('actions_detail'),
         directApiFetchFn: fetchSpy,
       },
     );
@@ -190,6 +233,7 @@ describe('runTabrixChooseContextWithDirectApi', () => {
       },
       {
         knowledgeApi: observedKnowledgeApi([observedSearchEndpoint()]),
+        pageContext: freshPageContext('item_list'),
         directApiFetchFn: fetchSpy,
       },
     );
@@ -214,6 +258,7 @@ describe('runTabrixChooseContextWithDirectApi', () => {
       { intent: WORKSPACE_SEARCH_INTENT, url: 'https://code.example/search' },
       {
         knowledgeApi: observedKnowledgeApi([observedSearchEndpoint()]),
+        pageContext: freshPageContext(),
         directApiFetchFn: fetchSpy,
       },
     );
@@ -271,6 +316,8 @@ describe('runTabrixChooseContextWithDirectApi', () => {
             hvoCount: 30,
             fullReadByteLength: 50_000,
             pageRole: 'item_list',
+            factSnapshotVerdict: 'fresh',
+            readinessVerdict: 'ready',
           }),
         },
         directApiFetchFn: fetchSpy,

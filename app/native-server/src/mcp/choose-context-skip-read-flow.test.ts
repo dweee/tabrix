@@ -45,6 +45,13 @@ import { bridgeCommandChannel } from '../server/bridge-command-channel';
 import type { ChooseContextDecisionSnapshot } from '../execution/skip-read-orchestrator';
 
 const AUTO_DEFAULT_KEY = 'mcp:auto:tab:default';
+const FRESH_CURRENT_PAGE_VALIDATION: NonNullable<
+  ChooseContextDecisionSnapshot['currentPageValidation']
+> = Object.freeze({
+  factSnapshotVerdict: 'fresh',
+  readinessVerdict: 'ready',
+  source: 'live_snapshot',
+});
 
 describe('V26-03 choose_context → chrome_read_page skip-read execution loop', () => {
   function markBridgeReady(): void {
@@ -855,6 +862,7 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
         dataPurpose: 'search_repositories',
         params: { q: 'tabrix' },
       },
+      currentPageValidation: FRESH_CURRENT_PAGE_VALIDATION,
       executionMode: 'direct_api',
       directApiResult: {
         endpointFamily: 'observed_search_results',
@@ -1069,6 +1077,7 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
         dataPurpose: 'search_list',
         params: { query: 'ACP', sort: 'stars', order: 'desc' },
       },
+      currentPageValidation: FRESH_CURRENT_PAGE_VALIDATION,
     });
     jest.spyOn(globalThis, 'fetch').mockResolvedValue({
       status: 403,
@@ -1260,6 +1269,7 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
         dataPurpose: 'search_list',
         params: { query: 'tabrix' },
       },
+      currentPageValidation: FRESH_CURRENT_PAGE_VALIDATION,
       executionMode: 'direct_api',
       directApiResult: {
         endpointFamily: 'observed_search_results',
@@ -1493,6 +1503,7 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
         dataPurpose: 'search_list',
         params: { query: 'tabrix' },
       },
+      currentPageValidation: FRESH_CURRENT_PAGE_VALIDATION,
     });
     jest.spyOn(globalThis, 'fetch').mockResolvedValue({
       status: 403,
@@ -1533,6 +1544,49 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
     });
   });
 
+  it('knowledge API reuse without fresh current-page validation falls back to bridge read', async () => {
+    markBridgeReady();
+    const ctx = sessionManager.getOrCreateExternalTaskContext('mcp:auto:tab:8');
+    ctx.noteUrlChange('https://code.example/search', null);
+    ctx.noteChooseContextDecision({
+      sourceRoute: 'knowledge_supported_read',
+      chosenLayer: 'L0+L1+L2',
+      fullReadTokenEstimate: 12000,
+      apiCapability: {
+        available: true,
+        family: 'observed_search_results',
+        dataPurpose: 'search_list',
+        params: { query: 'tabrix' },
+      },
+    });
+    const bridgeSpy = mockBridgeRoundTrip(
+      JSON.stringify({ kind: 'page', pageContent: 'fresh-validation-required-dom' }),
+    );
+
+    const result = await handleToolCall('chrome_read_page', {
+      requestedLayer: 'L0+L1+L2',
+      tabId: 8,
+    });
+
+    expect(result.isError).toBeFalsy();
+    const payload = JSON.parse(String(result.content[0].text)) as Record<string, unknown>;
+    expect(payload).not.toHaveProperty('kind', 'api_rows');
+    expect(payload.pageContent).toBe('fresh-validation-required-dom');
+    expectApiFallbackEvidence(payload, {
+      fallbackCause: 'current_page_validation_required',
+      apiReason: 'current_page_validation_required',
+    });
+    const callToolInvocations = bridgeSpy.mock.calls.filter((call) => {
+      const messageType = call[1];
+      return typeof messageType === 'string' && messageType.toLowerCase().includes('call_tool');
+    });
+    expect(callToolInvocations).toHaveLength(1);
+    expect(ctx.getTaskTotals()).toEqual({
+      readPageAvoidedCount: 0,
+      tokensSavedEstimateTotal: 0,
+    });
+  });
+
   it('API timeout falls back to bridge chrome_read_page at L0+L1 with api_timeout evidence', async () => {
     jest.useFakeTimers();
     try {
@@ -1549,6 +1603,7 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
           dataPurpose: 'search_list',
           params: { query: 'tabrix' },
         },
+        currentPageValidation: FRESH_CURRENT_PAGE_VALIDATION,
       });
       const bridgeSpy = mockBridgeRoundTrip(
         JSON.stringify({ kind: 'page', pageContent: 'api-timeout-fallback-dom' }),
@@ -1605,6 +1660,7 @@ describe('V26-03 choose_context → chrome_read_page skip-read execution loop', 
         dataPurpose: 'search_list',
         params: { query: 'tabrix' },
       },
+      currentPageValidation: FRESH_CURRENT_PAGE_VALIDATION,
     });
     const fetchSpy = jest.spyOn(globalThis, 'fetch');
     const bridgeSpy = mockBridgeRoundTrip(

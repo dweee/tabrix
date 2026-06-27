@@ -183,6 +183,8 @@ export interface DataSourceDecision {
   /** Fact-snapshot freshness verdict the router consumed. `'unknown'`
    *  when not supplied. */
   factSnapshotVerdict: FactSnapshotVerdict;
+  /** Page readiness verdict the router consumed. `'unknown'` when not supplied. */
+  readinessVerdict: ReadinessVerdict;
   /** Stable id of the rule in `DATA_SOURCE_ROUTER_RULES` that fired. */
   decisionRuleId: DataSourceRouterRuleId;
   /** Declares whether this decision touches the public MCP response
@@ -599,9 +601,10 @@ const DATA_SOURCE_ROUTER_RULES: ReadonlyArray<DataSourceRouterRule> = [
   },
 
   // 12. Compatibility path: knowledge_supported_read +
-  //     apiCandidateAvailable=true. This is the rule the existing
-  //     choose-context.ts caller hits when no observation evidence was
-  //     supplied; produces the existing decision.
+  //     apiCandidateAvailable=true. Historical API candidates are only
+  //     usable after the current page has been freshly validated; object
+  //     and knowledge history can guide planning, but must not authorize
+  //     blind read skipping or direct API reuse.
   //
   //     Only fires when the caller did NOT supply endpoint evidence.
   //     A caller that handed us an `endpointEvidence` row and saw the
@@ -616,6 +619,7 @@ const DATA_SOURCE_ROUTER_RULES: ReadonlyArray<DataSourceRouterRule> = [
     match: (ctx) =>
       ctx.input.sourceRoute === 'knowledge_supported_read' &&
       ctx.input.apiCandidateAvailable === true &&
+      ctx.factsAreFresh &&
       ctx.endpointEvidence === null,
     produce: (ctx) =>
       buildDecision({
@@ -768,6 +772,7 @@ function buildDecision(args: BuildDecisionArgs): DataSourceDecision {
     requestedLayer: ctx.input.chosenLayer,
     contextVersion: ctx.input.contextVersion ?? null,
     factSnapshotVerdict: ctx.factSnapshotVerdict,
+    readinessVerdict: ctx.readinessVerdict,
     decisionRuleId: ruleId,
     // Evidence fields stay native-server-internal. No change to the
     // public MCP response shape.
