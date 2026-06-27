@@ -2191,6 +2191,91 @@ describe('read_page mode', () => {
     expect(basePayload.fallbackSource).toBe('filter_panel_target_recovery');
   });
 
+  it('prefers unobstructed recovered filter targets over covered duplicate labels', async () => {
+    vi.spyOn(chrome.scripting, 'executeScript').mockResolvedValue([
+      { result: { bound: 1 } },
+    ] as any);
+    const collectInteractiveElementsFallback = vi.spyOn(
+      readPageTool as any,
+      'collectInteractiveElementsFallback',
+    );
+    collectInteractiveElementsFallback.mockImplementation(async (_tabId, options: any) => ({
+      success: true,
+      elements: [
+        {
+          type: 'text_action',
+          role: 'button',
+          selector: `body > main > div.filter-panel > div[data-covered="${options.textQuery}"] > span`,
+          text: options.textQuery,
+          isInteractive: true,
+          actionability: 'actionable',
+          visibility: {
+            source: 'dom',
+            domVisible: true,
+            inViewport: true,
+            centerHitTarget: false,
+            occluded: true,
+            reason: 'center_covered',
+          },
+          coordinates: {
+            x: 960,
+            y: 320,
+            rect: { x: 930, y: 304, width: 88, height: 32 },
+          },
+        },
+        {
+          type: 'text_action',
+          role: 'button',
+          selector: `body > main > div.filter-panel > div[data-visible="${options.textQuery}"] > span`,
+          text: options.textQuery,
+          isInteractive: true,
+          actionability: 'actionable',
+          visibility: {
+            source: 'dom',
+            domVisible: true,
+            inViewport: true,
+            centerHitTarget: true,
+            occluded: false,
+            reason: 'visible_unobstructed',
+          },
+          coordinates: {
+            x: 1080,
+            y: 320,
+            rect: { x: 1040, y: 304, width: 88, height: 32 },
+          },
+        },
+      ],
+    }));
+    const basePayload: any = {
+      visibleTextContent: '筛选 排序依据 综合 最新 最多收藏 发布时间 不限 一周内',
+      elements: [],
+      refMap: [],
+      count: 0,
+    };
+
+    const recovered = await (readPageTool as any).recoverFilterPanelTextTargets({
+      tabId: 5228,
+      basePayload,
+    });
+
+    expect(recovered).toBe(true);
+    expect(basePayload.elements).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          selector: expect.stringContaining('data-visible="最多收藏"'),
+          text: '最多收藏',
+          visibility: expect.objectContaining({
+            centerHitTarget: true,
+            occluded: false,
+          }),
+        }),
+      ]),
+    );
+    expect(
+      basePayload.elements.find((element: any) => element.text === '最多收藏')?.selector,
+    ).not.toContain('data-covered="最多收藏"');
+  });
+
   it('keeps recovered text menu actions ahead of long content lists', () => {
     const contentElements = Array.from({ length: 40 }, (_item, index) => ({
       ref: `ref_content_${index}`,

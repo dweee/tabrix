@@ -320,6 +320,21 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
     return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
   };
 
+  const centerHitScore = (element: Element): number => {
+    try {
+      const rect = element.getBoundingClientRect();
+      const x = Math.max(0, Math.min(window.innerWidth - 1, rect.left + rect.width / 2));
+      const y = Math.max(0, Math.min(window.innerHeight - 1, rect.top + rect.height / 2));
+      const hit = document.elementFromPoint(x, y);
+      if (!hit) return 0;
+      if (element === hit || element.contains(hit)) return 240;
+      if (hit.contains(element)) return 80;
+      return -1000;
+    } catch {
+      return 0;
+    }
+  };
+
   const classifyFilterLabel = (label: string): AppliedSearchFilter['kind'] => {
     if (contentTypeFilterPattern.test(label)) return 'content_type';
     if (sortFilterPattern.test(label)) return 'sort';
@@ -777,6 +792,8 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
       if (!isTrigger && filterKind === 'unknown') continue;
       const control = closestClickableControl(element);
       if (!control) continue;
+      const hitScore = centerHitScore(control);
+      if (hitScore < 0) continue;
       const selector = selectorForElement(control);
       const concreteXpath = xpathForElement(control);
       const canonicalLabel = isTrigger ? label : canonicalFilterLabel(label);
@@ -815,6 +832,7 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
         (accessibleText === canonicalLabel ? 300 : 0) +
         (['button', 'a', 'input', 'select', 'summary'].includes(tag) ? 120 : 0) +
         (['button', 'menuitem', 'option', 'tab'].includes(role) ? 80 : 0) +
+        hitScore +
         Math.min(120, (rect.width * rect.height) / 100);
       const dedupeKey = `${intent}|${targetRef}|${canonicalLabel}`;
       const previous = actionByKey.get(dedupeKey);

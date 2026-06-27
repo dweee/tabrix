@@ -200,6 +200,7 @@ export function promoteFilterPanelSelector(selector: unknown): string | undefine
 }
 
 export function isCompactSearchToolbarFallbackElement(element: any): boolean {
+  if (!hasRecoverableVisibility(element)) return false;
   const text = String(element?.text || element?.name || '')
     .replace(/\s+/g, ' ')
     .trim();
@@ -292,6 +293,7 @@ export function itemUrlMatchesReadPage(item: any, currentUrl: string): boolean {
 }
 
 export function isCompactFilterPanelFallbackElement(element: any): boolean {
+  if (!hasRecoverableVisibility(element)) return false;
   const text = String(element?.text || element?.name || '')
     .replace(/\s+/g, ' ')
     .trim();
@@ -399,9 +401,22 @@ export function searchToolbarElementKey(element: any): string {
 }
 
 export function hasExecutableRecoveredTarget(element: any): boolean {
+  if (!hasRecoverableVisibility(element)) return false;
   const href = typeof element?.href === 'string' ? element.href.trim() : '';
   const selector = typeof element?.selector === 'string' ? element.selector.trim() : '';
   return Boolean(selector || href);
+}
+
+function hasRecoverableVisibility(element: any): boolean {
+  const visibility = element?.visibility;
+  if (!visibility || typeof visibility !== 'object') return true;
+  if (visibility.domVisible === false) return false;
+  if (visibility.inViewport === false) return false;
+  if (visibility.centerHitTarget === false) return false;
+  if (visibility.occluded === true) return false;
+  const reason = String(visibility.reason || '').toLowerCase();
+  if (/(center_covered|occluded|covered)/.test(reason)) return false;
+  return true;
 }
 
 export function isSearchToolbarRecoveredRef(value: unknown): boolean {
@@ -482,6 +497,7 @@ function isDescriptiveVisibleTextControlLabel(label: string): boolean {
 }
 
 export function isCompactVisibleTextControlFallbackElement(element: any): boolean {
+  if (!hasRecoverableVisibility(element)) return false;
   const selector = typeof element?.selector === 'string' ? element.selector.trim() : '';
   if (!selector) return false;
   const text = String(element?.text || element?.name || '')

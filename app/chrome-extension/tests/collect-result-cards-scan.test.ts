@@ -172,6 +172,64 @@ describe('collect result cards DOM scan', () => {
     expect(xpathLocators?.[1]?.value).toContain('normalize-space');
   });
 
+  it('prefers unobstructed duplicate filter options over covered labels', () => {
+    setViewport();
+    document.body.innerHTML = `
+      <aside role="dialog" data-testid="filter-panel" data-rect="840,80,420,240">
+        <button data-testid="covered-filter" data-rect="880,120,116,44">最多收藏</button>
+        <button data-testid="visible-filter" data-rect="1010,120,116,44">最多收藏</button>
+        <div data-testid="covering-panel" data-rect="890,126,96,32">遮挡层</div>
+      </aside>
+      <main role="list" data-testid="list" data-rect="0,100,780,580">
+        <article role="listitem" data-testid="card-alpha" data-rect="20,140,260,180">
+          <a data-testid="link-alpha" data-rect="28,148,240,112" href="https://example.test/note/alpha">AI 图片创作提示词合集</a>
+          <span>作者 1</span>
+          <span>1 天前</span>
+          <span>收藏 100</span>
+        </article>
+      </main>
+    `;
+    installRects();
+    const covered = document.querySelector('[data-testid="covered-filter"]');
+    const visible = document.querySelector('[data-testid="visible-filter"]');
+    const coveringPanel = document.querySelector('[data-testid="covering-panel"]');
+    vi.mocked(document.elementFromPoint).mockImplementation((x: number, y: number) => {
+      const pointInside = (element: Element | null): boolean => {
+        if (!element) return false;
+        const rect = element.getBoundingClientRect();
+        return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+      };
+      if (pointInside(coveringPanel)) return coveringPanel;
+      if (pointInside(visible)) return visible;
+      if (pointInside(covered)) return covered;
+      return null;
+    });
+
+    const scan = scanVisibleResultCardsInPage();
+    const action = scan.candidateActions.find(
+      (candidate) =>
+        candidate.label === '最多收藏' && candidate.intent === 'search.apply_filter.sort',
+    );
+
+    expect(action).toBeTruthy();
+    expect(action?.locatorChain).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'css',
+          value: expect.stringContaining('button[data-testid="visible-filter"]'),
+        }),
+      ]),
+    );
+    expect(action?.locatorChain).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'css',
+          value: expect.stringContaining('button[data-testid="covered-filter"]'),
+        }),
+      ]),
+    );
+  });
+
   it('keeps applied filter state to one selected value per group while preserving visible filter actions', () => {
     setViewport();
     document.body.innerHTML = `

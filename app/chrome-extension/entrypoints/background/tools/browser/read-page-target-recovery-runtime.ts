@@ -74,6 +74,38 @@ function existingExecutableTargetKeys(basePayload: any): Set<string> {
   );
 }
 
+function fallbackVisibilityScore(element: any): number {
+  const visibility = element?.visibility;
+  let score = 0;
+  if (visibility?.domVisible === true) score += 40;
+  if (visibility?.inViewport === true) score += 40;
+  if (visibility?.centerHitTarget === true) score += 60;
+  if (visibility?.centerHitTarget === false) score -= 80;
+  if (visibility?.occluded === false) score += 60;
+  if (visibility?.occluded === true) score -= 160;
+  if (/visible_unobstructed/i.test(String(visibility?.reason || ''))) score += 40;
+  if (/center_covered|occluded|covered/i.test(String(visibility?.reason || ''))) score -= 80;
+  const actionability = String(element?.actionability || '').toLowerCase();
+  if (actionability === 'actionable') score += 30;
+  if (actionability === 'blocked' || actionability === 'not_actionable') score -= 160;
+  return score;
+}
+
+function pickBestFallbackElement(
+  elements: any[] | undefined,
+  predicate: (element: any) => boolean,
+): any | null {
+  const matches = (Array.isArray(elements) ? elements : [])
+    .filter((element: any) => element?.selector && predicate(element))
+    .map((element: any, index: number) => ({
+      element,
+      index,
+      score: fallbackVisibilityScore(element),
+    }))
+    .sort((left, right) => right.score - left.score || left.index - right.index);
+  return matches[0]?.element ?? null;
+}
+
 function prependRecoveredPayload(params: {
   basePayload: any;
   recovered: any[];
@@ -154,7 +186,9 @@ export async function recoverGlobalMenuTextTargets(params: TargetRecoveryParams)
       includeCoordinates: true,
       frameId: params.frameId,
     });
-    const first = Array.isArray(fallback?.elements) ? fallback.elements[0] : null;
+    const first = pickBestFallbackElement(fallback?.elements, (element: any) =>
+      Boolean(element?.selector),
+    );
     if (!first?.selector) continue;
     recovered.push({
       ...first,
@@ -204,11 +238,10 @@ export async function recoverVisibleTextControlTargets(
       includeCoordinates: true,
       frameId: params.frameId,
     });
-    const first = Array.isArray(fallback?.elements)
-      ? fallback.elements.find((element: any) =>
-          isCompactVisibleTextControlFallbackElement(element),
-        )
-      : null;
+    const first = pickBestFallbackElement(
+      fallback?.elements,
+      isCompactVisibleTextControlFallbackElement,
+    );
     if (!first?.selector) continue;
     const recoveredElement = {
       ...first,
@@ -272,21 +305,13 @@ export async function recoverSearchToolbarTextTargets(
       includeCoordinates: true,
       frameId: params.frameId,
     });
-    let first = Array.isArray(fallback?.elements)
-      ? fallback.elements.find(
-          (element: any) => element?.selector && isCompactSearchToolbarFallbackElement(element),
-        )
-      : null;
+    let first = pickBestFallbackElement(fallback?.elements, isCompactSearchToolbarFallbackElement);
     if (!first?.selector && typeof params.frameId === 'number') {
       fallback = await params.collectInteractiveElementsFallback(params.tabId, {
         textQuery: label,
         includeCoordinates: true,
       });
-      first = Array.isArray(fallback?.elements)
-        ? fallback.elements.find(
-            (element: any) => element?.selector && isCompactSearchToolbarFallbackElement(element),
-          )
-        : null;
+      first = pickBestFallbackElement(fallback?.elements, isCompactSearchToolbarFallbackElement);
     }
     if (!first?.selector) continue;
     const recoveredElement = {
@@ -365,11 +390,7 @@ export async function recoverFilterPanelTextTargets(
       includeCoordinates: true,
       frameId: params.frameId,
     });
-    const first = Array.isArray(fallback?.elements)
-      ? fallback.elements.find(
-          (element: any) => element?.selector && isCompactFilterPanelFallbackElement(element),
-        )
-      : null;
+    const first = pickBestFallbackElement(fallback?.elements, isCompactFilterPanelFallbackElement);
     if (!first?.selector) continue;
     const recoveredElement = {
       ...first,
