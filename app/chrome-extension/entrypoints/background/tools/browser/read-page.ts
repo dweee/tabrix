@@ -51,10 +51,6 @@ import {
   normalizeAccessibilityTreeDiagnostics,
 } from './read-page-sensing-diagnostics';
 import {
-  appendSyntheticRefBindingDiagnostic,
-  bindSyntheticRefsToSelectors,
-} from './read-page-target-ref-binding';
-import {
   normalizeAssistantGuidance,
   normalizeWindowRuntimeState,
   readWindowInteger,
@@ -110,34 +106,20 @@ import {
   buildReadPageOwnershipRuntimeSummary,
 } from './read-page-ownership-runtime';
 import { extractVisibleRegionRows, type VisibleRegionRowsResult } from './visible-region-rows';
-import {
-  extractGlobalMenuLabelsForTargetRecovery,
-  type ReadPageVisualElementHint,
-} from './read-page-task-protocol';
+import type { ReadPageVisualElementHint } from './read-page-task-protocol';
 import { collectQrVisualElementHints } from './read-page-visual-elements';
 import {
   attachFallbackRefs,
-  DEFAULT_FILTER_PANEL_TARGET_RECOVERY_LABELS,
-  extractVisibleMenuActionLabelsForTargetRecovery,
-  extractVisibleTextControlLabelsForTargetRecovery,
-  hasExecutableRecoveredTarget,
-  isCompactFilterPanelFallbackElement,
-  isCompactSearchToolbarFallbackElement,
-  isCompactVisibleTextControlFallbackElement,
-  isSearchToolbarFilterOpenLabel,
-  isSearchToolbarRecoveredRef,
   mergeHighValueObjectActionsIntoCandidateActions,
   mergeVisibleSearchSurfaceActions,
-  prependRecoveredElementsToPageContent,
-  promoteFilterPanelSelector,
-  promoteSearchToolbarSelector,
-  promoteTextMenuTriggerSelector,
-  searchToolbarElementKey,
-  SEARCH_TOOLBAR_TARGET_RECOVERY_FALLBACK_LABELS,
-  shouldRecoverFilterPanelTargets,
-  shouldRecoverSearchToolbarTargets,
   shouldRepairVisibleRowsTargetRefs,
 } from './read-page-target-recovery';
+import {
+  recoverFilterPanelTextTargets as recoverFilterPanelTextTargetsPayload,
+  recoverGlobalMenuTextTargets as recoverGlobalMenuTextTargetsPayload,
+  recoverSearchToolbarTextTargets as recoverSearchToolbarTextTargetsPayload,
+  recoverVisibleTextControlTargets as recoverVisibleTextControlTargetsPayload,
+} from './read-page-target-recovery-runtime';
 import {
   getBrowserWorldSnapshot,
   markBrowserWorldTabAiOperated,
@@ -695,76 +677,10 @@ class ReadPageTool extends BaseBrowserToolExecutor {
     basePayload: any;
     frameId?: number;
   }): Promise<boolean> {
-    const labels = Array.from(
-      new Set([
-        ...extractGlobalMenuLabelsForTargetRecovery(params.basePayload.visibleTextContent),
-        ...extractVisibleMenuActionLabelsForTargetRecovery(params.basePayload.visibleTextContent),
-      ]),
-    )
-      .filter((label) => label.length <= 18)
-      .slice(0, 16);
-    if (labels.length === 0) return false;
-
-    const existingTargetableLabels = new Set(
-      (Array.isArray(params.basePayload.elements) ? params.basePayload.elements : [])
-        .filter((element: any) => hasExecutableRecoveredTarget(element))
-        .map((element: any) =>
-          String(element?.name || element?.text || '')
-            .replace(/\s+/g, ' ')
-            .trim()
-            .toLowerCase(),
-        )
-        .filter(Boolean),
-    );
-    const recovered: any[] = [];
-    for (const label of labels) {
-      const normalizedLabel = label.replace(/\s+/g, ' ').trim().toLowerCase();
-      if (!normalizedLabel || existingTargetableLabels.has(normalizedLabel)) continue;
-      const fallback = await this.collectInteractiveElementsFallback(params.tabId, {
-        textQuery: label,
-        includeCoordinates: true,
-        frameId: params.frameId,
-      });
-      const first = Array.isArray(fallback?.elements) ? fallback.elements[0] : null;
-      if (!first?.selector) continue;
-      recovered.push({
-        ...first,
-        selector: promoteTextMenuTriggerSelector(first.selector) || first.selector,
-        text: label,
-        name: label,
-        role: first.role || 'button',
-        type: first.type === 'text' ? 'interactive' : first.type || 'interactive',
-      });
-      existingTargetableLabels.add(normalizedLabel);
-    }
-    if (recovered.length === 0) return false;
-
-    const existingElements = Array.isArray(params.basePayload.elements)
-      ? params.basePayload.elements
-      : [];
-    const existingRefMap = Array.isArray(params.basePayload.refMap)
-      ? params.basePayload.refMap
-      : [];
-    const offset = existingRefMap.filter((entry: unknown) => entry != null).length;
-    const recoveredRefMap = buildFallbackRefMap(recovered).map((entry, index) =>
-      entry ? { ...entry, ref: `ref_text_menu_${offset + index + 1}` } : null,
-    );
-    const recoveredWithRefs = attachFallbackRefs(recovered, recoveredRefMap);
-
-    params.basePayload.elements = [...recoveredWithRefs, ...existingElements].slice(0, 150);
-    params.basePayload.refMap = [...recoveredRefMap, ...existingRefMap].slice(0, 150);
-    params.basePayload.refMapCount = params.basePayload.refMap.filter(
-      (entry: unknown) => entry != null,
-    ).length;
-    params.basePayload.count = Math.max(
-      Number(params.basePayload.count || 0),
-      params.basePayload.elements.length,
-    );
-    params.basePayload.fallbackUsed = true;
-    params.basePayload.fallbackSource = params.basePayload.fallbackSource
-      ? `${params.basePayload.fallbackSource}+text_menu_target_recovery`
-      : 'text_menu_target_recovery';
-    return true;
+    return recoverGlobalMenuTextTargetsPayload({
+      ...params,
+      collectInteractiveElementsFallback: this.collectInteractiveElementsFallback.bind(this),
+    });
   }
 
   private async recoverVisibleTextControlTargets(params: {
@@ -772,101 +688,10 @@ class ReadPageTool extends BaseBrowserToolExecutor {
     basePayload: any;
     frameId?: number;
   }): Promise<boolean> {
-    const labels = extractVisibleTextControlLabelsForTargetRecovery(
-      params.basePayload.visibleTextContent,
-    );
-    if (labels.length === 0) return false;
-
-    const existingTargetKeys = new Set(
-      (Array.isArray(params.basePayload.elements) ? params.basePayload.elements : [])
-        .filter((element: any) => {
-          const selector = typeof element?.selector === 'string' ? element.selector.trim() : '';
-          const href = typeof element?.href === 'string' ? element.href.trim() : '';
-          return Boolean(selector || href);
-        })
-        .map((element: any) => searchToolbarElementKey(element))
-        .filter(Boolean),
-    );
-    const existingLabels = new Set(
-      (Array.isArray(params.basePayload.elements) ? params.basePayload.elements : [])
-        .filter((element: any) => hasExecutableRecoveredTarget(element))
-        .map((element: any) =>
-          String(element?.name || element?.text || '')
-            .replace(/\s+/g, ' ')
-            .trim()
-            .toLowerCase(),
-        )
-        .filter(Boolean),
-    );
-
-    const recovered: any[] = [];
-    for (const label of labels) {
-      const normalizedLabel = label.replace(/\s+/g, ' ').trim().toLowerCase();
-      if (!normalizedLabel || existingLabels.has(normalizedLabel)) continue;
-      const fallback = await this.collectInteractiveElementsFallback(params.tabId, {
-        textQuery: label,
-        includeCoordinates: true,
-        frameId: params.frameId,
-      });
-      const first = Array.isArray(fallback?.elements)
-        ? fallback.elements.find((element: any) =>
-            isCompactVisibleTextControlFallbackElement(element),
-          )
-        : null;
-      if (!first?.selector) continue;
-      const recoveredElement = {
-        ...first,
-        selector: first.selector,
-        text: label,
-        name: label,
-        role: first.role === 'generic' ? 'button' : first.role || 'button',
-        type: first.type === 'text' ? 'button' : first.type || 'button',
-      };
-      const key = searchToolbarElementKey(recoveredElement);
-      if (!key || existingTargetKeys.has(key)) continue;
-      recovered.push(recoveredElement);
-      existingTargetKeys.add(key);
-      existingLabels.add(normalizedLabel);
-    }
-    if (recovered.length === 0) return false;
-
-    const existingElements = Array.isArray(params.basePayload.elements)
-      ? params.basePayload.elements
-      : [];
-    const existingRefMap = Array.isArray(params.basePayload.refMap)
-      ? params.basePayload.refMap
-      : [];
-    const offset = existingRefMap.filter((entry: unknown) => entry != null).length;
-    const recoveredRefMap = buildFallbackRefMap(recovered).map((entry, index) =>
-      entry ? { ...entry, ref: `ref_text_control_${offset + index + 1}` } : null,
-    );
-    const binding = await bindSyntheticRefsToSelectors(
-      params.tabId,
-      recoveredRefMap,
-      params.frameId,
-    );
-    appendSyntheticRefBindingDiagnostic(params.basePayload, binding);
-    const recoveredWithRefs = attachFallbackRefs(recovered, recoveredRefMap);
-
-    params.basePayload.elements = [...recoveredWithRefs, ...existingElements].slice(0, 150);
-    params.basePayload.refMap = [...recoveredRefMap, ...existingRefMap].slice(0, 150);
-    prependRecoveredElementsToPageContent({
-      basePayload: params.basePayload,
-      recoveredElements: recoveredWithRefs,
-      recoveredRefMap,
+    return recoverVisibleTextControlTargetsPayload({
+      ...params,
+      collectInteractiveElementsFallback: this.collectInteractiveElementsFallback.bind(this),
     });
-    params.basePayload.refMapCount = params.basePayload.refMap.filter(
-      (entry: unknown) => entry != null,
-    ).length;
-    params.basePayload.count = Math.max(
-      Number(params.basePayload.count || 0),
-      params.basePayload.elements.length,
-    );
-    params.basePayload.fallbackUsed = true;
-    params.basePayload.fallbackSource = params.basePayload.fallbackSource
-      ? `${params.basePayload.fallbackSource}+visible_text_control_recovery`
-      : 'visible_text_control_recovery';
-    return true;
   }
 
   private async recoverSearchToolbarTextTargets(params: {
@@ -875,132 +700,10 @@ class ReadPageTool extends BaseBrowserToolExecutor {
     assistantGuidance?: ReadPageAssistantGuidance;
     frameId?: number;
   }): Promise<boolean> {
-    if (!shouldRecoverSearchToolbarTargets(params.assistantGuidance, params.basePayload.pageRole)) {
-      return false;
-    }
-    const labels = Array.from(
-      new Set([
-        ...SEARCH_TOOLBAR_TARGET_RECOVERY_FALLBACK_LABELS,
-        ...extractSearchToolbarLabelsFromVisibleText(params.basePayload.visibleTextContent),
-      ]),
-    )
-      .filter((label) => label.length <= 18)
-      .slice(0, 14);
-    if (labels.length === 0) return false;
-
-    const existingTargetKeys = new Set(
-      (Array.isArray(params.basePayload.elements) ? params.basePayload.elements : [])
-        .filter((element: any) => hasExecutableRecoveredTarget(element))
-        .map((element: any) => searchToolbarElementKey(element))
-        .filter(Boolean),
-    );
-    const existingLabels = new Set(
-      (Array.isArray(params.basePayload.elements) ? params.basePayload.elements : [])
-        .filter((element: any) => hasExecutableRecoveredTarget(element))
-        .map((element: any) =>
-          String(element?.name || element?.text || '')
-            .replace(/\s+/g, ' ')
-            .trim()
-            .toLowerCase(),
-        )
-        .filter(Boolean),
-    );
-    const existingRecoveredToolbarLabels = new Set(
-      (Array.isArray(params.basePayload.elements) ? params.basePayload.elements : [])
-        .filter((element: any) => isSearchToolbarRecoveredRef(element?.ref))
-        .map((element: any) =>
-          String(element?.name || element?.text || '')
-            .replace(/\s+/g, ' ')
-            .trim()
-            .toLowerCase(),
-        )
-        .filter(Boolean),
-    );
-
-    const recovered: any[] = [];
-    for (const label of labels) {
-      const normalizedLabel = label.replace(/\s+/g, ' ').trim().toLowerCase();
-      const forceToolbarRecovery =
-        isSearchToolbarFilterOpenLabel(label) &&
-        !existingRecoveredToolbarLabels.has(normalizedLabel);
-      if (!normalizedLabel || (existingLabels.has(normalizedLabel) && !forceToolbarRecovery))
-        continue;
-      let fallback = await this.collectInteractiveElementsFallback(params.tabId, {
-        textQuery: label,
-        includeCoordinates: true,
-        frameId: params.frameId,
-      });
-      let first = Array.isArray(fallback?.elements)
-        ? fallback.elements.find(
-            (element: any) => element?.selector && isCompactSearchToolbarFallbackElement(element),
-          )
-        : null;
-      if (!first?.selector && typeof params.frameId === 'number') {
-        fallback = await this.collectInteractiveElementsFallback(params.tabId, {
-          textQuery: label,
-          includeCoordinates: true,
-        });
-        first = Array.isArray(fallback?.elements)
-          ? fallback.elements.find(
-              (element: any) => element?.selector && isCompactSearchToolbarFallbackElement(element),
-            )
-          : null;
-      }
-      if (!first?.selector) continue;
-      const recoveredElement = {
-        ...first,
-        selector: promoteSearchToolbarSelector(first.selector) || first.selector,
-        text: label,
-        name: label,
-        role: first.role || 'button',
-        type: first.type === 'text' ? 'button' : first.type || 'button',
-      };
-      const key = searchToolbarElementKey(recoveredElement);
-      if (!key || (existingTargetKeys.has(key) && !forceToolbarRecovery)) continue;
-      recovered.push(recoveredElement);
-      existingTargetKeys.add(key);
-      existingLabels.add(normalizedLabel);
-      existingRecoveredToolbarLabels.add(normalizedLabel);
-    }
-    if (recovered.length === 0) return false;
-
-    const existingElements = Array.isArray(params.basePayload.elements)
-      ? params.basePayload.elements
-      : [];
-    const existingRefMap = Array.isArray(params.basePayload.refMap)
-      ? params.basePayload.refMap
-      : [];
-    const offset = existingRefMap.filter((entry: unknown) => entry != null).length;
-    const recoveredRefMap = buildFallbackRefMap(recovered).map((entry, index) =>
-      entry ? { ...entry, ref: `ref_text_search_toolbar_${offset + index + 1}` } : null,
-    );
-    const binding = await bindSyntheticRefsToSelectors(
-      params.tabId,
-      recoveredRefMap,
-      params.frameId,
-    );
-    appendSyntheticRefBindingDiagnostic(params.basePayload, binding);
-    const recoveredWithRefs = attachFallbackRefs(recovered, recoveredRefMap);
-
-    params.basePayload.elements = [...recoveredWithRefs, ...existingElements].slice(0, 150);
-    params.basePayload.refMap = [...recoveredRefMap, ...existingRefMap].slice(0, 150);
-    prependRecoveredElementsToPageContent({
-      basePayload: params.basePayload,
-      recoveredElements: recoveredWithRefs,
-      recoveredRefMap,
+    return recoverSearchToolbarTextTargetsPayload({
+      ...params,
+      collectInteractiveElementsFallback: this.collectInteractiveElementsFallback.bind(this),
     });
-    params.basePayload.refMapCount = params.basePayload.refMap.filter(
-      (entry: unknown) => entry != null,
-    ).length;
-    params.basePayload.count = Math.max(
-      Number(params.basePayload.count || 0),
-      params.basePayload.elements.length,
-    );
-    params.basePayload.fallbackUsed = true;
-    params.basePayload.fallbackSource = params.basePayload.fallbackSource
-      ? `${params.basePayload.fallbackSource}+search_toolbar_target_recovery`
-      : 'search_toolbar_target_recovery';
-    return true;
   }
 
   private async recoverFilterPanelTextTargets(params: {
@@ -1009,122 +712,10 @@ class ReadPageTool extends BaseBrowserToolExecutor {
     assistantGuidance?: ReadPageAssistantGuidance;
     frameId?: number;
   }): Promise<boolean> {
-    if (
-      !shouldRecoverFilterPanelTargets(
-        params.assistantGuidance,
-        params.basePayload.visibleTextContent,
-        params.basePayload.pageRole,
-      )
-    ) {
-      return false;
-    }
-    const labelSource = shouldRecoverSearchToolbarTargets(
-      params.assistantGuidance,
-      params.basePayload.pageRole,
-    )
-      ? [
-          ...extractFilterPanelLabelsFromVisibleText(params.basePayload.visibleTextContent),
-          ...DEFAULT_FILTER_PANEL_TARGET_RECOVERY_LABELS,
-        ]
-      : extractFilterPanelLabelsFromVisibleText(params.basePayload.visibleTextContent);
-    const seenLabels = new Set<string>();
-    const labels = labelSource
-      .filter((label) => label.length <= 18)
-      .filter((label) => {
-        const key = label.replace(/\s+/g, ' ').trim().toLowerCase();
-        if (!key || seenLabels.has(key)) return false;
-        seenLabels.add(key);
-        return true;
-      })
-      .slice(0, 16);
-    if (labels.length === 0) return false;
-
-    const existingTargetKeys = new Set(
-      (Array.isArray(params.basePayload.elements) ? params.basePayload.elements : [])
-        .filter((element: any) => hasExecutableRecoveredTarget(element))
-        .map((element: any) => searchToolbarElementKey(element))
-        .filter(Boolean),
-    );
-    const existingRecoveredLabels = new Set(
-      (Array.isArray(params.basePayload.elements) ? params.basePayload.elements : [])
-        .filter((element: any) => String(element?.ref || '').startsWith('ref_text_filter_panel_'))
-        .map((element: any) =>
-          String(element?.name || element?.text || '')
-            .replace(/\s+/g, ' ')
-            .trim()
-            .toLowerCase(),
-        )
-        .filter(Boolean),
-    );
-
-    const recovered: any[] = [];
-    for (const label of labels) {
-      const normalizedLabel = label.replace(/\s+/g, ' ').trim().toLowerCase();
-      if (!normalizedLabel || existingRecoveredLabels.has(normalizedLabel)) continue;
-      const fallback = await this.collectInteractiveElementsFallback(params.tabId, {
-        textQuery: label,
-        includeCoordinates: true,
-        frameId: params.frameId,
-      });
-      const first = Array.isArray(fallback?.elements)
-        ? fallback.elements.find(
-            (element: any) => element?.selector && isCompactFilterPanelFallbackElement(element),
-          )
-        : null;
-      if (!first?.selector) continue;
-      const recoveredElement = {
-        ...first,
-        selector: promoteFilterPanelSelector(first.selector) || first.selector,
-        text: label,
-        name: label,
-        role: first.role === 'generic' ? 'button' : first.role || 'button',
-        type: first.type === 'text' ? 'button' : first.type || 'button',
-      };
-      const key = searchToolbarElementKey(recoveredElement);
-      if (!key || existingTargetKeys.has(key)) continue;
-      recovered.push(recoveredElement);
-      existingTargetKeys.add(key);
-      existingRecoveredLabels.add(normalizedLabel);
-    }
-    if (recovered.length === 0) return false;
-
-    const existingElements = Array.isArray(params.basePayload.elements)
-      ? params.basePayload.elements
-      : [];
-    const existingRefMap = Array.isArray(params.basePayload.refMap)
-      ? params.basePayload.refMap
-      : [];
-    const offset = existingRefMap.filter((entry: unknown) => entry != null).length;
-    const recoveredRefMap = buildFallbackRefMap(recovered).map((entry, index) =>
-      entry ? { ...entry, ref: `ref_text_filter_panel_${offset + index + 1}` } : null,
-    );
-    const binding = await bindSyntheticRefsToSelectors(
-      params.tabId,
-      recoveredRefMap,
-      params.frameId,
-    );
-    appendSyntheticRefBindingDiagnostic(params.basePayload, binding);
-    const recoveredWithRefs = attachFallbackRefs(recovered, recoveredRefMap);
-
-    params.basePayload.elements = [...recoveredWithRefs, ...existingElements].slice(0, 150);
-    params.basePayload.refMap = [...recoveredRefMap, ...existingRefMap].slice(0, 150);
-    prependRecoveredElementsToPageContent({
-      basePayload: params.basePayload,
-      recoveredElements: recoveredWithRefs,
-      recoveredRefMap,
+    return recoverFilterPanelTextTargetsPayload({
+      ...params,
+      collectInteractiveElementsFallback: this.collectInteractiveElementsFallback.bind(this),
     });
-    params.basePayload.refMapCount = params.basePayload.refMap.filter(
-      (entry: unknown) => entry != null,
-    ).length;
-    params.basePayload.count = Math.max(
-      Number(params.basePayload.count || 0),
-      params.basePayload.elements.length,
-    );
-    params.basePayload.fallbackUsed = true;
-    params.basePayload.fallbackSource = params.basePayload.fallbackSource
-      ? `${params.basePayload.fallbackSource}+filter_panel_target_recovery`
-      : 'filter_panel_target_recovery';
-    return true;
   }
 
   private async generateAccessibilityTreeWithRetry(
