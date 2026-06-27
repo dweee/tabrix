@@ -203,9 +203,22 @@ describe('AI feedback requirement rule', () => {
   ])('requires feedback for actionful generic browser tools: %s', (toolName) => {
     expect(shouldRequestAiFeedbackForTrace(trace(toolName))).toBe(true);
     expect(shouldRequestAiFeedbackForTrace(trace(toolName, '内部维护：刷新浏览器状态缓存'))).toBe(
-      false,
+      true,
     );
   });
+
+  test.each([
+    [TOOL_NAMES.BROWSER.READ_PAGE, '后台诊断：读取页面内容以判断用户任务是否能继续'],
+    [TOOL_NAMES.BROWSER.COLLECT_RESULT_CARDS, '内部维护：收集结果卡片供 AI 判断路径质量'],
+    [TOOL_NAMES.BROWSER.CLICK, 'health check: click the current task filter option'],
+    [TOOL_NAMES.BROWSER.FILL, 'background projection: fill the search box for the active task'],
+    [TOOL_NAMES.BROWSER.KEYBOARD, '纯诊断：提交搜索并观察页面是否刷新'],
+  ])(
+    'does not let maintenance wording suppress default task-meaningful browser feedback: %s',
+    (toolName, taskIntent) => {
+      expect(shouldRequestAiFeedbackForTrace(trace(toolName, taskIntent))).toBe(true);
+    },
+  );
 
   test.each([
     ['AI feedback writeback', TOOL_NAMES.MEMORY.RECORD_AI_FEEDBACK, '回写 AI feedback 评价结果'],

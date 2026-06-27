@@ -54,7 +54,7 @@ export function shouldRequestAiFeedbackForTrace(
   const toolName = trace.toolName;
   if (!toolName) return false;
   if (AI_FEEDBACK_NEVER_TOOLS.has(toolName)) return false;
-  if (isMaintenanceIntent(trace.taskIntent)) return false;
   if (DEFAULT_INTENT_FEEDBACK_TOOLS.has(toolName)) return true;
+  if (isMaintenanceIntent(trace.taskIntent)) return false;
   return BROWSER_TOOLS.has(toolName);
 }
