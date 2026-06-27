@@ -98,6 +98,7 @@ import {
   suppressVisibleRowsForContentDetail,
 } from './read-page-visible-region-postprocess';
 import { inferUserActivityLevel } from './read-page-user-activity';
+import { shouldSampleVisibleText } from './read-page-visible-text-sampling';
 import {
   buildAuthCollaborationState,
   buildAuthQrArtifactRefs,
@@ -198,27 +199,6 @@ function delay(ms: number): Promise<void> {
 
 function getTabNavigationUrl(tab: Pick<chrome.tabs.Tab, 'url' | 'pendingUrl'>): string {
   return String(tab.url || tab.pendingUrl || '');
-}
-
-function shouldSampleVisibleText(input: {
-  treeOk: boolean;
-  userControlled: boolean;
-  mode: ReadPageMode;
-  requestedDepth: number | undefined;
-  focusRefId: string | undefined;
-  rows: VisibleRegionRowsResult;
-  pageRole?: string;
-  assistantGuidance?: ReadPageAssistantGuidance;
-}): boolean {
-  if (!input.treeOk) return false;
-  if (input.focusRefId) return false;
-  if (input.mode === 'full') return true;
-  if (input.pageRole === 'publish_form') return true;
-  if (shouldRecoverSearchToolbarTargets(input.assistantGuidance, input.pageRole)) return true;
-  if (!input.userControlled) return true;
-  if (input.rows.visibleRegionRowsUsed) return false;
-  if (input.pageRole === 'search_results') return true;
-  return input.requestedDepth !== undefined && input.requestedDepth <= 3;
 }
 
 async function buildModeOutput(params: {
