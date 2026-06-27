@@ -206,6 +206,28 @@ function hasVerifiedAiSuccessFeedback(trace: MemoryTrace): boolean {
   );
 }
 
+function hasAiFeedbackTrace(trace: MemoryTrace): boolean {
+  const feedback = readObject(trace.aiFeedback);
+  return readString(feedback?.sourceKind) === 'ai_feedback';
+}
+
+function hasAiFeedbackBusinessFailure(trace: MemoryTrace): boolean {
+  const feedback = readObject(trace.aiFeedback);
+  if (readString(feedback?.sourceKind) !== 'ai_feedback') return false;
+  const businessStatus = readString(feedback?.businessStatus);
+  return (
+    businessStatus === 'not_achieved' || businessStatus === 'blocked' || businessStatus === 'failed'
+  );
+}
+
+function hasAiExperienceReuseVeto(trace: MemoryTrace): boolean {
+  const feedback = readObject(trace.aiFeedback);
+  return (
+    readString(feedback?.sourceKind) === 'ai_feedback' &&
+    readBoolean(feedback?.experienceCandidate) === false
+  );
+}
+
 function isBusinessAchieved(trace: MemoryTrace): boolean {
   if (isBlockedOrUnreplayableTrace(trace)) return false;
   return hasVerifiedAiSuccessFeedback(trace);
@@ -649,11 +671,13 @@ function countRecipeRejectionSignals(
   const counters = emptyRecipeRejectionCounters();
   const feedbackRequiredTraces = group.traces.filter(shouldRequestAiFeedbackForTrace);
   counters.missingAiFeedbackTraceCount = feedbackRequiredTraces.filter(
-    (trace) => !hasVerifiedAiSuccessFeedback(trace),
+    (trace) => !hasAiFeedbackTrace(trace),
   ).length;
   counters.rejectedBusinessFailureTraceCount = feedbackRequiredTraces.filter(
-    (trace) => hasVerifiedAiSuccessFeedback(trace) && !isBusinessAchieved(trace),
+    (trace) => hasAiFeedbackBusinessFailure(trace) || hasHardNegativeBusinessState(trace),
   ).length;
+  counters.rejectedUnreplayableQualityTraceCount +=
+    feedbackRequiredTraces.filter(hasAiExperienceReuseVeto).length;
   const blockingUntemplatedTraceCount = feedbackRequiredTraces.filter(
     isBlockingUntemplatedTaskStep,
   ).length;

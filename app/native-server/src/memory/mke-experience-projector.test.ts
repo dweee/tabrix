@@ -1273,6 +1273,8 @@ describe('MkeExperienceProjector', () => {
     const result = projector.projectIdleBatch({ nowIso: '2026-06-06T09:00:05.000Z' });
 
     expect(result.savedExperienceCount).toBe(0);
+    expect(result.rejectedBusinessFailureTraceCount).toBe(1);
+    expect(result.missingAiFeedbackTraceCount).toBe(1);
     expect(experience.findByScenario(`mke:example.test:${pageModelKey}`)).toEqual([]);
   });
 
@@ -1326,6 +1328,8 @@ describe('MkeExperienceProjector', () => {
     const result = projector.projectIdleBatch({ nowIso: '2026-06-06T09:05:05.000Z' });
 
     expect(result.savedExperienceCount).toBe(0);
+    expect(result.rejectedUnreplayableQualityTraceCount).toBe(1);
+    expect(result.missingAiFeedbackTraceCount).toBe(0);
     expect(experience.findByScenario(`mke:example.test:${pageModelKey}`)).toEqual([]);
   });
 
