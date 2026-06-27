@@ -7,6 +7,14 @@ import {
   readString,
 } from './mke-memory-value-readers';
 
+const REUSABLE_OBJECT_SOURCE_PROVENANCE = new Set(['dom', 'ax', 'cdp', 'visible_text', 'api']);
+
+function normalizeReusableObjectSourceProvenance(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toLowerCase();
+  return REUSABLE_OBJECT_SOURCE_PROVENANCE.has(normalized) ? normalized : null;
+}
+
 export function mergeReadPageFactsWithExistingCollectionFacts(
   readPageFacts: Record<string, unknown>,
   existingFactsValue: unknown,
@@ -61,7 +69,7 @@ export function summarizeReadPageSnapshot(payload: unknown): Record<string, unkn
   if (!snapshot) return null;
   const pageState = readNestedObject(snapshot, 'pageState');
   const sourceProvenance = readArray(snapshot.sourceProvenance)
-    .map((entry): string | null => (typeof entry === 'string' ? entry : null))
+    .map(normalizeReusableObjectSourceProvenance)
     .filter((entry): entry is string => Boolean(entry))
     .slice(0, 8);
   const summary = {

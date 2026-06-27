@@ -34,7 +34,7 @@ describe('read-page object projection helpers', () => {
       pageRole: 'results',
       objectCount: 12,
       actionableObjectCount: 5,
-      sourceProvenance: ['dom', 'ax', 'cdp', 'network', 'screenshot', 'extra'],
+      sourceProvenance: ['dom', 'ax', 'cdp'],
     });
     const serialized = JSON.stringify(summary);
     expect(serialized).not.toContain('xsec_token');

@@ -220,6 +220,39 @@ describe('read_page object snapshot and delta', () => {
     });
   });
 
+  it('does not mark object provenance as CDP when only runtime network or console signals exist', () => {
+    const result = buildReadPageSnapshotSourceStats({
+      tabId: 100,
+      currentUrl: 'https://example.test/search?q=ai',
+      currentTitle: 'Search',
+      cdpSensing: {
+        source: 'cdp_page_sensing',
+        available: true,
+        readiness: 'complete',
+        likelyLoading: false,
+        networkActivity: {
+          requestStartedCount: 3,
+          inFlightCount: 0,
+          failedRequestCount: 0,
+        },
+        console: {
+          errorCount: 0,
+          warningCount: 1,
+        },
+        claimBoundary: 'test fixture',
+      },
+      pageRegions: [region()],
+      candidateActions: [],
+      pageType: 'search',
+      pageRole: 'search_page',
+      pageStability: 'stable',
+      loadReadiness: ready,
+    });
+
+    expect(result.sourceProvenance).toEqual(['dom']);
+    expect(result.objects[0].sourceProvenance).toEqual(['dom', 'visible_text']);
+  });
+
   it('prioritizes route and console changes before generic object changes', () => {
     const before = snapshot({
       snapshotId: 'before',

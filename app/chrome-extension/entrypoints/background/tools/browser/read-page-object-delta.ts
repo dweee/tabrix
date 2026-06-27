@@ -189,11 +189,7 @@ export function buildReadPageSnapshotSourceStats(params: {
   const regionList = Array.isArray(params.pageRegions) ? params.pageRegions : [];
   const actionList = Array.isArray(params.candidateActions) ? params.candidateActions : [];
   const regionSources = collectSourceProvenance({
-    includeCDP: Boolean(
-      params.cdpSensing?.accessibility ||
-      params.cdpSensing?.networkActivity ||
-      params.cdpSensing?.console,
-    ),
+    includeCDP: Boolean(params.cdpSensing?.accessibility),
     includeVisibleText: Boolean(
       params.visibleTextContent && String(params.visibleTextContent).trim().length > 0,
     ),
