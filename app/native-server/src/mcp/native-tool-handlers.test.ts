@@ -21,6 +21,7 @@ function makeDeps(
     } | null;
     flushAndProjectMkeAfterAiFeedback: jest.Mock;
     findReusableMkeExperienceRecipes: jest.Mock;
+    findLatestMkeKnowledgeModel: jest.Mock;
   }> = {},
 ): NativeToolHandlerDeps {
   const flushAndProjectMkeAfterAiFeedback =
@@ -58,6 +59,7 @@ function makeDeps(
       },
       flushAndProjectMkeAfterAiFeedback,
       findReusableMkeExperienceRecipes: overrides.findReusableMkeExperienceRecipes,
+      findLatestMkeKnowledgeModel: overrides.findLatestMkeKnowledgeModel,
     } as unknown as NativeToolHandlerDeps['sessionManager'],
   };
 }
@@ -363,6 +365,73 @@ describe('native-tool-handlers · tabrix_choose_context (B-018 v1)', () => {
       siteFamily: 'content.example',
       pageRole: 'search_results',
       limit: 1,
+    });
+  });
+
+  it('surfaces page-model Knowledge from the native SessionManager as context guidance', async () => {
+    const handler = getChooseHandler();
+    const findLatestMkeKnowledgeModel = jest.fn().mockReturnValue({
+      knowledgeId: 'km-content-search',
+      siteFamily: 'content.example',
+      pageUrlPattern: 'https://content.example/search*',
+      pageRole: 'search_results',
+      pageModelKey: 'page:content.example:search_results',
+      modelVersion: 1,
+      pageStateModel: {},
+      objectGraph: {
+        sourceObjectCount: 8,
+        objectTypeCounts: {
+          result_card: 6,
+          search_input: 1,
+        },
+      },
+      actionSurface: {
+        reusableActionKinds: ['click_result_card', 'submit_search'],
+      },
+      dataSourceModel: {
+        selectedDataSourceCounts: {
+          dom_json: 1,
+        },
+      },
+      navigationModel: null,
+      failureSignal: null,
+      sourceTraceIds: [],
+      sourceExperienceIds: [],
+      observationCount: 2,
+      successfulUseCount: 0,
+      failedUseCount: 0,
+      confidenceScore: 0.8,
+      driftScore: null,
+      archivedAt: null,
+      lastObservedAt: '2026-06-20T00:00:00.000Z',
+      lastValidatedAt: null,
+      createdAt: '2026-06-20T00:00:00.000Z',
+      updatedAt: '2026-06-20T00:00:00.000Z',
+    });
+
+    const result = await handler(
+      {
+        intent: '内容站搜索并整理前10条结果',
+        url: 'https://content.example/search?q=ai',
+        pageRole: 'search_results',
+      },
+      makeDeps({
+        findLatestMkeKnowledgeModel,
+      }),
+    );
+
+    expect(result.isError).toBe(false);
+    const body = callTextPayload(result);
+    expect(body.strategy).toBe('read_page_required');
+    expect(body.artifacts).toEqual([
+      expect.objectContaining({
+        kind: 'knowledge_page_model',
+        ref: 'km-content-search',
+      }),
+    ]);
+    expect(findLatestMkeKnowledgeModel).toHaveBeenCalledWith({
+      siteFamily: 'content.example',
+      pageModelKey: 'page:content.example:search_results',
     });
   });
 

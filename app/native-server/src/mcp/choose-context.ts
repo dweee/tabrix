@@ -64,7 +64,7 @@ import {
   type TaskIntentClass,
 } from '../execution/data-source-router';
 import { tryDirectApiExecute, type DirectApiIntentClass } from '../execution/direct-api-executor';
-import type { ExperienceRecipe } from '../memory/db';
+import type { ExperienceRecipe, KnowledgeModel } from '../memory/db';
 import type { DataNeed, EndpointKnowledgeReader } from '../api-knowledge/types';
 
 const chooseContextLogger = logger.child('choose-context');
@@ -292,6 +292,63 @@ function buildExperienceCatalog(recipe: ExperienceRecipe): {
   };
 }
 
+function readCounterKeys(value: unknown, limit: number): string[] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+  return Object.keys(value as Record<string, unknown>)
+    .filter((key) => key.trim().length > 0)
+    .sort()
+    .slice(0, limit);
+}
+
+function buildChooseContextPageModelKey(input: {
+  siteFamily?: string | null;
+  pageRole?: string | null;
+}): string | null {
+  if (!input.siteFamily) return null;
+  return `page:${input.siteFamily}:${input.pageRole ?? 'unknown_page_role'}`;
+}
+
+function buildKnowledgeModelArtifact(model: KnowledgeModel): TabrixChooseContextArtifact {
+  const objectGraph = readObject(model.objectGraph);
+  const actionSurface = readObject(model.actionSurface);
+  const dataSourceModel = readObject(model.dataSourceModel);
+  const objectTypeCounts = readObject(objectGraph?.objectTypeCounts) as Record<
+    string,
+    number
+  > | null;
+  const reusableActionKinds = Array.isArray(actionSurface?.reusableActionKinds)
+    ? actionSurface.reusableActionKinds
+        .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+        .slice(0, 12)
+    : [];
+  const dataSourceKinds = readCounterKeys(dataSourceModel?.selectedDataSourceCounts, 8);
+  const objectTypeNames = objectTypeCounts ? readCounterKeys(objectTypeCounts, 8) : [];
+  const summaryParts = [
+    `Page model ${model.pageModelKey}`,
+    `objects=${objectGraph?.sourceObjectCount ?? 'unknown'}`,
+    reusableActionKinds.length > 0 ? `actions=${reusableActionKinds.join('/')}` : null,
+    objectTypeNames.length > 0 ? `types=${objectTypeNames.join('/')}` : null,
+  ].filter((part): part is string => Boolean(part));
+
+  return {
+    kind: 'knowledge_page_model',
+    ref: model.knowledgeId,
+    summary: summaryParts.join('; ').slice(0, 200),
+    knowledgeModel: {
+      schema: 'tabrix_knowledge_page_model_hint_v1',
+      siteFamily: model.siteFamily,
+      pageRole: model.pageRole,
+      pageModelKey: model.pageModelKey,
+      observationCount: model.observationCount,
+      confidenceScore: model.confidenceScore,
+      lastObservedAt: model.lastObservedAt,
+      objectTypeCounts: objectTypeCounts ?? undefined,
+      reusableActionKinds,
+      dataSourceKinds,
+    },
+  };
+}
+
 function readArtifactObject(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : null;
 }
@@ -353,6 +410,7 @@ export interface ChooseContextFacts {
     summary: string;
     recipe?: NonNullable<TabrixChooseContextArtifact['recipe']>;
   };
+  knowledgeModelArtifact?: TabrixChooseContextArtifact;
   /**
    * Knowledge catalog summary for the resolved site family. Empty or
    * missing data means "do not pick `knowledge_light`".
@@ -390,6 +448,7 @@ export function chooseContextStrategy(facts: ChooseContextFacts): StrategyDecisi
           summary: facts.experienceCatalog.summary,
           ...(facts.experienceCatalog.recipe ? { recipe: facts.experienceCatalog.recipe } : {}),
         },
+        ...(facts.knowledgeModelArtifact ? [facts.knowledgeModelArtifact] : []),
       ],
     };
   }
@@ -412,14 +471,17 @@ export function chooseContextStrategy(facts: ChooseContextFacts): StrategyDecisi
           ref: cat.site,
           summary,
         },
+        ...(facts.knowledgeModelArtifact ? [facts.knowledgeModelArtifact] : []),
       ],
     };
   }
 
   return {
     strategy: 'read_page_required',
-    reasoning: 'no usable local Knowledge — fall back to chrome_read_page',
-    artifacts: [],
+    reasoning: facts.knowledgeModelArtifact
+      ? 'page Knowledge exists but no reusable Experience or API endpoint matched — call chrome_read_page with the page model as guidance'
+      : 'no usable local Knowledge — fall back to chrome_read_page',
+    artifacts: facts.knowledgeModelArtifact ? [facts.knowledgeModelArtifact] : [],
   };
 }
 
@@ -521,6 +583,12 @@ export interface RunTabrixChooseContextDeps {
       limit?: number;
     }): ExperienceRecipe[];
   } | null;
+  knowledgeModels?: {
+    findLatestByPage(input: {
+      siteFamily: string;
+      pageModelKey: string;
+    }): KnowledgeModel | undefined;
+  } | null;
   /**
    * Telemetry write-back. `null` means "telemetry disabled"
    * (persistence off, or the wiring opted out for a particular caller).
@@ -612,6 +680,20 @@ export function runTabrixChooseContext(
   }
 
   let knowledgeCatalog: ChooseContextFacts['knowledgeCatalog'];
+  let knowledgeModelArtifact: ChooseContextFacts['knowledgeModelArtifact'];
+  if (!currentContextRestricted && deps.knowledgeModels && siteFamily) {
+    const pageModelKey = buildChooseContextPageModelKey({
+      siteFamily,
+      pageRole: input.pageRole ?? null,
+    });
+    if (pageModelKey) {
+      const model = deps.knowledgeModels.findLatestByPage({
+        siteFamily,
+        pageModelKey,
+      });
+      if (model) knowledgeModelArtifact = buildKnowledgeModelArtifact(model);
+    }
+  }
   const apiCandidate = currentContextRestricted
     ? null
     : resolveApiKnowledgeCandidate({
@@ -650,6 +732,7 @@ export function runTabrixChooseContext(
     pageRole: input.pageRole,
     siteFamily,
     experienceCatalog,
+    knowledgeModelArtifact,
     knowledgeCatalog,
   });
 

@@ -84,6 +84,7 @@ export interface NativeToolHandlerDeps {
   > & {
     memoryTraces?: SessionManager['memoryTraces'];
     findReusableMkeExperienceRecipes?: SessionManager['findReusableMkeExperienceRecipes'];
+    findLatestMkeKnowledgeModel?: SessionManager['findLatestMkeKnowledgeModel'];
   };
   /**
    * Externally-keyed `TaskSessionContext` the dispatcher resolved for
@@ -296,6 +297,11 @@ const handleTabrixChooseContext: NativeToolHandler = async (args, deps) => {
       ? {
           findReusableByContext: (input) =>
             deps.sessionManager.findReusableMkeExperienceRecipes?.(input) ?? [],
+        }
+      : null,
+    knowledgeModels: deps.sessionManager.findLatestMkeKnowledgeModel
+      ? {
+          findLatestByPage: (input) => deps.sessionManager.findLatestMkeKnowledgeModel?.(input),
         }
       : null,
     telemetry: deps.sessionManager.chooseContextTelemetry,

@@ -19,7 +19,7 @@ import {
 import type { ChooseContextTelemetryRepository } from '../memory/telemetry/choose-context-telemetry';
 import type { KnowledgeApiRepository } from '../memory/knowledge/knowledge-api-repository';
 import type { KnowledgeApiEndpoint } from '../memory/knowledge/knowledge-api-repository';
-import type { ExperienceRecipe } from '../memory/db';
+import type { ExperienceRecipe, KnowledgeModel } from '../memory/db';
 import { logger } from '../logging/logger';
 
 function fakeEndpoint(overrides: Partial<KnowledgeApiEndpoint> = {}): KnowledgeApiEndpoint {
@@ -58,6 +58,57 @@ function fakeKnowledgeRepo(rows: KnowledgeApiEndpoint[]): {
   return {
     repo: { listBySite: spy, countAll: () => rows.length } as unknown as KnowledgeApiRepository,
     spy,
+  };
+}
+
+function fakeKnowledgeModel(overrides: Partial<KnowledgeModel> = {}): KnowledgeModel {
+  return {
+    knowledgeId: 'km-content-search',
+    siteFamily: 'content.example',
+    pageUrlPattern: 'https://content.example/search*',
+    pageRole: 'search_results',
+    pageModelKey: 'page:content.example:search_results',
+    modelVersion: 1,
+    pageStateModel: {
+      schema: 'tabrix_mke_page_state_model_v1',
+      states: { observed: 3 },
+      observationCount: 3,
+    },
+    objectGraph: {
+      schema: 'tabrix_mke_object_graph_summary_v1',
+      sourceObjectCount: 12,
+      objectTypeCounts: {
+        search_input: 1,
+        filter_panel: 1,
+        result_card: 10,
+      },
+    },
+    actionSurface: {
+      schema: 'tabrix_mke_action_surface_summary_v1',
+      reusableActionKinds: ['click_result_card', 'set_filter', 'submit_search'],
+    },
+    dataSourceModel: {
+      schema: 'tabrix_mke_data_source_model_v1',
+      selectedDataSourceCounts: {
+        dom_json: 2,
+        api: 1,
+      },
+    },
+    navigationModel: null,
+    failureSignal: null,
+    sourceTraceIds: ['trace-1'],
+    sourceExperienceIds: [],
+    observationCount: 3,
+    successfulUseCount: 0,
+    failedUseCount: 0,
+    confidenceScore: 0.82,
+    driftScore: null,
+    archivedAt: null,
+    lastObservedAt: '2026-06-20T00:00:00.000Z',
+    lastValidatedAt: null,
+    createdAt: '2026-06-20T00:00:00.000Z',
+    updatedAt: '2026-06-20T00:00:00.000Z',
+    ...overrides,
   };
 }
 
@@ -366,6 +417,40 @@ describe('runTabrixChooseContext (orchestrator)', () => {
     );
     expect(result.strategy).toBe('knowledge_light');
     expect(spy).toHaveBeenCalledWith('www.example.test', expect.any(Number));
+  });
+
+  it('returns a page-model Knowledge artifact without changing the fallback strategy', () => {
+    const findLatestByPage = jest.fn().mockReturnValue(fakeKnowledgeModel());
+    const result = runTabrixChooseContext(
+      {
+        intent: 'collect top 10 result cards',
+        url: 'https://content.example/search?q=ai',
+        pageRole: 'search_results',
+      },
+      {
+        knowledgeApi: null,
+        knowledgeModels: { findLatestByPage },
+      },
+    );
+
+    expect(result.strategy).toBe('read_page_required');
+    expect(findLatestByPage).toHaveBeenCalledWith({
+      siteFamily: 'content.example',
+      pageModelKey: 'page:content.example:search_results',
+    });
+    expect(result.artifacts).toEqual([
+      expect.objectContaining({
+        kind: 'knowledge_page_model',
+        ref: 'km-content-search',
+        knowledgeModel: expect.objectContaining({
+          schema: 'tabrix_knowledge_page_model_hint_v1',
+          pageModelKey: 'page:content.example:search_results',
+          reusableActionKinds: ['click_result_card', 'set_filter', 'submit_search'],
+          dataSourceKinds: ['api', 'dom_json'],
+        }),
+      }),
+    ]);
+    expect(JSON.stringify(result.artifacts)).not.toContain('trace-1');
   });
 
   it('does not reuse Knowledge when the current page is a verification challenge', () => {

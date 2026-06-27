@@ -739,6 +739,14 @@ export class SessionManager {
     return this.repos.knowledgeModel.listRecent({ limit, offset });
   }
 
+  public findLatestMkeKnowledgeModel(input: {
+    siteFamily: string;
+    pageModelKey: string;
+  }): KnowledgeModel | undefined {
+    if (!this.repos) return undefined;
+    return this.repos.knowledgeModel.findLatestByPage(input);
+  }
+
   public countMkeKnowledgeModels(): number {
     if (!this.repos) return 0;
     return this.repos.knowledgeModel.count();

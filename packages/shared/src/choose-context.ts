@@ -111,7 +111,7 @@ export interface TabrixChooseContextInput {
  * subsystem produced it.
  */
 export interface TabrixChooseContextArtifact {
-  kind: 'experience_recipe' | 'knowledge_api' | 'read_page';
+  kind: 'experience_recipe' | 'knowledge_api' | 'knowledge_page_model' | 'read_page';
   ref: string;
   /** Compact human-readable label, ≤ 200 chars. Not a UI string. */
   summary: string;
@@ -133,6 +133,23 @@ export interface TabrixChooseContextArtifact {
     steps?: unknown[];
     successCheck?: unknown;
     fallback?: string;
+  };
+  /**
+   * Optional privacy-safe page capability hint distilled from Object Library
+   * records. This is read-only guidance for AI context selection; it is not an
+   * execution recipe and must not contain raw page payloads or session DOM refs.
+   */
+  knowledgeModel?: {
+    schema: 'tabrix_knowledge_page_model_hint_v1';
+    siteFamily?: string | null;
+    pageRole?: string | null;
+    pageModelKey?: string | null;
+    observationCount?: number;
+    confidenceScore?: number | null;
+    lastObservedAt?: string | null;
+    objectTypeCounts?: Record<string, number>;
+    reusableActionKinds?: string[];
+    dataSourceKinds?: string[];
   };
 }
 
