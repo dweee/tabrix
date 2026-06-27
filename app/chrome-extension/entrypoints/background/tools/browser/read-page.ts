@@ -96,6 +96,7 @@ import {
   suppressVisibleRowsForContentDetail,
 } from './read-page-visible-region-postprocess';
 import { inferUserActivityLevel } from './read-page-user-activity';
+import { sampleVisibleTextContent } from './read-page-visible-text-content';
 import { shouldSampleVisibleText } from './read-page-visible-text-sampling';
 import { collectVisibleSearchSurfaceActions } from './read-page-visible-search-surface-actions';
 import {
@@ -181,7 +182,6 @@ const READ_PAGE_PENDING_DOCUMENT_WAIT_MS = 5000;
 const READ_PAGE_CONTENT_MESSAGE_RETRY_DELAY_MS = 450;
 const INTERACTIVE_ELEMENTS_HELPER_FILE = 'inject-scripts/interactive-elements-helper.js';
 const INTERACTIVE_ELEMENTS_HELPER_PING_TIMEOUT_MS = 300;
-const VISIBLE_TEXT_FALLBACK_MAX_CHARS = 12_000;
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -646,24 +646,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
   }
 
   private async sampleVisibleTextContent(tabId: number, frameId?: number): Promise<string | null> {
-    try {
-      const result = await chrome.scripting.executeScript({
-        target: { tabId, ...(typeof frameId === 'number' ? { frameIds: [frameId] } : {}) },
-        func: (maxChars: number) => {
-          try {
-            const text = document.body?.innerText || '';
-            return typeof text === 'string' ? text.slice(0, maxChars) : '';
-          } catch {
-            return '';
-          }
-        },
-        args: [VISIBLE_TEXT_FALLBACK_MAX_CHARS],
-      } as any);
-      const text = result?.[0]?.result;
-      return typeof text === 'string' && text.trim() ? text : null;
-    } catch {
-      return null;
-    }
+    return sampleVisibleTextContent({ tabId, frameId });
   }
 
   private async collectInteractiveElementsFallback(
