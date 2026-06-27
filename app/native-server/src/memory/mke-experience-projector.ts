@@ -71,6 +71,8 @@ const TEMPLATE_BLOCKING_UNTEMPLATED_TOOLS = new Set([
 const MAX_REPLAYABLE_ACTION_DURATION_MS = 30_000;
 const UNREPLAYABLE_FALLBACK_PATTERN =
   /coordinate|coords|mouse|screenshot|image|ocr|fallback|retry|unstable|no[_-]?stable[_-]?target/i;
+const TRANSIENT_TARGET_SIGNAL_PATTERN =
+  /\b(coordinate|coordinates|coords|mouse[_-]?position|visual[-_]?fallback|screenshot|viewport[-_]?center|viewport[-_]?pixel|bounding[-_]?box)\b|(?:^|[:/_-])rect(?:$|[:/_-])/i;
 
 const BLOCKED_PAGE_SIGNAL_PATTERN =
   /\b(captcha|recaptcha|challenge|verification|security[-_]?check|human[-_]?check|verify(uuid|type|biz)?|user[_-]?verification[_-]?required|login[_-]?required|auth[_-]?required|access[_-]?denied|restricted)\b|安全验证|人机验证|滑块验证|验证码|登录验证/i;
@@ -236,8 +238,7 @@ function isBusinessAchieved(trace: MemoryTrace): boolean {
 
 function hasCoordinateDependency(value: unknown): boolean {
   if (value === null || value === undefined) return false;
-  if (typeof value === 'string')
-    return /\b(coordinate|coordinates|coords|mouse_position)\b/i.test(value);
+  if (typeof value === 'string') return TRANSIENT_TARGET_SIGNAL_PATTERN.test(value);
   if (typeof value === 'number' || typeof value === 'boolean') return false;
   if (Array.isArray(value)) return value.some(hasCoordinateDependency);
   if (typeof value !== 'object') return false;
@@ -246,7 +247,9 @@ function hasCoordinateDependency(value: unknown): boolean {
   if (
     (keys.includes('x') && keys.includes('y')) ||
     keys.some((key) =>
-      /\b(screenx|screeny|clientx|clienty|coordinate|coordinates|coords)\b/i.test(key),
+      /\b(screenx|screeny|clientx|clienty|coordinate|coordinates|coords|rect|center|boundingbox|bounding_box|visualfallback|visual_fallback|viewportpixel|viewport_pixel)\b/i.test(
+        key,
+      ),
     )
   ) {
     return true;

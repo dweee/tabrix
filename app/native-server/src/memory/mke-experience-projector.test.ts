@@ -956,6 +956,32 @@ describe('MkeExperienceProjector', () => {
       requestParams: { tabId: 9 },
       durationMs: 1000,
     },
+    {
+      label: 'visual fallback target with a nominal stable ref',
+      actionTraceId: 'trace-click-visual-fallback',
+      requestParams: {
+        tabId: 9,
+        ref: 'submit-button',
+        stableLocatorChain: ['visual_fallback:screenshot_region'],
+      },
+      actionTarget: {
+        stableTargetRef: 'tgt_submit',
+        stableLocatorChain: ['css:#submit', 'rect:center'],
+        sourceProvenance: ['dom', 'visual_fallback'],
+      },
+      durationMs: 1000,
+    },
+    {
+      label: 'viewport bounding box target with a nominal stable ref',
+      actionTraceId: 'trace-click-bounding-box',
+      requestParams: { tabId: 9, ref: 'submit-button' },
+      actionTarget: {
+        stableTargetRef: 'tgt_submit',
+        locatorChain: ['ax:name:Submit', 'viewport_center'],
+        boundingBox: { left: 10, top: 20, width: 80, height: 24 },
+      },
+      durationMs: 1000,
+    },
   ])('does not mine a recipe from AI-approved but unreplayable quality path: $label', (variant) => {
     const opened = openMemoryDb({ dbPath: ':memory:' });
     const traces = new MemoryTraceRepository(opened.db);
@@ -1005,6 +1031,7 @@ describe('MkeExperienceProjector', () => {
         durationMs: variant.durationMs,
         toolSuccess: true,
         fallbackUsed: variant.fallbackUsed,
+        actionTarget: variant.actionTarget,
         aiFeedback: verifiedExperienceFeedback({
           confidence: 0.95,
           reasonCode: 'ai_verified_result',
