@@ -306,6 +306,40 @@ describe('chooseContextStrategy (pure)', () => {
     ]);
   });
 
+  it('returns read_page_required when Experience exists but current page validation is required', () => {
+    const decision = chooseContextStrategy({
+      intentSignature: 'content_site top 10 cards',
+      siteFamily: 'content.example',
+      pageRole: 'search_results',
+      blockedExperienceCatalog: {
+        experienceId: 'exp-content-top10',
+        summary: 'Verified chrome_collect_result_cards filters=最多收藏/图文/一周内 top>=10',
+        recipe: {
+          schema: 'tabrix_experience_recipe_hint_v1',
+          siteFamily: 'content.example',
+          pageRole: 'search_results',
+          taskSignature: 'tools:chrome_collect_result_cards',
+          successCount: 2,
+          reliabilityScore: 1,
+          driftState: 'verified_once',
+          steps: [{ toolName: 'chrome_collect_result_cards' }],
+          successCheck: {},
+          fallback:
+            'If the live page or filter state does not match this recipe, call chrome_read_page before reusing it.',
+        },
+      },
+      experienceReuseBlockedBy: 'current_page_validation_required',
+    });
+
+    expect(decision.strategy).toBe('read_page_required');
+    expect(decision.fallbackStrategy).toBeUndefined();
+    expect(decision.reuseBlockedBy).toBe('current_page_validation_required');
+    expect(decision.artifacts[0]).toMatchObject({
+      kind: 'experience_recipe',
+      ref: 'exp-content-top10',
+    });
+  });
+
   it('returns knowledge_light when no experience hit and catalog is non-empty', () => {
     const decision = chooseContextStrategy({
       intentSignature: 'open issues',
@@ -707,6 +741,8 @@ describe('runTabrixChooseContext telemetry (V23-04)', () => {
             hvoCount: 10,
             fullReadByteLength: 40_000,
             pageRole: 'search_results',
+            factSnapshotVerdict: 'fresh',
+            readinessVerdict: 'ready',
           }),
         },
       },
@@ -736,6 +772,60 @@ describe('runTabrixChooseContext telemetry (V23-04)', () => {
         taskSignature: 'tools:chrome_collect_result_cards',
       },
     ]);
+  });
+
+  it('blocks Experience reuse until the current page has a fresh validated snapshot', () => {
+    const tele = fakeTelemetry();
+    const recipe = {
+      experienceId: 'exp-content-top10',
+      taskSignature: 'tools:chrome_collect_result_cards',
+      successCount: 3,
+      failureCount: 0,
+      reliabilityScore: 1,
+      pageRole: 'search_results',
+      steps: [{ toolName: 'chrome_collect_result_cards' }],
+      successCheck: {},
+    } as unknown as ExperienceRecipe;
+
+    const result = runTabrixChooseContext(
+      {
+        intent: 'collect top 10 result cards',
+        url: 'https://content.example/search_result/?keyword=AI',
+        pageRole: 'search_results',
+      },
+      {
+        knowledgeApi: null,
+        telemetry: tele.repo,
+        newDecisionId: () => 'dc-exp-current-page-required',
+        now: () => '2026-06-14T10:00:00.000Z',
+        experienceRecipes: {
+          findReusableByContext: () => [recipe],
+        },
+        pageContext: {
+          getContext: () => ({
+            source: 'fallback_zero',
+            candidateActionsCount: 0,
+            hvoCount: 0,
+            fullReadByteLength: 0,
+            pageRole: 'search_results',
+            factSnapshotVerdict: 'missing',
+            readinessVerdict: 'unknown',
+            fallbackCause: 'no_matching_snapshot',
+          }),
+        },
+      },
+    );
+
+    expect(result.status).toBe('ok');
+    expect(result.strategy).toBe('read_page_required');
+    expect(result.reuseBlockedBy).toBe('current_page_validation_required');
+    expect(result.sourceRoute).toBe('read_page_required');
+    expect(result.artifacts?.[0]).toMatchObject({
+      kind: 'experience_recipe',
+      ref: 'exp-content-top10',
+    });
+    expect(tele.decisions[0]?.strategy).toBe('read_page_required');
+    expect(tele.decisions[0]?.sourceRoute).toBe('read_page_required');
   });
 
   it('records dispatcherInputSource=fallback_zero with cause when no snapshot is available', () => {

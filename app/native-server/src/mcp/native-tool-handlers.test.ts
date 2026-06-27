@@ -26,6 +26,7 @@ function makeDeps(
     browserObjects: {
       listReusableForPage: jest.Mock;
     } | null;
+    taskContext: TaskSessionContext | null;
   }> = {},
 ): NativeToolHandlerDeps {
   const flushAndProjectMkeAfterAiFeedback =
@@ -75,6 +76,7 @@ function makeDeps(
         return overrides.browserObjects ?? null;
       },
     } as unknown as NativeToolHandlerDeps['sessionManager'],
+    taskContext: overrides.taskContext ?? null,
   };
 }
 
@@ -488,6 +490,18 @@ describe('native-tool-handlers · tabrix_choose_context (B-018 v1)', () => {
       },
       makeDeps({
         findReusableMkeExperienceRecipes,
+        taskContext: {
+          peekReadPageContextMeasurement: () => ({
+            url: 'https://content.example/search_result/?keyword=AI图片创作&type=51',
+            pageRole: 'search_results',
+            fullReadByteLength: 40_000,
+            candidateActionsCount: 10,
+            highValueObjectCount: 10,
+          }),
+          peekVisibleRegionRowsEvidence: () => null,
+          noteUrlChange: jest.fn(),
+          noteChooseContextDecision: jest.fn(),
+        } as unknown as TaskSessionContext,
       }),
     );
 
@@ -507,6 +521,43 @@ describe('native-tool-handlers · tabrix_choose_context (B-018 v1)', () => {
       pageRole: 'search_results',
       limit: 1,
     });
+  });
+
+  it('blocks Experience reuse when no current page validation exists', async () => {
+    const handler = getChooseHandler();
+    const findReusableMkeExperienceRecipes = jest.fn().mockReturnValue([
+      {
+        experienceId: 'exp-content-top10',
+        taskSignature: 'tools:chrome_collect_result_cards',
+        successCount: 2,
+        failureCount: 0,
+        reliabilityScore: 1,
+        successCheck: {},
+      },
+    ]);
+
+    const result = await handler(
+      {
+        intent: 'collect top 10 result cards',
+        url: 'https://content.example/search_result/?keyword=AI',
+        pageRole: 'search_results',
+      },
+      makeDeps({
+        findReusableMkeExperienceRecipes,
+      }),
+    );
+
+    expect(result.isError).toBe(false);
+    const body = callTextPayload(result);
+    expect(body.strategy).toBe('read_page_required');
+    expect(body.sourceRoute).toBe('read_page_required');
+    expect(body.reuseBlockedBy).toBe('current_page_validation_required');
+    expect(body.artifacts).toEqual([
+      expect.objectContaining({
+        kind: 'experience_recipe',
+        ref: 'exp-content-top10',
+      }),
+    ]);
   });
 
   it('surfaces page-model Knowledge from the native SessionManager as context guidance', async () => {

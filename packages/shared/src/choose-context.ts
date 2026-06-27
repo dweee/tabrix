@@ -167,6 +167,8 @@ export interface TabrixChooseContextErrorBody {
   message: string;
 }
 
+export type TabrixChooseContextReuseBlockedBy = 'current_page_validation_required';
+
 /**
  * Public response. `status: 'invalid_input'` carries only `error`
  * (everything else is omitted) so the caller can branch on the
@@ -186,6 +188,13 @@ export interface TabrixChooseContextResult {
   reasoning?: string;
   /** Always a list when `status === 'ok'`; possibly empty. */
   artifacts?: TabrixChooseContextArtifact[];
+  /**
+   * Closed-enum reason a reusable artifact was returned only as guidance,
+   * not as an immediately executable route. Today this protects Experience
+   * reuse: historical recipes can guide the AI, but must not bypass a fresh
+   * current-page validation gate.
+   */
+  reuseBlockedBy?: TabrixChooseContextReuseBlockedBy;
   resolved?: TabrixChooseContextResolved;
   error?: TabrixChooseContextErrorBody;
   /**

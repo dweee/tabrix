@@ -34,6 +34,7 @@ import {
   type TabrixChooseContextOutcome,
   type TabrixChooseContextRecordOutcomeResult,
   type TabrixChooseContextResult,
+  type TabrixChooseContextReuseBlockedBy,
   type TabrixContextSiteFamily,
   type TabrixObserveMode,
   type TabrixObserveReason,
@@ -412,6 +413,12 @@ export interface ChooseContextFacts {
     summary: string;
     recipe?: NonNullable<TabrixChooseContextArtifact['recipe']>;
   };
+  blockedExperienceCatalog?: {
+    experienceId: string;
+    summary: string;
+    recipe?: NonNullable<TabrixChooseContextArtifact['recipe']>;
+  };
+  experienceReuseBlockedBy?: TabrixChooseContextReuseBlockedBy;
   knowledgeModelArtifact?: TabrixChooseContextArtifact;
   /**
    * Knowledge catalog summary for the resolved site family. Empty or
@@ -429,6 +436,31 @@ interface StrategyDecision {
   fallbackStrategy?: ContextStrategyName;
   reasoning: string;
   artifacts: TabrixChooseContextArtifact[];
+  reuseBlockedBy?: TabrixChooseContextReuseBlockedBy;
+}
+
+function experienceRecipeArtifact(
+  catalog: NonNullable<ChooseContextFacts['experienceCatalog']>,
+): TabrixChooseContextArtifact {
+  return {
+    kind: 'experience_recipe',
+    ref: catalog.experienceId,
+    summary: catalog.summary,
+    ...(catalog.recipe ? { recipe: catalog.recipe } : {}),
+  };
+}
+
+function isCurrentPageValidatedForExperience(
+  input: {
+    factSnapshotVerdict?: 'fresh' | 'stale' | 'missing' | 'unknown';
+    readinessVerdict?: 'ready' | 'document_loading' | 'empty' | 'error_or_blocked' | 'unknown';
+  } | null,
+): boolean {
+  if (!input) return false;
+  return (
+    input.factSnapshotVerdict === 'fresh' &&
+    (input.readinessVerdict === 'ready' || input.readinessVerdict === 'empty')
+  );
 }
 
 /**
@@ -444,14 +476,22 @@ export function chooseContextStrategy(facts: ChooseContextFacts): StrategyDecisi
       reasoning:
         'verified Experience exists for this site and page role. Reuse it first; fall back to chrome_read_page if the page state or filters do not match.',
       artifacts: [
-        {
-          kind: 'experience_recipe',
-          ref: facts.experienceCatalog.experienceId,
-          summary: facts.experienceCatalog.summary,
-          ...(facts.experienceCatalog.recipe ? { recipe: facts.experienceCatalog.recipe } : {}),
-        },
+        experienceRecipeArtifact(facts.experienceCatalog),
         ...(facts.knowledgeModelArtifact ? [facts.knowledgeModelArtifact] : []),
       ],
+    };
+  }
+
+  if (facts.blockedExperienceCatalog) {
+    return {
+      strategy: 'read_page_required',
+      reasoning:
+        'verified Experience exists, but the current page has not passed a fresh readiness check — call chrome_read_page before reusing the recipe.',
+      artifacts: [
+        experienceRecipeArtifact(facts.blockedExperienceCatalog),
+        ...(facts.knowledgeModelArtifact ? [facts.knowledgeModelArtifact] : []),
+      ],
+      reuseBlockedBy: facts.experienceReuseBlockedBy ?? 'current_page_validation_required',
     };
   }
 
@@ -669,7 +709,16 @@ export function runTabrixChooseContext(
 
   const nowIso = (deps.now ?? (() => new Date().toISOString()))();
 
+  const dispatcherInputs = deps.pageContext
+    ? deps.pageContext.getContext({
+        url: input.url ?? null,
+        pageRole: input.pageRole ?? null,
+      })
+    : null;
+
   let experienceCatalog: ChooseContextFacts['experienceCatalog'];
+  let blockedExperienceCatalog: ChooseContextFacts['blockedExperienceCatalog'];
+  let experienceReuseBlockedBy: TabrixChooseContextReuseBlockedBy | undefined;
   if (!currentContextRestricted && deps.experienceRecipes && siteFamily) {
     const reusableRecipes = deps.experienceRecipes.findReusableByContext({
       siteFamily,
@@ -677,7 +726,13 @@ export function runTabrixChooseContext(
       limit: 1,
     });
     if (reusableRecipes.length > 0 && reusableRecipes[0]) {
-      experienceCatalog = buildExperienceCatalog(reusableRecipes[0]);
+      const catalog = buildExperienceCatalog(reusableRecipes[0]);
+      if (isCurrentPageValidatedForExperience(dispatcherInputs)) {
+        experienceCatalog = catalog;
+      } else {
+        blockedExperienceCatalog = catalog;
+        experienceReuseBlockedBy = 'current_page_validation_required';
+      }
     }
   }
 
@@ -734,6 +789,8 @@ export function runTabrixChooseContext(
     pageRole: input.pageRole,
     siteFamily,
     experienceCatalog,
+    blockedExperienceCatalog,
+    experienceReuseBlockedBy,
     knowledgeModelArtifact,
     knowledgeCatalog,
   });
@@ -753,12 +810,6 @@ export function runTabrixChooseContext(
   // zero-input behaviour bit-for-bit and leave `dispatcherInputSource` /
   // `fallbackCauseV26` `null` in telemetry.
   const intentHint = classifyIntentForLayerDispatch(input.intent);
-  const dispatcherInputs = deps.pageContext
-    ? deps.pageContext.getContext({
-        url: input.url ?? null,
-        pageRole: input.pageRole ?? null,
-      })
-    : null;
   const observedKnowledgeReadIntent =
     !!knowledgeCatalog && !apiCandidate && isObservedKnowledgeReadIntent(input.intent);
   const layerDispatch = dispatchLayer({
@@ -902,6 +953,7 @@ export function runTabrixChooseContext(
     fallbackStrategy: decision.fallbackStrategy,
     reasoning: decision.reasoning,
     artifacts: decision.artifacts,
+    reuseBlockedBy: decision.reuseBlockedBy,
     resolved: {
       intentSignature,
       pageRole: input.pageRole,
