@@ -743,7 +743,7 @@ describe('服务器测试', () => {
         _tabrix: {
           toolName: 'get_windows_and_tabs',
           toolSuccess: true,
-          businessFeedbackRequired: false,
+          businessFeedbackRequired: true,
         },
       });
       expect(payload._tabrix).not.toHaveProperty('businessFeedbackGuideVersion');
