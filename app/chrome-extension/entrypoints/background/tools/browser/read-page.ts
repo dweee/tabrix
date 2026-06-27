@@ -62,7 +62,7 @@ import {
   extractSearchToolbarLabelsFromVisibleText,
 } from './read-page-search-surface';
 import { buildArtifactRefs } from './read-page-artifact-refs';
-import { buildFallbackRefMap, formatElementsAsPageContent } from './read-page-fallback-format';
+import { buildFallbackRefMap } from './read-page-fallback-format';
 import { collectReadPageFileInputBindings } from './read-page-file-input-bindings';
 import { buildPageOperationMap } from './read-page-operation-map';
 import { buildExtensionLayer, buildStableSnapshotLayer } from './read-page-snapshot-builders';
@@ -91,6 +91,10 @@ import {
   reconcilePageUnderstandingWithVisibleRows,
   suppressVisibleRowsForContentDetail,
 } from './read-page-visible-region-postprocess';
+import {
+  applyInteractiveFallbackPayload,
+  repairVisibleRowsTargetRefs as repairVisibleRowsTargetRefsPayload,
+} from './read-page-visible-region-runtime';
 import { inferUserActivityLevel } from './read-page-user-activity';
 import { sampleVisibleTextContent } from './read-page-visible-text-content';
 import { shouldSampleVisibleText } from './read-page-visible-text-sampling';
@@ -112,7 +116,6 @@ import {
   attachFallbackRefs,
   mergeHighValueObjectActionsIntoCandidateActions,
   mergeVisibleSearchSurfaceActions,
-  shouldRepairVisibleRowsTargetRefs,
 } from './read-page-target-recovery';
 import {
   recoverFilterPanelTextTargets as recoverFilterPanelTextTargetsPayload,
@@ -747,51 +750,11 @@ class ReadPageTool extends BaseBrowserToolExecutor {
     currentTitle: string;
     frameId?: number;
   }): Promise<boolean> {
-    if (!shouldRepairVisibleRowsTargetRefs(params.basePayload.visibleRegionRows)) return false;
-
-    const fallback = await this.collectInteractiveElementsFallback(params.tabId, {
-      frameId: params.frameId,
+    return repairVisibleRowsTargetRefsPayload({
+      ...params,
+      collectInteractiveElementsFallback: this.collectInteractiveElementsFallback.bind(this),
+      sampleVisibleTextContent: this.sampleVisibleTextContent.bind(this),
     });
-    if (!fallback) return false;
-    const merged = fallback.elements.slice(0, 150);
-    const fallbackRefMap = buildFallbackRefMap(merged);
-    const mergedWithRefs = attachFallbackRefs(merged, fallbackRefMap);
-    const visibleTextContent =
-      typeof params.basePayload.visibleTextContent === 'string' &&
-      params.basePayload.visibleTextContent.trim()
-        ? params.basePayload.visibleTextContent
-        : await this.sampleVisibleTextContent(params.tabId, params.frameId);
-    if (!visibleTextContent) return false;
-
-    const repairedRows = extractVisibleRegionRows({
-      pageContent: String(params.basePayload.pageContent || ''),
-      visibleTextContent,
-      sourceRegion: params.pageUnderstanding.primaryRegion,
-      fallbackInteractiveElements: mergedWithRefs,
-      url: params.currentUrl,
-      title: params.currentTitle,
-      viewport: params.basePayload.viewport,
-      scrollY: typeof fallback?.scrollY === 'number' ? fallback.scrollY : null,
-      pixelsBelow: typeof fallback?.pixelsBelow === 'number' ? fallback.pixelsBelow : null,
-    });
-    if (
-      !repairedRows.visibleRegionRowsUsed ||
-      repairedRows.targetRefCoverageRate <=
-        params.basePayload.visibleRegionRows.targetRefCoverageRate
-    ) {
-      return false;
-    }
-
-    params.basePayload.visibleTextContent = visibleTextContent;
-    params.basePayload.visibleRegionRows = repairedRows;
-    params.basePayload.fallbackUsed = true;
-    params.basePayload.fallbackSource = 'get_interactive_elements_target_ref_repair';
-    params.basePayload.elements = mergedWithRefs;
-    params.basePayload.count = fallback.elements.length;
-    params.basePayload.refMap = fallbackRefMap;
-    params.basePayload.refMapCount = fallbackRefMap.filter((entry) => entry != null).length;
-    reconcilePageUnderstandingWithVisibleRows(params.basePayload);
-    return true;
   }
 
   // Execute read page
@@ -1455,60 +1418,18 @@ class ReadPageTool extends BaseBrowserToolExecutor {
         });
 
         if (fallback) {
-          const merged = fallback.elements.slice(0, 150);
-          const fallbackRefMap = buildFallbackRefMap(merged);
-          const mergedWithRefs = attachFallbackRefs(merged, fallbackRefMap);
-          const fallbackRefEntryCount = fallbackRefMap.filter((entry) => entry != null).length;
-
-          basePayload.fallbackUsed = true;
-          basePayload.fallbackSource = 'get_interactive_elements';
-          basePayload.reason = treeOk ? 'sparse_tree' : resp?.error || 'tree_failed';
-          basePayload.elements = mergedWithRefs;
-          basePayload.count = fallback.elements.length;
-          basePayload.refMap = fallbackRefMap;
-          basePayload.refMapCount = fallbackRefEntryCount;
-          if (mergedWithRefs.length > 0 || !basePayload.pageContent) {
-            basePayload.pageContent = formatElementsAsPageContent(mergedWithRefs, fallbackRefMap);
-          }
-          const fallbackUnderstanding = inferPageUnderstanding(
+          await applyInteractiveFallbackPayload({
+            tabId,
+            basePayload,
+            fallback,
+            treeOk,
+            treeError: resp?.error,
             currentUrl,
             currentTitle,
-            String(basePayload.pageContent || ''),
-          );
-          basePayload.pageRole = fallbackUnderstanding.pageRole;
-          basePayload.primaryRegion = fallbackUnderstanding.primaryRegion;
-          basePayload.primaryRegionConfidence = fallbackUnderstanding.primaryRegionConfidence;
-          basePayload.footerOnly = fallbackUnderstanding.footerOnly;
-          basePayload.anchorTexts = fallbackUnderstanding.anchorTexts;
-          basePayload.visibleRegionRows = extractVisibleRegionRows({
-            pageContent: String(basePayload.pageContent || ''),
-            sourceRegion: fallbackUnderstanding.primaryRegion,
-            fallbackInteractiveElements: mergedWithRefs,
-            url: currentUrl,
-            title: currentTitle,
-            viewport: basePayload.viewport,
-            scrollY: typeof fallback?.scrollY === 'number' ? fallback.scrollY : null,
-            pixelsBelow: typeof fallback?.pixelsBelow === 'number' ? fallback.pixelsBelow : null,
+            frameId: requestedFrameId,
+            collectInteractiveElementsFallback: this.collectInteractiveElementsFallback.bind(this),
+            sampleVisibleTextContent: this.sampleVisibleTextContent.bind(this),
           });
-          if (!basePayload.visibleRegionRows.visibleRegionRowsUsed) {
-            const visibleTextContent = await this.sampleVisibleTextContent(tabId, requestedFrameId);
-            if (visibleTextContent) {
-              basePayload.visibleTextContent = visibleTextContent;
-              basePayload.visibleRegionRows = extractVisibleRegionRows({
-                pageContent: String(basePayload.pageContent || ''),
-                visibleTextContent,
-                sourceRegion: fallbackUnderstanding.primaryRegion,
-                fallbackInteractiveElements: mergedWithRefs,
-                url: currentUrl,
-                title: currentTitle,
-                viewport: basePayload.viewport,
-                scrollY: typeof fallback?.scrollY === 'number' ? fallback.scrollY : null,
-                pixelsBelow:
-                  typeof fallback?.pixelsBelow === 'number' ? fallback.pixelsBelow : null,
-              });
-            }
-          }
-          reconcilePageUnderstandingWithVisibleRows(basePayload);
           await this.recoverGlobalMenuTextTargets({
             tabId,
             basePayload,
