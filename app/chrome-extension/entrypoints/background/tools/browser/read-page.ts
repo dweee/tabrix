@@ -23,7 +23,6 @@ import {
   type ReadPageFileInputBinding,
   type ReadPagePublishFormReadiness,
   READ_PAGE_REQUESTED_LAYER_VALUES,
-  buildReadPageBrowserPageObjectView,
   buildBrowserPageThingProjectionFromReadPage,
 } from '@tabrix/shared';
 import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
@@ -34,12 +33,12 @@ import { summarizePageContent } from './read-page-content-summary';
 import { buildInteractiveElements } from './read-page-interactive-elements';
 import { buildCandidateActions, type CandidateActionSeed } from './read-page-candidate-actions';
 import {
-  buildBoundedWatchLoopSnapshot,
   buildReadPagePageDeltaReport,
   recordPendingActionBinding,
   resetObjectLifecycleCacheForTests,
 } from './read-page-object-delta';
 import { buildAndRememberReadPageObjectSensingOutput } from './read-page-object-sensing-output';
+import { buildBrowserPageObjectPublication } from './read-page-browser-page-object-publication';
 import { recordReadPageTargetPublication } from './read-page-object-publication';
 import {
   appendObjectSensingDiagnostic,
@@ -440,33 +439,23 @@ async function buildModeOutput(params: {
   }
   let browserPageObjectForAuth: ReadPageBrowserPageObjectView | null = null;
   if (sharedPayload.objectLifecycle) {
-    const watchLoopSnapshot = buildBoundedWatchLoopSnapshot({
+    const browserPageObjectPublication = buildBrowserPageObjectPublication({
       tabId: params.tabId,
-      url: params.currentUrl,
-      pageRegions: sharedPayload.pageRegions,
-      lifecycle: sharedPayload.objectLifecycle,
-      pageProjection: sharedPayload.pageProjection,
-      ownershipRuntime: sharedPayload.ownershipRuntime,
-    });
-    sharedPayload.objectLifecycle = watchLoopSnapshot.objectLifecycle;
-    const browserPageObject = buildReadPageBrowserPageObjectView({
+      currentUrl: params.currentUrl,
+      mode: params.mode,
       pageRegions: sharedPayload.pageRegions,
       pageOperationMap: sharedPayload.pageOperationMap,
       objectLifecycle: sharedPayload.objectLifecycle,
-      previousPageProjection: watchLoopSnapshot.previousPageProjection,
       pageProjection: sharedPayload.pageProjection,
-      previousOwnershipRuntime: watchLoopSnapshot.previousOwnershipRuntime,
       ownershipRuntime: sharedPayload.ownershipRuntime,
       selectedDataSource: sharedPayload.selectedDataSource,
       publishFormReadiness: sharedPayload.publishFormReadiness,
-      sourceRouteHonestyVerdict: null,
     });
-    browserPageObjectForAuth = browserPageObject;
-    sharedPayload.browserPageObjectCompact = browserPageObject.compact;
-    if (params.mode === 'compact') {
-      delete sharedPayload.browserPageObject;
-    } else {
-      sharedPayload.browserPageObject = browserPageObject;
+    browserPageObjectForAuth = browserPageObjectPublication.browserPageObjectForAuth;
+    sharedPayload.objectLifecycle = browserPageObjectPublication.objectLifecycle;
+    sharedPayload.browserPageObjectCompact = browserPageObjectPublication.browserPageObjectCompact;
+    if (browserPageObjectPublication.browserPageObject) {
+      sharedPayload.browserPageObject = browserPageObjectPublication.browserPageObject;
     }
   }
   sharedPayload.authCollaboration = buildAuthCollaborationState({
