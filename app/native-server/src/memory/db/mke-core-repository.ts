@@ -1053,6 +1053,12 @@ export interface ExperienceRecipe extends Required<
   lastVerifiedAt: string | null;
 }
 
+export interface RemoveExperienceSourceTraceResult {
+  updatedCount: number;
+  archivedCount: number;
+  affectedExperienceIds: string[];
+}
+
 export type ExperienceRecipeExport = Pick<
   ExperienceRecipe,
   | 'recipeName'
@@ -1162,6 +1168,8 @@ export class ExperienceRecipeRepository {
   private readonly findReusableByContextStmt;
   private readonly countStmt;
   private readonly archiveStmt;
+  private readonly listBySourceTraceHintStmt;
+  private readonly updateSourceTraceIdsStmt;
   private readonly clearStmt;
 
   constructor(private readonly db: SqliteDatabase) {
@@ -1247,6 +1255,22 @@ export class ExperienceRecipeRepository {
     );
     this.archiveStmt = db.prepare(
       'UPDATE tabrix_experience_recipes SET archived_at = ?, updated_at = ? WHERE experience_id = ?',
+    );
+    this.listBySourceTraceHintStmt = db.prepare(
+      `SELECT * FROM tabrix_experience_recipes
+        WHERE archived_at IS NULL
+          AND source_trace_ids_blob LIKE ?`,
+    );
+    this.updateSourceTraceIdsStmt = db.prepare(
+      `UPDATE tabrix_experience_recipes
+        SET source_trace_ids_blob = @source_trace_ids_blob,
+            success_count = @success_count,
+            reliability_score = @reliability_score,
+            drift_state = @drift_state,
+            archived_at = @archived_at,
+            last_verified_at = @last_verified_at,
+            updated_at = @updated_at
+        WHERE experience_id = @experience_id`,
     );
     this.countStmt = db.prepare(
       'SELECT COUNT(*) AS count FROM tabrix_experience_recipes WHERE archived_at IS NULL',
@@ -1451,6 +1475,57 @@ export class ExperienceRecipeRepository {
 
   public archive(input: { experienceId: string; archivedAt: string }): void {
     this.archiveStmt.run(input.archivedAt, input.archivedAt, input.experienceId);
+  }
+
+  public removeSourceTrace(input: {
+    traceId: string;
+    nowIso: string;
+  }): RemoveExperienceSourceTraceResult {
+    const rows = this.listBySourceTraceHintStmt.all(
+      `%"${input.traceId}"%`,
+    ) as ExperienceRecipeRow[];
+    let updatedCount = 0;
+    let archivedCount = 0;
+    const affectedExperienceIds: string[] = [];
+
+    for (const row of rows) {
+      const recipe = rowToExperienceRecipe(row);
+      if (!recipe.sourceTraceIds.includes(input.traceId)) continue;
+
+      const remainingSourceTraceIds = recipe.sourceTraceIds.filter(
+        (traceId) => traceId !== input.traceId,
+      );
+      const nextSuccessCount = Math.max(0, recipe.successCount - 1);
+      const totalOutcomes = nextSuccessCount + recipe.failureCount;
+      const archivedAt = remainingSourceTraceIds.length === 0 ? input.nowIso : null;
+      const driftState =
+        archivedAt !== null
+          ? 'ai_rejected'
+          : nextSuccessCount >= 2 && recipe.failureCount === 0
+            ? recipe.driftState
+            : 'unverified_template';
+
+      this.updateSourceTraceIdsStmt.run({
+        experience_id: recipe.experienceId,
+        source_trace_ids_blob: requiredBlob(remainingSourceTraceIds),
+        success_count: nextSuccessCount,
+        reliability_score:
+          totalOutcomes > 0 ? Number((nextSuccessCount / totalOutcomes).toFixed(4)) : null,
+        drift_state: driftState,
+        archived_at: archivedAt,
+        last_verified_at: driftState === 'verified_once' ? recipe.lastVerifiedAt : null,
+        updated_at: input.nowIso,
+      });
+      affectedExperienceIds.push(recipe.experienceId);
+      updatedCount += 1;
+      if (archivedAt !== null) archivedCount += 1;
+    }
+
+    return {
+      updatedCount,
+      archivedCount,
+      affectedExperienceIds,
+    };
   }
 
   public count(): number {

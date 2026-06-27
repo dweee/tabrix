@@ -20,6 +20,7 @@ function makeDeps(
       recordAiBusinessFeedback: jest.Mock;
     } | null;
     flushAndProjectMkeAfterAiFeedback: jest.Mock;
+    revokeMkeExperienceForTrace: jest.Mock;
     findReusableMkeExperienceRecipes: jest.Mock;
     findLatestMkeKnowledgeModel: jest.Mock;
   }> = {},
@@ -58,6 +59,13 @@ function makeDeps(
         };
       },
       flushAndProjectMkeAfterAiFeedback,
+      revokeMkeExperienceForTrace:
+        overrides.revokeMkeExperienceForTrace ??
+        jest.fn().mockReturnValue({
+          updatedCount: 0,
+          archivedCount: 0,
+          affectedExperienceIds: [],
+        }),
       findReusableMkeExperienceRecipes: overrides.findReusableMkeExperienceRecipes,
       findLatestMkeKnowledgeModel: overrides.findLatestMkeKnowledgeModel,
     } as unknown as NativeToolHandlerDeps['sessionManager'],
@@ -142,6 +150,11 @@ describe('native-tool-handlers · memory_record_ai_feedback', () => {
       aiFeedbackScore: 0.96,
     });
     const flushAndProjectMkeAfterAiFeedback = jest.fn();
+    const revokeMkeExperienceForTrace = jest.fn().mockReturnValue({
+      updatedCount: 1,
+      archivedCount: 0,
+      affectedExperienceIds: ['experience-1'],
+    });
 
     const result = await handler(
       {
@@ -162,7 +175,11 @@ describe('native-tool-handlers · memory_record_ai_feedback', () => {
         userGoalSnapshot: 'Search, filter, and collect the first ten result cards.',
         experienceCandidate: false,
       },
-      makeDeps({ memoryTraces: { recordAiBusinessFeedback }, flushAndProjectMkeAfterAiFeedback }),
+      makeDeps({
+        memoryTraces: { recordAiBusinessFeedback },
+        flushAndProjectMkeAfterAiFeedback,
+        revokeMkeExperienceForTrace,
+      }),
     );
 
     expect(result.isError).toBe(false);
@@ -196,9 +213,17 @@ describe('native-tool-handlers · memory_record_ai_feedback', () => {
         knowledgeUpserted: null,
         experienceSaved: null,
         experienceIds: [],
+        experienceRevocation: {
+          updatedCount: 1,
+          archivedCount: 0,
+          affectedExperienceIds: ['experience-1'],
+        },
       },
     });
     expect(flushAndProjectMkeAfterAiFeedback).not.toHaveBeenCalled();
+    expect(revokeMkeExperienceForTrace).toHaveBeenCalledWith(
+      expect.objectContaining({ traceId: 'trace-1' }),
+    );
   });
 
   it('records partial AI feedback without triggering Experience projection', async () => {

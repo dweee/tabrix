@@ -766,6 +766,20 @@ export class SessionManager {
     return this.repos.experienceRecipe.findReusableByContext(input);
   }
 
+  public revokeMkeExperienceForTrace(input: { traceId: string; nowIso?: string }): {
+    updatedCount: number;
+    archivedCount: number;
+    affectedExperienceIds: string[];
+  } {
+    if (!this.repos) {
+      return { updatedCount: 0, archivedCount: 0, affectedExperienceIds: [] };
+    }
+    return this.repos.experienceRecipe.removeSourceTrace({
+      traceId: input.traceId,
+      nowIso: input.nowIso ?? new Date().toISOString(),
+    });
+  }
+
   public countMkeExperienceRecipes(): number {
     if (!this.repos) return 0;
     return this.repos.experienceRecipe.count();

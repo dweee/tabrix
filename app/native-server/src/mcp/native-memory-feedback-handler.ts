@@ -154,6 +154,13 @@ export const handleMemoryRecordAiFeedback: NativeToolHandler = async (args, deps
     summary: readStringArg(object, 'summary'),
     experienceCandidate: readBooleanArg(object, 'experienceCandidate'),
   });
+  const experienceRevocation =
+    readBooleanArg(object, 'experienceCandidate') === false
+      ? deps.sessionManager.revokeMkeExperienceForTrace({
+          traceId,
+          nowIso: new Date().toISOString(),
+        })
+      : null;
   const projection = eligibleForExperienceProjection
     ? await deps.sessionManager.flushAndProjectMkeAfterAiFeedback().catch((error: unknown) => {
         const message = error instanceof Error ? error.message : String(error);
@@ -181,6 +188,7 @@ export const handleMemoryRecordAiFeedback: NativeToolHandler = async (args, deps
               knowledgeUpserted: projection?.knowledge?.upsertedKnowledgeCount ?? null,
               experienceSaved: projection?.experience?.savedExperienceCount ?? null,
               experienceIds: projection?.experience?.experienceIds ?? [],
+              experienceRevocation,
             },
     },
     false,

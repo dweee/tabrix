@@ -709,6 +709,80 @@ describe('MKE core repositories', () => {
     }
   });
 
+  it('removes AI-vetoed source traces from mined Experience recipes', () => {
+    const { experienceRepo, close } = bootstrap();
+    try {
+      const first = experienceRepo.save(
+        templateRecipe({
+          sourceTraceIds: ['trace-1'],
+          successCount: 1,
+          driftState: 'unverified_template',
+          linkedKnowledgeIds: ['knowledge-1'],
+        }),
+      );
+      experienceRepo.save(
+        templateRecipe({
+          sourceTraceIds: ['trace-2'],
+          successCount: 1,
+          driftState: 'unverified_template',
+          linkedKnowledgeIds: ['knowledge-2'],
+          updatedAt: '2026-06-06T10:01:00.000Z',
+        }),
+      );
+
+      const result = experienceRepo.removeSourceTrace({
+        traceId: 'trace-2',
+        nowIso: '2026-06-06T10:02:00.000Z',
+      });
+      const updated = experienceRepo.get(first.experienceId);
+
+      expect(result).toEqual({
+        updatedCount: 1,
+        archivedCount: 0,
+        affectedExperienceIds: [first.experienceId],
+      });
+      expect(updated?.sourceTraceIds).toEqual(['trace-1']);
+      expect(updated?.successCount).toBe(1);
+      expect(updated?.driftState).toBe('unverified_template');
+      expect(updated?.archivedAt).toBeNull();
+    } finally {
+      close();
+    }
+  });
+
+  it('archives Experience recipes when AI veto removes the last source trace', () => {
+    const { experienceRepo, close } = bootstrap();
+    try {
+      const recipe = experienceRepo.save(
+        templateRecipe({
+          sourceTraceIds: ['trace-only'],
+          successCount: 1,
+          linkedKnowledgeIds: ['knowledge-1'],
+        }),
+      );
+
+      const result = experienceRepo.removeSourceTrace({
+        traceId: 'trace-only',
+        nowIso: '2026-06-06T10:03:00.000Z',
+      });
+      const archived = experienceRepo.get(recipe.experienceId);
+
+      expect(result).toEqual({
+        updatedCount: 1,
+        archivedCount: 1,
+        affectedExperienceIds: [recipe.experienceId],
+      });
+      expect(archived?.sourceTraceIds).toEqual([]);
+      expect(archived?.successCount).toBe(0);
+      expect(archived?.driftState).toBe('ai_rejected');
+      expect(archived?.archivedAt).toBe('2026-06-06T10:03:00.000Z');
+      expect(experienceRepo.listRecent({ limit: 10 })).toHaveLength(0);
+      expect(experienceRepo.count()).toBe(0);
+    } finally {
+      close();
+    }
+  });
+
   it('rejects Experience templates that contain raw-sensitive fields', () => {
     const { experienceRepo, close } = bootstrap();
     try {

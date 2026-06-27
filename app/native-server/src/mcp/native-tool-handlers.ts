@@ -81,6 +81,7 @@ export interface NativeToolHandlerDeps {
     | 'chooseContextTelemetry'
     | 'flushAndProjectMkeIdle'
     | 'flushAndProjectMkeAfterAiFeedback'
+    | 'revokeMkeExperienceForTrace'
   > & {
     memoryTraces?: SessionManager['memoryTraces'];
     findReusableMkeExperienceRecipes?: SessionManager['findReusableMkeExperienceRecipes'];
