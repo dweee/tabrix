@@ -101,6 +101,7 @@ import {
   applyPreviousBusinessFeedback,
   createMkeMemoryTraceRecorder,
 } from './mcp-tool-memory-trace';
+import { finishToolCallLifecycle } from './mcp-tool-call-lifecycle';
 import {
   attachReadPagePayloadMetadata,
   mergeReadPagePayloadMetadata,
@@ -260,15 +261,20 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
       const result = createErrorResult(
         `Tool "${name}" is disabled or not available in the current server configuration.`,
       );
-      sessionManager.completeStep(session.sessionId, step.stepId, {
-        status: 'failed',
-        errorCode: 'tool_not_available',
-        errorSummary: `Tool "${name}" is disabled or unavailable`,
-        resultSummary: 'Tool rejected by current configuration',
-      });
-      sessionManager.finishSession(session.sessionId, {
-        status: 'failed',
-        summary: `Tool ${name} rejected by configuration`,
+      finishToolCallLifecycle({
+        sessionManager,
+        sessionId: session.sessionId,
+        stepId: step.stepId,
+        step: {
+          status: 'failed',
+          errorCode: 'tool_not_available',
+          errorSummary: `Tool "${name}" is disabled or unavailable`,
+          resultSummary: 'Tool rejected by current configuration',
+        },
+        session: {
+          status: 'failed',
+          summary: `Tool ${name} rejected by configuration`,
+        },
       });
       return recordAndAttachMkeMemoryTrace(result, {
         errorCode: 'tool_not_available',
@@ -278,15 +284,20 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
 
     if (!isToolAllowedByPolicy(name, process.env)) {
       const result = createPolicyDeniedResult(name);
-      sessionManager.completeStep(session.sessionId, step.stepId, {
-        status: 'failed',
-        errorCode: 'policy_denied_p3',
-        errorSummary: `Tool "${name}" blocked by Tabrix Policy (P3 opt-in required)`,
-        resultSummary: 'Tool rejected by Tabrix Policy',
-      });
-      sessionManager.finishSession(session.sessionId, {
-        status: 'failed',
-        summary: `Tool ${name} rejected by Tabrix Policy`,
+      finishToolCallLifecycle({
+        sessionManager,
+        sessionId: session.sessionId,
+        stepId: step.stepId,
+        step: {
+          status: 'failed',
+          errorCode: 'policy_denied_p3',
+          errorSummary: `Tool "${name}" blocked by Tabrix Policy (P3 opt-in required)`,
+          resultSummary: 'Tool rejected by Tabrix Policy',
+        },
+        session: {
+          status: 'failed',
+          summary: `Tool ${name} rejected by Tabrix Policy`,
+        },
       });
       return recordAndAttachMkeMemoryTrace(result, {
         errorCode: 'policy_denied_p3',
@@ -334,15 +345,20 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
           nativeResult,
           `Native tool ${name} failed`,
         );
-        sessionManager.completeStep(session.sessionId, step.stepId, {
-          status: 'failed',
-          errorCode: 'native_tool_error',
-          errorSummary,
-          resultSummary: `Native tool ${name} failed`,
-        });
-        sessionManager.finishSession(session.sessionId, {
-          status: 'failed',
-          summary: `Native tool ${name} failed`,
+        finishToolCallLifecycle({
+          sessionManager,
+          sessionId: session.sessionId,
+          stepId: step.stepId,
+          step: {
+            status: 'failed',
+            errorCode: 'native_tool_error',
+            errorSummary,
+            resultSummary: `Native tool ${name} failed`,
+          },
+          session: {
+            status: 'failed',
+            summary: `Native tool ${name} failed`,
+          },
         });
         return recordAndAttachMkeMemoryTrace(nativeResult, {
           requestParams: args,
@@ -351,13 +367,18 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
           browserContextKey: taskContextAttachment.taskContextKey,
         });
       }
-      sessionManager.completeStep(session.sessionId, step.stepId, {
-        status: 'completed',
-        resultSummary: `Native tool ${name} completed`,
-      });
-      sessionManager.finishSession(session.sessionId, {
-        status: 'completed',
-        summary: `Native tool ${name} completed`,
+      finishToolCallLifecycle({
+        sessionManager,
+        sessionId: session.sessionId,
+        stepId: step.stepId,
+        step: {
+          status: 'completed',
+          resultSummary: `Native tool ${name} completed`,
+        },
+        session: {
+          status: 'completed',
+          summary: `Native tool ${name} completed`,
+        },
       });
       return recordAndAttachMkeMemoryTrace(nativeResult, {
         requestParams: args,
