@@ -5,7 +5,7 @@ import type { TaskSessionContext } from '../execution/task-session-context';
 import type { ExecutionSession, ExecutionStep, Task } from '../execution/types';
 import { getNativeToolHandler } from './native-tool-handlers';
 import type { TaskContextAttachment } from './task-context-envelope';
-import { finishToolCallLifecycle } from './mcp-tool-call-lifecycle';
+import { finishAndRecordToolCallResult } from './mcp-tool-call-lifecycle';
 import { summarizeNativeToolErrorResult } from './tool-result-summary';
 
 type TraceAttachmentInput = {
@@ -49,51 +49,55 @@ export async function dispatchNativeToolIfAvailable(
       nativeResult,
       `Native tool ${input.name} failed`,
     );
-    finishToolCallLifecycle({
-      sessionManager: input.sessionManager,
-      sessionId: input.session.sessionId,
-      stepId: input.step.stepId,
-      step: {
-        status: 'failed',
-        errorCode: 'native_tool_error',
-        errorSummary,
-        resultSummary: `Native tool ${input.name} failed`,
-      },
-      session: {
-        status: 'failed',
-        summary: `Native tool ${input.name} failed`,
-      },
-    });
     return {
       handled: true,
-      result: input.recordAndAttachMkeMemoryTrace(nativeResult, {
-        requestParams: input.args,
-        resultSummary: `Native tool ${input.name} failed`,
-        errorCode: 'native_tool_error',
-        browserContextKey: input.taskContextAttachment.taskContextKey,
+      result: finishAndRecordToolCallResult({
+        sessionManager: input.sessionManager,
+        sessionId: input.session.sessionId,
+        stepId: input.step.stepId,
+        step: {
+          status: 'failed',
+          errorCode: 'native_tool_error',
+          errorSummary,
+          resultSummary: `Native tool ${input.name} failed`,
+        },
+        session: {
+          status: 'failed',
+          summary: `Native tool ${input.name} failed`,
+        },
+        result: nativeResult,
+        recordTrace: input.recordAndAttachMkeMemoryTrace,
+        trace: {
+          requestParams: input.args,
+          resultSummary: `Native tool ${input.name} failed`,
+          errorCode: 'native_tool_error',
+          browserContextKey: input.taskContextAttachment.taskContextKey,
+        },
       }),
     };
   }
 
-  finishToolCallLifecycle({
-    sessionManager: input.sessionManager,
-    sessionId: input.session.sessionId,
-    stepId: input.step.stepId,
-    step: {
-      status: 'completed',
-      resultSummary: `Native tool ${input.name} completed`,
-    },
-    session: {
-      status: 'completed',
-      summary: `Native tool ${input.name} completed`,
-    },
-  });
   return {
     handled: true,
-    result: input.recordAndAttachMkeMemoryTrace(nativeResult, {
-      requestParams: input.args,
-      resultSummary: `Native tool ${input.name} completed`,
-      browserContextKey: input.taskContextAttachment.taskContextKey,
+    result: finishAndRecordToolCallResult({
+      sessionManager: input.sessionManager,
+      sessionId: input.session.sessionId,
+      stepId: input.step.stepId,
+      step: {
+        status: 'completed',
+        resultSummary: `Native tool ${input.name} completed`,
+      },
+      session: {
+        status: 'completed',
+        summary: `Native tool ${input.name} completed`,
+      },
+      result: nativeResult,
+      recordTrace: input.recordAndAttachMkeMemoryTrace,
+      trace: {
+        requestParams: input.args,
+        resultSummary: `Native tool ${input.name} completed`,
+        browserContextKey: input.taskContextAttachment.taskContextKey,
+      },
     }),
   };
 }
