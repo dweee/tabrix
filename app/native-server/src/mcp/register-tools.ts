@@ -106,6 +106,7 @@ import {
   mergeReadPagePayloadMetadata,
   readJsonObjectFromCallToolResult,
 } from './register-tool-result-json';
+import { summarizeNativeToolErrorResult } from './tool-result-summary';
 import {
   buildReadPageRequestKey,
   extractReadPageRenderMode,
@@ -329,20 +330,10 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
         taskContext: taskContextEarly,
       });
       if (nativeResult.isError) {
-        let errorSummary = `Native tool ${name} failed`;
-        const firstContent = nativeResult.content?.[0];
-        if (firstContent && firstContent.type === 'text') {
-          const text = String(firstContent.text ?? '');
-          if (text) {
-            try {
-              const parsed = JSON.parse(text) as { message?: string };
-              if (parsed && typeof parsed.message === 'string') errorSummary = parsed.message;
-            } catch (parseError) {
-              void parseError;
-              // Non-JSON error payload — fall back to the generic summary.
-            }
-          }
-        }
+        const errorSummary = summarizeNativeToolErrorResult(
+          nativeResult,
+          `Native tool ${name} failed`,
+        );
         sessionManager.completeStep(session.sessionId, step.stepId, {
           status: 'failed',
           errorCode: 'native_tool_error',
