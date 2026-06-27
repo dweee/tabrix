@@ -708,15 +708,6 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
               : null,
         });
         const normalizedWarning = normalizeToolCallResult(name, warningResult);
-        sessionManager.completeStep(session.sessionId, step.stepId, {
-          status: 'completed',
-          resultSummary: normalizedWarning.stepSummary,
-          operationLog,
-        });
-        sessionManager.finishSession(session.sessionId, {
-          status: 'completed',
-          summary: normalizedWarning.executionResult.summary,
-        });
         const finalWarningResult = cachedProjection
           ? attachAiFacingOwnershipRuntime(warningResult, taskContextAttachment, {
               includeAiContextEnvelope: shouldIncludeVerboseReadPageContext(args, requestedLayer),
@@ -724,11 +715,27 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
           : attachTaskContextEnvelopeToJsonResult(warningResult, taskContextAttachment, {
               stripReadPageDiagnostics: !shouldIncludeVerboseReadPageContext(args, requestedLayer),
             });
-        return recordAndAttachMkeMemoryTrace(finalWarningResult, {
-          requestParams: outgoingArgs,
-          resultSummary: normalizedWarning.stepSummary,
-          errorCode: decision.reason ?? 'read_page_warning',
-          browserContextKey: taskContextAttachment.taskContextKey,
+        return finishAndRecordToolCallResult({
+          sessionManager,
+          sessionId: session.sessionId,
+          stepId: step.stepId,
+          step: {
+            status: 'completed',
+            resultSummary: normalizedWarning.stepSummary,
+            operationLog,
+          },
+          session: {
+            status: 'completed',
+            summary: normalizedWarning.executionResult.summary,
+          },
+          result: finalWarningResult,
+          recordTrace: recordAndAttachMkeMemoryTrace,
+          trace: {
+            requestParams: outgoingArgs,
+            resultSummary: normalizedWarning.stepSummary,
+            errorCode: decision.reason ?? 'read_page_warning',
+            browserContextKey: taskContextAttachment.taskContextKey,
+          },
         });
       }
     }
@@ -787,35 +794,42 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
         createErrorResult(JSON.stringify(payload)),
         taskContextAttachment,
       );
-      sessionManager.completeStep(session.sessionId, step.stepId, {
-        status: 'failed',
-        errorCode: 'non_interference_blocked',
-        resultSummary: `${name} blocked by non-interference policy`,
-        operationLog: {
-          decisionReason: nonInterferenceVerdict.audit.reason,
-          metadata: {
+      return finishAndRecordToolCallResult({
+        sessionManager,
+        sessionId: session.sessionId,
+        stepId: step.stepId,
+        step: {
+          status: 'failed',
+          errorCode: 'non_interference_blocked',
+          resultSummary: `${name} blocked by non-interference policy`,
+          operationLog: {
             decisionReason: nonInterferenceVerdict.audit.reason,
-            actionOutcome: 'blocked',
-            executionMode: 'non_interference_policy',
-            ...(taskResumeHandoff
-              ? {
-                  taskResumeHandoffStatus: taskResumeHandoff.status,
-                  taskResumeHandoffNextAction: taskResumeHandoff.nextAction,
-                  taskResumeCanContinue: taskResumeHandoff.canContinue,
-                }
-              : {}),
+            metadata: {
+              decisionReason: nonInterferenceVerdict.audit.reason,
+              actionOutcome: 'blocked',
+              executionMode: 'non_interference_policy',
+              ...(taskResumeHandoff
+                ? {
+                    taskResumeHandoffStatus: taskResumeHandoff.status,
+                    taskResumeHandoffNextAction: taskResumeHandoff.nextAction,
+                    taskResumeCanContinue: taskResumeHandoff.canContinue,
+                  }
+                : {}),
+            },
           },
         },
-      });
-      sessionManager.finishSession(session.sessionId, {
-        status: 'failed',
-        summary: `${name} blocked by non-interference policy`,
-      });
-      return recordAndAttachMkeMemoryTrace(result, {
-        requestParams: outgoingArgs,
-        resultSummary: `${name} blocked by non-interference policy`,
-        errorCode: 'non_interference_blocked',
-        browserContextKey: taskContextAttachment.taskContextKey,
+        session: {
+          status: 'failed',
+          summary: `${name} blocked by non-interference policy`,
+        },
+        result,
+        recordTrace: recordAndAttachMkeMemoryTrace,
+        trace: {
+          requestParams: outgoingArgs,
+          resultSummary: `${name} blocked by non-interference policy`,
+          errorCode: 'non_interference_blocked',
+          browserContextKey: taskContextAttachment.taskContextKey,
+        },
       });
     }
 
