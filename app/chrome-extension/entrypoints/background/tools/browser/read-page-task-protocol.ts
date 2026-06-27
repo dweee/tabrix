@@ -375,6 +375,40 @@ function visualBoundsFromCdpAxCandidate(candidate: {
   return { x, y, width, height };
 }
 
+function visibilityFromCdpAxCandidate(candidate: {
+  visibilityProbe?: {
+    source?: unknown;
+    domVisible?: unknown;
+    inViewport?: unknown;
+    centerHitTarget?: unknown;
+    occluded?: unknown;
+    reason?: unknown;
+  };
+}): ReadPageRegionObject['visibility'] {
+  const probe = candidate.visibilityProbe;
+  if (!probe || typeof probe !== 'object') return undefined;
+  return {
+    source: probe.source === 'dom' || probe.source === 'mixed' ? probe.source : 'cdp',
+    domVisible: probe.domVisible !== false,
+    inViewport: probe.inViewport !== false,
+    centerHitTarget: typeof probe.centerHitTarget === 'boolean' ? probe.centerHitTarget : null,
+    occluded: typeof probe.occluded === 'boolean' ? probe.occluded : null,
+    ...(typeof probe.reason === 'string' && probe.reason.trim()
+      ? { reason: probe.reason.trim().slice(0, 120) }
+      : {}),
+  };
+}
+
+function isVisuallyBlocked(visibility: ReadPageRegionObject['visibility']): boolean {
+  if (!visibility) return false;
+  return (
+    visibility.domVisible === false ||
+    visibility.inViewport === false ||
+    visibility.occluded === true ||
+    visibility.centerHitTarget === false
+  );
+}
+
 function objectTypeFromCdpAxRole(role: string): string {
   if (role === 'link') return 'link';
   if (role === 'menuitem') return 'nav_entry';
@@ -407,6 +441,14 @@ function buildCdpAxRegionObjects(params: TaskProtocolParams): ReadPageRegionObje
       };
       actionTypes?: unknown;
       state?: { checked?: unknown; selected?: unknown; expanded?: unknown; disabled?: unknown };
+      visibilityProbe?: {
+        source?: unknown;
+        domVisible?: unknown;
+        inViewport?: unknown;
+        centerHitTarget?: unknown;
+        occluded?: unknown;
+        reason?: unknown;
+      };
     };
     const role = normalizeCdpAxRole(candidate.role);
     if (!role) continue;
@@ -421,6 +463,8 @@ function buildCdpAxRegionObjects(params: TaskProtocolParams): ReadPageRegionObje
       `${role}_${index}`;
     const actionTypes = actionTypesFromCdpAxCandidate(candidate);
     const disabled = candidate.state?.disabled === true;
+    const visibility = visibilityFromCdpAxCandidate(candidate);
+    const visuallyBlocked = isVisuallyBlocked(visibility);
     objects.push({
       objectId: `cdp_ax_${idPart}`,
       label,
@@ -429,16 +473,20 @@ function buildCdpAxRegionObjects(params: TaskProtocolParams): ReadPageRegionObje
       valueState: valueStateFromCdpAxCandidate(candidate),
       locatorChain,
       actionTypes,
-      targetability: disabled
-        ? 'not_clickable'
-        : locatorChain.length > 0
-          ? 'locator_chain'
-          : 'not_clickable',
-      confidence: locatorChain.length > 0 ? 0.74 : 0.58,
-      reason: 'cdp_ax_accessibility_candidate',
+      targetability:
+        disabled || visuallyBlocked
+          ? 'not_clickable'
+          : locatorChain.length > 0
+            ? 'locator_chain'
+            : 'not_clickable',
+      confidence: visuallyBlocked ? 0.48 : locatorChain.length > 0 ? 0.74 : 0.58,
+      reason: visuallyBlocked
+        ? 'cdp_ax_accessibility_candidate_currently_not_visually_actionable'
+        : 'cdp_ax_accessibility_candidate',
       sourceProvenance: ['cdp', 'ax'],
       freshness: 'fresh',
       visualBounds: visualBoundsFromCdpAxCandidate(candidate),
+      ...(visibility ? { visibility } : {}),
     });
   }
   return objects;

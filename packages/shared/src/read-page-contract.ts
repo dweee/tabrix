@@ -903,6 +903,18 @@ export interface ReadPageCDPSensingSummary {
         expanded?: boolean;
         disabled?: boolean;
       };
+      /**
+       * Optional privacy-safe current-snapshot visual operability facts from
+       * CDP/AX enrichment. This never contains raw page text, screenshots, or
+       * long-lived execution authority.
+       */
+      visibilityProbe?: {
+        domVisible: boolean;
+        inViewport: boolean;
+        centerHitTarget: boolean | null;
+        occluded: boolean;
+        reason: string;
+      };
     }[];
   };
   networkResources?: {
@@ -1109,6 +1121,11 @@ export interface ReadPageRegionObject {
    * not a stable cross-session identifier or execution authority.
    */
   visualBounds?: ReadPageElementRect;
+  /**
+   * Optional privacy-safe current-snapshot visual operability facts. This is
+   * sensing evidence for AI planning only; it must be revalidated before reuse.
+   */
+  visibility?: ReadPageTargetVisibility;
   menuItemRole?: ReadPageRegionMenuItemRole;
 }
 

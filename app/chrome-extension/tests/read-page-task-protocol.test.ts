@@ -155,6 +155,33 @@ describe('read_page task protocol', () => {
                     },
                     actionTypes: ['focus', 'set_value'],
                     state: { disabled: false },
+                    visibilityProbe: {
+                      domVisible: true,
+                      inViewport: true,
+                      centerHitTarget: true,
+                      occluded: false,
+                      reason: 'cdp_ax_box_model',
+                    },
+                  },
+                  {
+                    role: 'textbox',
+                    label: 'Covered search input',
+                    locator: {
+                      source: 'cdp_ax',
+                      axNodeId: 'ax-covered',
+                      backendDOMNodeId: 102,
+                      cssSelector: 'input[data-covered="true"]',
+                      visualBounds: { x: 12, y: 24, width: 120, height: 32 },
+                    },
+                    actionTypes: ['focus', 'set_value'],
+                    state: { disabled: false },
+                    visibilityProbe: {
+                      domVisible: true,
+                      inViewport: true,
+                      centerHitTarget: false,
+                      occluded: true,
+                      reason: 'center_hit_test_mismatch',
+                    },
                   },
                 ],
               },
@@ -176,10 +203,38 @@ describe('read_page task protocol', () => {
           reason: 'cdp_ax_accessibility_candidate',
           sourceProvenance: ['cdp', 'ax'],
           visualBounds: { x: 10, y: 20, width: 200, height: 40 },
+          visibility: {
+            source: 'cdp',
+            domVisible: true,
+            inViewport: true,
+            centerHitTarget: true,
+            occluded: false,
+            reason: 'cdp_ax_box_model',
+          },
           locatorChain: expect.arrayContaining([
             { type: 'cdp_ax_node', value: 'ax-search' },
             { type: 'backend_dom_node', value: '101' },
             { type: 'css', value: 'input[aria-label="Search input"]' },
+          ]),
+        }),
+      ]),
+    );
+    const allRegionObjects = protocol.pageRegions.flatMap((region) => region.objects);
+    expect(allRegionObjects).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          objectId: 'cdp_ax_102',
+          label: 'Covered search input',
+          targetability: 'not_clickable',
+          reason: 'cdp_ax_accessibility_candidate_currently_not_visually_actionable',
+          visibility: expect.objectContaining({
+            centerHitTarget: false,
+            occluded: true,
+            reason: 'center_hit_test_mismatch',
+          }),
+          locatorChain: expect.arrayContaining([
+            { type: 'cdp_ax_node', value: 'ax-covered' },
+            { type: 'backend_dom_node', value: '102' },
           ]),
         }),
       ]),
