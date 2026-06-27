@@ -784,6 +784,49 @@ describe('lifecycle-evidence-collector — event window artifacts', () => {
     expect(artifact.actionLog.available).toBe(false);
   });
 
+  it('keeps action outcomes with malformed signal entries as unknown postconditions', () => {
+    ensureLifecycleEvidenceCollectorRegistered();
+    dispatchBridgeObservationToStream(
+      makeBridgeMessage('action_outcome', {
+        tabId: 42,
+        observedAtMs: T0,
+        data: {
+          actionId: 'act-malformed-signal',
+          actionKind: 'click',
+          signals: [null],
+        },
+      }),
+    );
+
+    const artifact = produceRuntimeLifecycleEvidenceArtifact({
+      artifactId: 'runtime-artifact-malformed-signal-postcondition',
+      evidenceLevel: 'integration',
+      scenarioId: 'scenario-malformed-signal-postcondition',
+      scenarioClass: 'postcondition_failure_v1',
+      startedAtMs: T0,
+      endedAtMs: T0,
+      eventWindow: { tabIds: [42] },
+    });
+
+    expect(getLifecycleEvidenceCollectorSnapshot().bufferedPostconditions).toBe(1);
+    expect(artifact.actionLog).toMatchObject({
+      available: true,
+      totalActions: 1,
+      passed: 0,
+      failed: 0,
+      unknown: 1,
+    });
+    expect(artifact.actionLog.entries[0]).toMatchObject({
+      actionId: 'act-malformed-signal',
+      actionKind: 'click',
+      verdict: 'unknown',
+      reason: 'action_outcome_classification_failed',
+      observedOutcome: 'unknown',
+      observedOutcomeConfidence: 0,
+    });
+    expect(JSON.stringify(artifact.actionLog)).not.toContain('sourcePayload');
+  });
+
   it('does not emit raw sourcePayload through derived postcondition evidence', () => {
     ensureLifecycleEvidenceCollectorRegistered();
     dispatchBridgeObservationToStream(

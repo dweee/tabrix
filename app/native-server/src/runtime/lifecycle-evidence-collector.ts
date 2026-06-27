@@ -603,8 +603,33 @@ function derivePostconditionResult(event: BrowserStreamEvent): PostconditionResu
       now: () => event.observedAtMs,
     });
   } catch {
-    return null;
+    return buildUnknownPostconditionFromActionOutcome(envelope, event.observedAtMs);
   }
+}
+
+function buildUnknownPostconditionFromActionOutcome(
+  envelope: ActionOutcomeEventEnvelope,
+  producedAtMs: number,
+): PostconditionResult {
+  return {
+    actionId: envelope.actionId,
+    actionKind: envelope.actionKind,
+    tabId: envelope.tabId,
+    urlPattern: envelope.urlPattern ?? null,
+    verdict: 'unknown',
+    reason: 'action_outcome_classification_failed',
+    observedOutcome: 'unknown',
+    observedOutcomeConfidence: 0,
+    sourceEventRefs: [
+      {
+        kind: 'action_outcome',
+        id: `action_outcome:${envelope.actionId}`,
+        origin: 'unknown',
+      },
+    ],
+    sourceOrigins: ['runtime', 'unknown'],
+    producedAtMs,
+  };
 }
 
 function extractActionOutcomeEnvelope(sourcePayload: unknown): ActionOutcomeEventEnvelope | null {
