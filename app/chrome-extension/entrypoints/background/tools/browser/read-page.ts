@@ -74,6 +74,10 @@ import { buildFallbackRefMap, formatElementsAsPageContent } from './read-page-fa
 import { collectReadPageFileInputBindings } from './read-page-file-input-bindings';
 import { buildPageOperationMap } from './read-page-operation-map';
 import { buildExtensionLayer, buildStableSnapshotLayer } from './read-page-snapshot-builders';
+import {
+  attachInteractiveRects,
+  attachInteractiveValueState,
+} from './read-page-interactive-enrichment';
 import { buildReadPageModeResult } from './read-page-mode-result';
 import {
   applyPublishFormReadinessToPageRegions,
@@ -310,69 +314,6 @@ function shouldSampleVisibleText(input: {
   if (input.rows.visibleRegionRowsUsed) return false;
   if (input.pageRole === 'search_results') return true;
   return input.requestedDepth !== undefined && input.requestedDepth <= 3;
-}
-
-function attachInteractiveRects<T extends { ref?: string; rect?: unknown }>(
-  elements: T[],
-  refMap: any[],
-): T[] {
-  const rectByRef = new Map<string, { x: number; y: number; width: number; height: number }>();
-  for (const entry of Array.isArray(refMap) ? refMap : []) {
-    const ref = typeof entry?.ref === 'string' ? entry.ref.trim() : '';
-    const rect = entry?.rect;
-    if (
-      !ref ||
-      !rect ||
-      !Number.isFinite(rect.x) ||
-      !Number.isFinite(rect.y) ||
-      !Number.isFinite(rect.width) ||
-      !Number.isFinite(rect.height)
-    ) {
-      continue;
-    }
-    rectByRef.set(ref, {
-      x: Number(rect.x),
-      y: Number(rect.y),
-      width: Number(rect.width),
-      height: Number(rect.height),
-    });
-  }
-  if (rectByRef.size === 0) return elements;
-  return elements.map((element) => {
-    const rect = element.ref ? rectByRef.get(element.ref) : undefined;
-    return rect ? { ...element, rect } : element;
-  });
-}
-
-function attachInteractiveValueState<
-  T extends { ref?: string; valueState?: 'empty' | 'non_empty' | 'unknown' },
->(elements: T[], refMap: any[]): T[] {
-  const valueStateByRef = new Map<string, 'empty' | 'non_empty' | 'unknown'>();
-  for (const entry of Array.isArray(refMap) ? refMap : []) {
-    const ref = typeof entry?.ref === 'string' ? entry.ref.trim() : '';
-    if (!ref) continue;
-    if (
-      entry?.valueState === 'empty' ||
-      entry?.valueState === 'non_empty' ||
-      entry?.valueState === 'unknown'
-    ) {
-      valueStateByRef.set(ref, entry.valueState);
-      continue;
-    }
-    const rawValue =
-      Object.prototype.hasOwnProperty.call(entry, 'value') ||
-      Object.prototype.hasOwnProperty.call(entry, 'currentValue')
-        ? (entry.value ?? entry.currentValue)
-        : undefined;
-    if (rawValue === undefined || rawValue === null) continue;
-    valueStateByRef.set(ref, String(rawValue).length > 0 ? 'non_empty' : 'empty');
-  }
-  if (valueStateByRef.size === 0) return elements;
-  return elements.map((element) => {
-    if (!element.ref || element.valueState) return element;
-    const valueState = valueStateByRef.get(element.ref);
-    return valueState ? { ...element, valueState } : element;
-  });
 }
 
 const AUTH_FORM_TARGETED_CONTROL_QUERIES = [
