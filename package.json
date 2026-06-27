@@ -39,7 +39,7 @@
     "docs:check": "node ./scripts/check-docs.mjs",
     "governance:public": "node ./scripts/check-public-governance.mjs",
     "governance:console": "node ./scripts/check-console-governance.mjs",
-    "governance:empty-catch": "node ./scripts/check-empty-catch.mjs",
+    "governance:empty-catch": "node ./scripts/check-empty-catch.mjs --self-test && node ./scripts/check-empty-catch.mjs",
     "governance:extension-logs": "node ./scripts/check-extension-production-logs.mjs",
     "i18n:check": "node ./scripts/check-i18n.mjs",
     "ubuntu:self-check": "powershell -ExecutionPolicy Bypass -File ./scripts/run-ubuntu-docker-self-check.ps1",
