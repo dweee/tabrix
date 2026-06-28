@@ -36,7 +36,6 @@ describe('AI feedback requirement rule', () => {
       TOOL_NAMES.BROWSER.COMPUTER,
     ]);
     const auxiliaryBrowserFeedbackTools = new Set<string>([
-      TOOL_NAMES.BROWSER.GET_WINDOWS_AND_TABS,
       TOOL_NAMES.BROWSER.SCREENSHOT,
       TOOL_NAMES.BROWSER.CONSOLE,
       TOOL_NAMES.BROWSER.NETWORK_CAPTURE,
@@ -51,6 +50,7 @@ describe('AI feedback requirement rule', () => {
       TOOL_NAMES.BROWSER.PERFORMANCE_ANALYZE_INSIGHT,
     ]);
     const neverFeedbackTools = new Set<string>([
+      TOOL_NAMES.BROWSER.GET_WINDOWS_AND_TABS,
       TOOL_NAMES.BROWSER.PERFORMANCE_START_TRACE,
       TOOL_NAMES.BROWSER.PERFORMANCE_STOP_TRACE,
     ]);
@@ -88,6 +88,7 @@ describe('AI feedback requirement rule', () => {
     [TOOL_NAMES.CONTEXT.CHOOSE],
     [TOOL_NAMES.CONTEXT.RECORD_OUTCOME],
     [TOOL_NAMES.MEMORY.RECORD_AI_FEEDBACK],
+    [TOOL_NAMES.BROWSER.GET_WINDOWS_AND_TABS],
     [TOOL_NAMES.BROWSER.PERFORMANCE_START_TRACE],
     [TOOL_NAMES.BROWSER.PERFORMANCE_STOP_TRACE],
   ])('does not request feedback for internal maintenance tools: %s', (toolName) => {
@@ -116,8 +117,19 @@ describe('AI feedback requirement rule', () => {
     expect(shouldRequestAiFeedbackForTrace(trace(toolName))).toBe(true);
   });
 
+  test('never requests feedback for window and tab inventory refreshes', () => {
+    expect(shouldRequestAiFeedbackForTool(TOOL_NAMES.BROWSER.GET_WINDOWS_AND_TABS)).toBe(false);
+    expect(shouldRequestAiFeedbackForTrace(trace(TOOL_NAMES.BROWSER.GET_WINDOWS_AND_TABS))).toBe(
+      false,
+    );
+    expect(
+      shouldRequestAiFeedbackForTrace(
+        trace(TOOL_NAMES.BROWSER.GET_WINDOWS_AND_TABS, '完成用户任务中的关键浏览器步骤'),
+      ),
+    ).toBe(false);
+  });
+
   test.each([
-    [TOOL_NAMES.BROWSER.GET_WINDOWS_AND_TABS],
     [TOOL_NAMES.BROWSER.SCREENSHOT],
     [TOOL_NAMES.BROWSER.CONSOLE],
     [TOOL_NAMES.BROWSER.NETWORK_CAPTURE],
@@ -132,7 +144,6 @@ describe('AI feedback requirement rule', () => {
   );
 
   test.each([
-    [TOOL_NAMES.BROWSER.GET_WINDOWS_AND_TABS],
     [TOOL_NAMES.BROWSER.SCREENSHOT],
     [TOOL_NAMES.BROWSER.CONSOLE],
     [TOOL_NAMES.BROWSER.NETWORK_CAPTURE],
