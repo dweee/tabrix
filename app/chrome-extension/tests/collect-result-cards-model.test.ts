@@ -5,6 +5,7 @@ import {
   mergeCollectedResultCards,
   resultCardKey,
   stableResultCardTarget,
+  summarizeCollectedResultCardsForAi,
   summarizeCollectedResultCardTargetability,
 } from '@/entrypoints/background/tools/browser/collect-result-cards-model';
 
@@ -234,6 +235,80 @@ describe('mergeCollectedResultCards', () => {
         },
       },
     });
+  });
+});
+
+describe('summarizeCollectedResultCardsForAi', () => {
+  it('keeps scan-friendly card facts without leaking coordinate click payloads', () => {
+    const summaries = summarizeCollectedResultCardsForAi([
+      card({
+        title: 'Prompt Guide',
+        url: 'https://example.com/result/1',
+        primaryText: 'Author A',
+        metaText: '1 day ago',
+        interactionText: '129',
+        confidence: 0.86,
+        actionTarget: {
+          actionType: 'click',
+          targetKind: 'result_card_link',
+          url: 'https://example.com/result/1',
+          selector: 'article[data-id="1"] a[href]',
+          executionScope: 'same_tab_fresh_snapshot',
+          toolName: 'chrome_click_element',
+          toolArgs: {
+            candidateAction: {
+              id: 'ca_click_ref_result_card_1',
+              actionType: 'click',
+              targetRef: 'ref_result_card_1',
+              label: 'Prompt Guide',
+              confidence: 0.9,
+              matchReason: 'result_card_primary_link',
+              intent: 'content.open_detail',
+              locatorChain: [
+                { type: 'ref', value: 'ref_result_card_1' },
+                { type: 'css', value: 'article[data-id="1"] a[href]' },
+              ],
+            },
+          },
+          rect: { x: 20, y: 40, width: 120, height: 28 },
+          center: { x: 80, y: 54 },
+          coordinateFrame: 'viewport',
+          sourceScrollY: 320,
+          confidence: 0.9,
+          reasons: ['title_link_match'],
+        },
+      }),
+      card({
+        title: 'URL fallback',
+        url: 'https://example.com/result/2',
+        confidence: 0.7,
+      }),
+    ]);
+
+    expect(summaries).toEqual([
+      {
+        rank: 1,
+        title: 'Prompt Guide',
+        url: 'https://example.com/result/1',
+        author: 'Author A',
+        time: '1 day ago',
+        interaction: '129',
+        targetRef: 'ref_result_card_1',
+        candidateActionId: 'ca_click_ref_result_card_1',
+        targetabilityStatus: 'stable_click_target',
+        confidence: 0.86,
+      },
+      {
+        rank: 2,
+        title: 'URL fallback',
+        url: 'https://example.com/result/2',
+        targetabilityStatus: 'url_fallback',
+        confidence: 0.7,
+      },
+    ]);
+    expect(JSON.stringify(summaries)).not.toContain('center');
+    expect(JSON.stringify(summaries)).not.toContain('actionTarget');
+    expect(JSON.stringify(summaries)).not.toContain('selector');
   });
 });
 

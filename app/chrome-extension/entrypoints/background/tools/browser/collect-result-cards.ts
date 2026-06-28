@@ -11,6 +11,7 @@ import {
   type CollectedResultCard,
   mergeCollectedResultCards,
   stableResultCardTarget,
+  summarizeCollectedResultCardsForAi,
   summarizeCollectedResultCardTargetability,
 } from './collect-result-cards-model';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
@@ -27,6 +28,7 @@ interface CollectResultCardsParams {
   scrollStepPx?: number;
   settleMs?: number;
   startFromTop?: boolean;
+  outputMode?: 'full' | 'compact';
 }
 
 interface VisibleCardScanResult {
@@ -1991,52 +1993,92 @@ class CollectResultCardsTool extends BaseBrowserToolExecutor {
         };
       });
       const complete = cards.length >= minResults;
+      const page = latestPageInfo
+        ? {
+            title: latestPageInfo.title,
+            url: latestPageInfo.url,
+            finalScrollY: latestPageInfo.scrollY,
+            scrollTarget: latestPageInfo.scrollTarget,
+            pixelsBelow: latestPageInfo.pixelsBelow,
+          }
+        : null;
+      const collection = {
+        steps,
+        scrollsPerformed: scrolls.length,
+        startFromTop,
+        durationMs: Date.now() - startedAt,
+      };
+      const recommendedNextAction = complete
+        ? 'Use these card objects as the stable top-N result set for ranking, opening, or summarizing.'
+        : 'If top-N completeness matters, increase maxScrolls or use screenshot/manual verification for this page.';
+      const claimBoundary =
+        'This tool proves visible DOM card collection across bounded scroll steps; it does not prove hidden, personalized, or not-yet-loaded results outside the scanned range.';
+      const outputMode = args.outputMode === 'compact' ? 'compact' : 'full';
+      const compactPayload = {
+        success: true,
+        kind: 'result_card_collection',
+        outputMode: 'compact' as const,
+        page,
+        pageRole: 'search_results',
+        pageState: complete ? 'complete' : 'partial',
+        sourceRoute: 'visible_dom_cards_bounded_scroll',
+        selectedDataSource: 'visible_dom_result_cards',
+        freshness: 'fresh',
+        filterState: latestFilterState
+          ? {
+              status: latestFilterState.status,
+              appliedLabels: latestFilterState.appliedLabels,
+              contentType: latestFilterState.contentType,
+              sort: latestFilterState.sort,
+              timeRange: latestFilterState.timeRange,
+              groups: latestFilterState.groups,
+            }
+          : null,
+        tabId: tab.id,
+        ...(tab.windowId !== undefined ? { windowId: tab.windowId } : {}),
+        requestedMinResults: minResults,
+        observedResultCount: cards.length,
+        targetRefCoverageRate: targetabilitySummary.targetRefCoverageRate,
+        targetabilitySummary,
+        complete,
+        status: complete ? 'complete_enough' : 'partial',
+        cards: summarizeCollectedResultCardsForAi(selectedCards),
+        collection,
+        recommendedNextAction,
+        claimBoundary,
+      };
+      const fullPayload = {
+        success: true,
+        kind: 'result_card_collection',
+        outputMode: 'full' as const,
+        page,
+        pageRole: 'search_results',
+        pageState: complete ? 'complete' : 'partial',
+        sourceRoute: 'visible_dom_cards_bounded_scroll',
+        selectedDataSource: 'visible_dom_result_cards',
+        freshness: 'fresh',
+        filterState: latestFilterState,
+        pageRegions,
+        candidateActions,
+        tabId: tab.id,
+        ...(tab.windowId !== undefined ? { windowId: tab.windowId } : {}),
+        requestedMinResults: minResults,
+        observedResultCount: cards.length,
+        targetRefCoverageRate: targetabilitySummary.targetRefCoverageRate,
+        targetabilitySummary,
+        complete,
+        status: complete ? 'complete_enough' : 'partial',
+        cards,
+        collection,
+        recommendedNextAction,
+        claimBoundary,
+      };
 
       return {
         content: [
           {
             type: 'text',
-            text: JSON.stringify({
-              success: true,
-              kind: 'result_card_collection',
-              page: latestPageInfo
-                ? {
-                    title: latestPageInfo.title,
-                    url: latestPageInfo.url,
-                    finalScrollY: latestPageInfo.scrollY,
-                    scrollTarget: latestPageInfo.scrollTarget,
-                    pixelsBelow: latestPageInfo.pixelsBelow,
-                  }
-                : null,
-              pageRole: 'search_results',
-              pageState: complete ? 'complete' : 'partial',
-              sourceRoute: 'visible_dom_cards_bounded_scroll',
-              selectedDataSource: 'visible_dom_result_cards',
-              freshness: 'fresh',
-              filterState: latestFilterState,
-              pageRegions,
-              candidateActions,
-              tabId: tab.id,
-              ...(tab.windowId !== undefined ? { windowId: tab.windowId } : {}),
-              requestedMinResults: minResults,
-              observedResultCount: cards.length,
-              targetRefCoverageRate: targetabilitySummary.targetRefCoverageRate,
-              targetabilitySummary,
-              complete,
-              status: complete ? 'complete_enough' : 'partial',
-              cards,
-              collection: {
-                steps,
-                scrollsPerformed: scrolls.length,
-                startFromTop,
-                durationMs: Date.now() - startedAt,
-              },
-              recommendedNextAction: complete
-                ? 'Use these card objects as the stable top-N result set for ranking, opening, or summarizing.'
-                : 'If top-N completeness matters, increase maxScrolls or use screenshot/manual verification for this page.',
-              claimBoundary:
-                'This tool proves visible DOM card collection across bounded scroll steps; it does not prove hidden, personalized, or not-yet-loaded results outside the scanned range.',
-            }),
+            text: JSON.stringify(outputMode === 'compact' ? compactPayload : fullPayload),
           },
         ],
         isError: false,

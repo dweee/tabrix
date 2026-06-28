@@ -76,6 +76,19 @@ export interface CollectedResultCardTargetabilitySummary {
   status: 'stable_target_set' | 'partial_stable_targets' | 'url_or_text_only';
 }
 
+export interface CollectedResultCardAiSummary {
+  rank: number;
+  title: string;
+  url?: string;
+  author?: string;
+  time?: string;
+  interaction?: string;
+  targetRef?: string;
+  candidateActionId?: string;
+  targetabilityStatus: 'stable_click_target' | 'url_fallback' | 'not_targetable';
+  confidence: number;
+}
+
 export function stableResultCardTarget(
   card: CollectedResultCard | undefined,
 ): CollectedResultCardStableTarget | null {
@@ -125,6 +138,32 @@ export function summarizeCollectedResultCardTargetability(
           ? 'partial_stable_targets'
           : 'url_or_text_only',
   };
+}
+
+export function summarizeCollectedResultCardsForAi(
+  cards: readonly CollectedResultCard[],
+): CollectedResultCardAiSummary[] {
+  return cards.map((card, index) => {
+    const stableTarget = stableResultCardTarget(card);
+    return {
+      rank: index + 1,
+      title: card.title,
+      ...(card.url ? { url: card.url } : {}),
+      ...(card.primaryText ? { author: card.primaryText } : {}),
+      ...(card.metaText ? { time: card.metaText } : {}),
+      ...(card.interactionText ? { interaction: card.interactionText } : {}),
+      ...(stableTarget
+        ? {
+            targetRef: stableTarget.targetRef,
+            candidateActionId: stableTarget.candidateActionId,
+            targetabilityStatus: 'stable_click_target' as const,
+          }
+        : card.url
+          ? { targetabilityStatus: 'url_fallback' as const }
+          : { targetabilityStatus: 'not_targetable' as const }),
+      confidence: card.confidence,
+    };
+  });
 }
 
 function hasExecutableClickTarget(card: CollectedResultCard | undefined): boolean {

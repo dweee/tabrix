@@ -338,6 +338,12 @@ export const BROWSER_SCHEMAS: Tool[] = [
           description:
             'Default true. Scroll to the top before collecting so Top N means the first results on the page. Set false to collect from the current viewport.',
         },
+        outputMode: {
+          type: 'string',
+          enum: ['full', 'compact'],
+          description:
+            'Default full. Use compact for an AI-facing top-N card summary without verbose actionTarget/region payloads; use full when object projection or detailed debugging needs the complete structure.',
+        },
       },
       required: [],
     },
