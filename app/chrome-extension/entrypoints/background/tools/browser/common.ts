@@ -747,11 +747,19 @@ class NavigateTool extends BaseBrowserToolExecutor {
                     requestedUrl: url,
                     finalUrl: settleResult.tab.url,
                     status: settleResult.tab.status,
+                    activated: background !== true,
+                    focusPolicy: background === true ? 'background' : 'foreground',
                     settled: settleResult.settled,
                     settleReason: settleResult.reason,
                     waitedMs: settleResult.waitedMs,
                     readyState: settleResult.readyState,
                     postActionDelta,
+                    ...buildNavigationReadinessFields({
+                      settled: settleResult.settled,
+                      readyState: settleResult.readyState,
+                      finalUrl: settleResult.tab.url,
+                      status: settleResult.tab.status,
+                    }),
                     tabs: newWindow.tabs
                       ? newWindow.tabs.map((tab) => ({
                           tabId: tab.id,
@@ -964,7 +972,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
             url: url,
             width: DEFAULT_WINDOW_WIDTH,
             height: DEFAULT_WINDOW_HEIGHT,
-            focused: true,
+            focused: background === true ? false : true,
           });
 
           if (fallbackWindow && fallbackWindow.id !== undefined) {
@@ -1003,11 +1011,19 @@ class NavigateTool extends BaseBrowserToolExecutor {
                       requestedUrl: url,
                       finalUrl: settleResult.tab.url,
                       status: settleResult.tab.status,
+                      activated: background !== true,
+                      focusPolicy: background === true ? 'background' : 'foreground',
                       settled: settleResult.settled,
                       settleReason: settleResult.reason,
                       waitedMs: settleResult.waitedMs,
                       readyState: settleResult.readyState,
                       postActionDelta,
+                      ...buildNavigationReadinessFields({
+                        settled: settleResult.settled,
+                        readyState: settleResult.readyState,
+                        finalUrl: settleResult.tab.url,
+                        status: settleResult.tab.status,
+                      }),
                       tabs: fallbackWindow.tabs
                         ? fallbackWindow.tabs.map((tab) => ({
                             tabId: tab.id,

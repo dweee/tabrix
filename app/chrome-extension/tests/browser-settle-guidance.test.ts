@@ -199,6 +199,64 @@ describe('browser settle guidance', () => {
     });
   });
 
+  it('keeps fallback window creation in background mode when no existing window is available', async () => {
+    vi.spyOn(navigateTool as any, 'tryGetTab').mockResolvedValue(null);
+    vi.mocked(chrome.tabs.query).mockResolvedValue([]);
+    (chrome.windows.getLastFocused as unknown as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('no window'),
+    );
+    (chrome.windows.create as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 17,
+      tabs: [
+        {
+          id: 171,
+          windowId: 17,
+          active: false,
+          status: 'loading',
+          url: 'https://background-fallback.example/',
+          title: 'Loading',
+        } as chrome.tabs.Tab,
+      ],
+    } as chrome.windows.Window);
+    vi.spyOn(navigateTool as any, 'waitForTabSettled').mockResolvedValue({
+      tab: {
+        id: 171,
+        windowId: 17,
+        active: false,
+        status: 'complete',
+        url: 'https://background-fallback.example/',
+        title: 'Fallback',
+      },
+      settled: true,
+      timedOut: false,
+      reason: 'complete',
+      waitedMs: 120,
+      readyState: 'complete',
+    });
+
+    const result = await navigateTool.execute({
+      url: 'https://background-fallback.example/',
+      background: true,
+    });
+
+    expect(result.isError).toBe(false);
+    expect(chrome.windows.create).toHaveBeenCalledWith({
+      url: 'https://background-fallback.example/',
+      width: 1280,
+      height: 720,
+      focused: false,
+    });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+    expect(payload).toMatchObject({
+      success: true,
+      windowId: 17,
+      tabId: 171,
+      activated: false,
+      focusPolicy: 'background',
+      pageReadable: true,
+    });
+  });
+
   it('passes a bounded custom settle timeout to new-tab navigation waits', async () => {
     vi.spyOn(navigateTool as any, 'tryGetTab').mockResolvedValue(null);
     const waitForTabSettled = vi.spyOn(navigateTool as any, 'waitForTabSettled').mockResolvedValue({
