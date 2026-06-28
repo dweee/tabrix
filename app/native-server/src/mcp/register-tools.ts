@@ -17,6 +17,7 @@ import {
 } from '../policy/non-interference-preflight';
 import { sessionManager } from '../execution/session-manager';
 import type {
+  TaskSessionContext,
   TaskPageInteractionSnapshot,
   TaskVisibleRegionRowsData,
 } from '../execution/task-session-context';
@@ -124,6 +125,7 @@ import {
   readInteger,
   readNonNegativeInteger,
   readNullableBoolean,
+  readNumericArray,
   readNumber,
   readObject,
   readPositiveInteger,
@@ -170,6 +172,27 @@ function applyTaskOwnedBackgroundNavigationPolicy(toolName: string, args: unknow
   return {
     ...(args as Record<string, unknown>),
     background: true,
+  };
+}
+
+function applyTaskOwnedFinalizeCleanupPolicy(
+  toolName: string,
+  args: unknown,
+  taskContext: TaskSessionContext | null,
+): unknown {
+  if (toolName !== TOOL_NAMES.BROWSER.CLOSE_TABS) return args;
+  if (!args || typeof args !== 'object') return args;
+  if (readRuntimePolicyString(args, 'cleanupPolicy') !== 'close_run_owned') return args;
+  if (readNumericArray(args, 'tabIds') !== null) return args;
+  if (readString(readObject(args)?.url) !== null) return args;
+  if (readInteger(args, 'windowId') !== null) return args;
+
+  const runOwnedTabIds = taskContext?.getRunOwnedTabIds() ?? [];
+  if (runOwnedTabIds.length === 0) return args;
+
+  return {
+    ...(args as Record<string, unknown>),
+    tabIds: [...runOwnedTabIds],
   };
 }
 
@@ -368,6 +391,7 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
     const primaryTabController = getDefaultPrimaryTabController();
     let outgoingArgs: any = resolvePrimaryTabOutgoingArgs(name, args, primaryTabController);
     outgoingArgs = applyTaskOwnedBackgroundNavigationPolicy(name, outgoingArgs);
+    outgoingArgs = applyTaskOwnedFinalizeCleanupPolicy(name, outgoingArgs, taskContextEarly);
     taskContextAttachment.requestArgs = outgoingArgs;
     // Task Session Context read-budget gate. Only the `chrome_read_page`
     // hot path is gated; everything else passes through. The gate is
@@ -1182,7 +1206,7 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
       });
       if (name === 'chrome_close_tabs' && taskContext && rawResultWithEvidence.isError !== true) {
         recordCloseTabsSuccessPostprocess({
-          args,
+          args: outgoingArgs,
           result: rawResultWithEvidence,
           taskContext,
           sessionManager,

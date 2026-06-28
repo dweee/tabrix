@@ -1402,7 +1402,7 @@ describe('handleToolCall execution wrapper', () => {
 
   it('releases run-owned tab ids reported as closed by cleanup', async () => {
     markBridgeReady();
-    jest
+    const bridgeSpy = jest
       .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
       .mockResolvedValueOnce({
         status: 'success',
@@ -1440,7 +1440,6 @@ describe('handleToolCall execution wrapper', () => {
       taskSessionId: 'w4b-closed-run-owned',
     });
     const cleanupResult = await handleToolCall('chrome_close_tabs', {
-      tabIds: [88],
       taskSessionId: 'w4b-closed-run-owned',
       runtimePolicy: {
         cleanupPolicy: 'close_run_owned',
@@ -1448,6 +1447,13 @@ describe('handleToolCall execution wrapper', () => {
     });
 
     expect(cleanupResult.isError).toBe(false);
+    expect((bridgeSpy.mock.calls[1][0] as any).args).toMatchObject({
+      tabIds: [88],
+      taskSessionId: 'w4b-closed-run-owned',
+      runtimePolicy: {
+        cleanupPolicy: 'close_run_owned',
+      },
+    });
     const cleanupPayload = JSON.parse(String(cleanupResult.content[0].text));
     expect(cleanupPayload.taskContextEnvelope.taskOwnedSession).toMatchObject({
       taskSessionId: 'w4b-closed-run-owned',
