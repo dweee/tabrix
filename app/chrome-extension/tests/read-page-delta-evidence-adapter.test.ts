@@ -97,6 +97,20 @@ describe('derivePostActionDeltaEvidenceFromReadPageDelta', () => {
         expect(evidence.recommendedNextAction).toBe(expected);
       });
     }
+
+    it('maps network_failed read-page delta to retry guidance', () => {
+      const evidence = derivePostActionDeltaEvidenceFromReadPageDelta(
+        makeReport({
+          deltaKind: 'network_failed',
+          recommendation: 'retry',
+          networkSignals: { requestStartedDelta: 1, failedRequestDelta: 1 },
+        }),
+      );
+
+      expect(evidence.observedChangeKind).toBe('network_failed');
+      expect(evidence.recommendedNextAction).toBe('retry_action_then_read');
+      expect(evidence.observedSignalDeltas?.failedRequestDelta).toBe(1);
+    });
   });
 
   describe('deltaKind mapping', () => {

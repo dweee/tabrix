@@ -366,6 +366,25 @@ describe('read_page object snapshot and delta', () => {
     });
   });
 
+  it('returns network_failed when CDP observes new failed requests', () => {
+    const report = buildReadPagePageDeltaReport({
+      tabId: 100,
+      previousSnapshot: snapshot({ snapshotId: 'before' }),
+      currentSnapshot: snapshot({ snapshotId: 'after' }),
+      previousCdpSignals: { networkStartedCount: 2, failedRequestCount: 0 },
+      cdpSignals: { networkStartedCount: 3, failedRequestCount: 1, networkInFlightCount: 0 },
+    });
+
+    expect(report).toMatchObject({
+      deltaKind: 'network_failed',
+      recommendation: 'retry',
+      networkSignals: {
+        requestStartedDelta: 1,
+        failedRequestDelta: 1,
+      },
+    });
+  });
+
   it('carries before and after URL signals when the page URL changes', () => {
     const report = buildReadPagePageDeltaReport({
       tabId: 100,

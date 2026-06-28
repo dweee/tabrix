@@ -1419,6 +1419,7 @@ export type ReadPagePageDeltaKind =
   | 'form_state_changed'
   | 'target_state_changed'
   | 'network_completed'
+  | 'network_failed'
   | 'console_error'
   | 'no_useful_change'
   | 'blocked'

@@ -566,6 +566,7 @@ export function buildReadPagePageDeltaReport(params: {
     typeof requestStartedDelta === 'number' &&
     requestStartedDelta > 0 &&
     params.cdpSignals?.networkInFlightCount === 0;
+  const networkFailed = typeof failedRequestDelta === 'number' && failedRequestDelta > 0;
   const consoleError = typeof errorCountDelta === 'number' && errorCountDelta > 0;
   const accessDelta = classifyAccessDelta(params.currentSnapshot);
   let deltaKind: ReadPagePageDeltaReport['deltaKind'] = 'no_useful_change';
@@ -583,6 +584,9 @@ export function buildReadPagePageDeltaReport(params: {
   } else if (consoleError) {
     deltaKind = 'console_error';
     recommendation = 'stop';
+  } else if (networkFailed) {
+    deltaKind = 'network_failed';
+    recommendation = 'retry';
   } else if (dialogAppeared) {
     deltaKind = 'dialog_appeared';
     recommendation = qrCodeAppeared ? 'needs_user' : 'proceed';

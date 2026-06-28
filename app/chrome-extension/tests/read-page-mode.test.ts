@@ -3858,7 +3858,7 @@ describe('read_page mode', () => {
       afterProjectionId: secondPayload.pageObjectSnapshot.snapshotId,
       deltaKind: 'read_refresh_delta',
       observedChangeKind: expect.stringMatching(
-        /^(url_changed|spa_route_change|list_refreshed|dialog_appeared|new_tab_opened|object_appeared|form_state_changed|network_completed|console_error|no_useful_change|blocked|restricted|unknown)$/,
+        /^(url_changed|spa_route_change|list_refreshed|dialog_appeared|new_tab_opened|object_appeared|form_state_changed|target_state_changed|network_completed|network_failed|console_error|no_useful_change|blocked|restricted|unknown)$/,
       ),
       objectDelta: expect.objectContaining({
         changedObjectIds: expect.any(Array),
