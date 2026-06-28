@@ -430,6 +430,48 @@ describe('collect result cards DOM scan', () => {
     );
   });
 
+  it('prefers the first meaningful title link over longer description links in generic result cards', () => {
+    setViewport();
+    document.body.innerHTML = `
+      <main role="list" data-testid="list" data-rect="0,0,1000,680">
+        <article role="listitem" data-testid="card-alpha" data-rect="20,24,520,220">
+          <a
+            data-testid="title-link"
+            data-rect="28,32,220,32"
+            href="https://code.example/owner/repo"
+          >owner/repo</a>
+          <a
+            data-testid="description-link"
+            data-rect="28,76,480,64"
+            href="https://code.example/owner/repo"
+          >AI browser intelligence extension for automatic tab classification and browser control</a>
+          <span>Updated yesterday</span>
+          <span>Stars 128</span>
+        </article>
+      </main>
+    `;
+    installRects();
+
+    const scan = scanVisibleResultCardsInPage();
+    const card = scan.cards[0];
+    const action = card?.actionTarget?.toolArgs?.candidateAction;
+
+    expect(card?.title).toBe('owner/repo');
+    expect(card?.actionTarget?.selector).toContain('a[data-testid="title-link"]');
+    expect(action).toMatchObject({
+      label: 'owner/repo',
+      actionType: 'click',
+      intent: 'content.open_detail',
+      matchReason: 'result_card_primary_link',
+      locatorChain: expect.arrayContaining([
+        expect.objectContaining({
+          type: 'css',
+          value: expect.stringContaining('a[data-testid="title-link"]'),
+        }),
+      ]),
+    });
+  });
+
   it('uses the actually hit same-href link layer as the result-card click target', () => {
     setViewport();
     document.body.innerHTML = `

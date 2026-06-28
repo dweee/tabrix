@@ -335,6 +335,64 @@ describe('CDP page sensing snapshot', () => {
     expect(blob).not.toContain('private description');
   });
 
+  it('keeps high-value result objects when utility controls appear first in the AX tree', async () => {
+    const utilityNodes = Array.from({ length: 32 }, (_, index) => ({
+      nodeId: `ax-utility-${index}`,
+      backendDOMNodeId: 300 + index,
+      role: { value: index % 2 === 0 ? 'button' : 'link' },
+      name: { value: index % 2 === 0 ? 'Menu' : 'Settings' },
+      actions: [{ name: 'click' }],
+    }));
+    sendCommandMock.mockImplementation(async (_tabId: number, method: string) => {
+      if (method === 'Runtime.evaluate') {
+        return {
+          result: {
+            value: {
+              readyState: 'complete',
+              url: 'https://code.example/search?q=browser',
+              title: 'Code Search',
+            },
+          },
+        };
+      }
+      if (method === 'Accessibility.getFullAXTree') {
+        return {
+          nodes: [
+            ...utilityNodes,
+            {
+              nodeId: 'ax-result-title',
+              backendDOMNodeId: 501,
+              role: { value: 'link' },
+              name: { value: 'owner/repository' },
+              actions: [{ name: 'click' }],
+            },
+            {
+              nodeId: 'ax-result-description',
+              backendDOMNodeId: 502,
+              role: { value: 'link' },
+              name: {
+                value: 'A browser automation runtime with object perception and memory reuse',
+              },
+              actions: [{ name: 'click' }],
+            },
+          ],
+        };
+      }
+      return {};
+    });
+
+    const snapshot = await captureCDPPageSensingSnapshot(80);
+    const labels = snapshot.accessibility?.objectCandidates.map((candidate) => candidate.label);
+
+    expect(snapshot.accessibility?.actionableNodeCount).toBe(34);
+    expect(snapshot.accessibility?.objectCandidates).toHaveLength(24);
+    expect(labels?.slice(0, 2)).toEqual([
+      'owner/repository',
+      'A browser automation runtime with object perception and memory reuse',
+    ]);
+    expect(labels).toContain('owner/repository');
+  });
+
   it('enriches AX locators with safe DOM selectors from backend node ids', async () => {
     sendCommandMock.mockImplementation(async (_tabId: number, method: string, params?: any) => {
       if (method === 'Runtime.evaluate') {

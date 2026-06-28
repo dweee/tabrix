@@ -362,10 +362,17 @@ function attachTargetRefsToVisibleTextRows(
 
   const usedRefs = new Set<string>();
   return rows.map((row) => {
-    const match = candidates.find((candidate) => {
-      if (!candidate.ref || usedRefs.has(candidate.ref)) return false;
-      return rowMatchesInteractiveCandidate(row, candidate);
-    });
+    const match = candidates
+      .map((candidate) => ({
+        candidate,
+        score: usedRefs.has(candidate.ref || '')
+          ? 0
+          : scoreInteractiveCandidateForRow(row, candidate),
+      }))
+      .filter((item) => item.candidate.ref && item.score > 0)
+      .sort(
+        (left, right) => right.score - left.score || left.candidate.order - right.candidate.order,
+      )[0]?.candidate;
     if (!match?.ref) return row;
     usedRefs.add(match.ref);
     return {
@@ -409,15 +416,38 @@ function rowMatchesInteractiveCandidate(
   row: VisibleRegionRow,
   candidate: ParsedVisibleNode,
 ): boolean {
+  return scoreInteractiveCandidateForRow(row, candidate) > 0;
+}
+
+function scoreInteractiveCandidateForRow(
+  row: VisibleRegionRow,
+  candidate: ParsedVisibleNode,
+): number {
   const candidateName = normalizeComparableText(candidate.name);
-  if (candidateName.length < 6) return false;
-  const fields = uniqueCompactStrings([row.title, ...row.visibleTextFields])
+  if (candidateName.length < 6) return 0;
+  const title = normalizeComparableText(row.title);
+  if (title.length >= 6) {
+    const titleMatches =
+      title === candidateName || title.includes(candidateName) || candidateName.includes(title);
+    if (titleMatches) return candidate.href ? 120 : 90;
+  }
+
+  const supportFields = uniqueCompactStrings([
+    row.primaryText,
+    row.secondaryText,
+    row.summary,
+    row.metaText,
+    row.interactionText,
+    ...(row.visibleTextFields || []).filter((field) => field !== row.title),
+  ])
     .map((field) => normalizeComparableText(field))
     .filter((field) => field.length >= 6);
-  return fields.some(
+  const supportMatches = supportFields.some(
     (field) =>
       field === candidateName || field.includes(candidateName) || candidateName.includes(field),
   );
+  if (!supportMatches) return 0;
+  return candidate.href ? 40 : 20;
 }
 
 function isVisibleTextTargetCandidate(
@@ -1093,7 +1123,59 @@ function averageRowQualityBonus(rows: VisibleRegionRow[]): number {
 function preferBusinessRows(rows: VisibleRegionRow[]): VisibleRegionRow[] {
   if (rows.length < 2) return rows;
   const businessRows = rows.filter((row) => isBusinessResultRow(row));
-  return businessRows.length >= 2 ? businessRows : rows;
+  const preferredRows = businessRows.length >= 2 ? businessRows : rows;
+  return suppressDescriptionRowsWhenTitleRowsExist(preferredRows);
+}
+
+function suppressDescriptionRowsWhenTitleRowsExist(rows: VisibleRegionRow[]): VisibleRegionRow[] {
+  if (rows.length < 2) return rows;
+  const titleRowTargetRefs = new Set(
+    rows
+      .filter((row) => isObjectLikeResultTitle(row.title) && !isSentenceLikeDescriptionTitle(row))
+      .map((row) => normalizeTargetRefFamily(row.targetRef))
+      .filter(Boolean),
+  );
+  if (titleRowTargetRefs.size === 0) return rows;
+  return rows.filter((row) => {
+    const isSentenceLikeDescription = isSentenceLikeDescriptionTitle(row);
+    if (!isSentenceLikeDescription && isObjectLikeResultTitle(row.title)) return true;
+    const targetFamily = normalizeTargetRefFamily(row.targetRef);
+    if (!isSentenceLikeDescription) return true;
+    if (targetFamily && titleRowTargetRefs.has(targetFamily)) return false;
+    return !hasNearbyTitleRow(rows, row);
+  });
+}
+
+function isSentenceLikeDescriptionTitle(row: VisibleRegionRow): boolean {
+  const title = normalizeText(row.title);
+  return title.length > 56 && title.split(/\s+/).filter(Boolean).length >= 7;
+}
+
+function normalizeTargetRefFamily(value: string | null | undefined): string {
+  const normalized = normalizeText(value).toLowerCase();
+  return normalized.replace(/(?:^|_)(?:desc|description)(?:_|$)/g, '_');
+}
+
+function hasNearbyTitleRow(rows: VisibleRegionRow[], row: VisibleRegionRow): boolean {
+  const rowBox = row.boundingBox;
+  if (!rowBox || typeof rowBox.y !== 'number') return false;
+  return rows.some((candidate) => {
+    if (
+      candidate === row ||
+      !isObjectLikeResultTitle(candidate.title) ||
+      isSentenceLikeDescriptionTitle(candidate)
+    ) {
+      return false;
+    }
+    const candidateBox = candidate.boundingBox;
+    if (!candidateBox || typeof candidateBox.y !== 'number') return false;
+    const verticalDistance = Math.abs(candidateBox.y - rowBox.y);
+    if (verticalDistance > 90) return false;
+    if (typeof rowBox.x === 'number' && typeof candidateBox.x === 'number') {
+      return Math.abs(rowBox.x - candidateBox.x) <= 80;
+    }
+    return true;
+  });
 }
 
 function shouldPreferVisibleTextRows(
@@ -1165,10 +1247,7 @@ function buildRow(
     remaining.filter((node) => node.name !== primaryText),
     [INTERACTION_PATTERN, META_PATTERN],
   );
-  const targetRef =
-    group.nodes.find((node) => node.href && node.ref)?.ref ||
-    group.nodes.find((node) => node.ref && node.role === 'link')?.ref ||
-    group.container.ref;
+  const targetRef = selectRowTargetRef(group, titleNode, searchShellContext);
   const visibleTextFields = uniqueCompactStrings([
     title,
     primaryText,
@@ -1209,6 +1288,30 @@ function buildRow(
     confidence,
     qualityReasons,
   };
+}
+
+function selectRowTargetRef(
+  group: CandidateGroup,
+  titleNode: ParsedVisibleNode,
+  searchShellContext: SearchShellContext,
+): string | null {
+  if (titleNode.ref && (titleNode.href || titleNode.role === 'link')) return titleNode.ref;
+
+  const title = normalizeComparableText(titleNode.name);
+  const titleLink = group.nodes.find((node) => {
+    if (!node.ref || !node.href) return false;
+    if (!isStandaloneResultLink(node, searchShellContext)) return false;
+    const label = normalizeComparableText(node.name);
+    if (label.length < 6 || title.length < 6) return false;
+    return label === title || label.includes(title) || title.includes(label);
+  });
+  if (titleLink?.ref) return titleLink.ref;
+
+  return (
+    group.nodes.find((node) => node.ref && isStandaloneResultLink(node, searchShellContext))?.ref ||
+    group.nodes.find((node) => node.ref && node.role === 'link' && !isTagLikeLink(node))?.ref ||
+    group.container.ref
+  );
 }
 
 function isMetaOnlyRow(row: VisibleRegionRow): boolean {

@@ -140,6 +140,35 @@ describe('V27-P0-REAL-01 visible region rows', () => {
     );
   });
 
+  it('binds a row target to the title link instead of an earlier description link', () => {
+    const rows = extractVisibleRegionRows({
+      sourceRegion: 'search_results',
+      url: 'https://code.example/search?q=tabrix&type=repositories',
+      title: 'Repository search results',
+      viewport: { width: 1280, height: 720, dpr: 1 },
+      pageContent: [
+        '- main "Repository search results" [ref=ref_main] (x=640,y=370)',
+        '  - generic "Repository result" [ref=ref_repo_1] (x=260,y=160)',
+        '    - link "AI browser intelligence extension for automatic tab classification and browser control" [ref=ref_desc_1_link] (x=260,y=188) href="/owner/repo"',
+        '    - heading "owner/repo" [ref=ref_heading_1] (x=260,y=150)',
+        '      - link "owner/repo" [ref=ref_repo_1_link] (x=260,y=150) href="/owner/repo"',
+        '    - link "browser" [ref=ref_topic_1] (x=260,y=226) href="/topics/browser"',
+        '    - generic "Updated May 8, 2026" [ref=ref_updated_1] (x=700,y=226)',
+        '  - generic "Repository result" [ref=ref_repo_2] (x=260,y=270)',
+        '    - link "Another generic browser automation description that should not win" [ref=ref_desc_2_link] (x=260,y=298) href="/owner/other"',
+        '    - heading "owner/other" [ref=ref_heading_2] (x=260,y=260)',
+        '      - link "owner/other" [ref=ref_repo_2_link] (x=260,y=260) href="/owner/other"',
+        '    - generic "Updated Apr 30, 2026" [ref=ref_updated_2] (x=700,y=336)',
+      ].join('\n'),
+    });
+
+    expect(rows.visibleRegionRowsUsed).toBe(true);
+    expect(rows.rows.map((row) => ({ title: row.title, targetRef: row.targetRef }))).toEqual([
+      { title: 'owner/repo', targetRef: 'ref_repo_1_link' },
+      { title: 'owner/other', targetRef: 'ref_repo_2_link' },
+    ]);
+  });
+
   it('keeps more than five high-confidence visible result rows for list tasks', () => {
     const pageContent = [
       '- main "Repository search results" [ref=ref_main] (x=640,y=370)',

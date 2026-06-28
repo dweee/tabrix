@@ -176,6 +176,7 @@ const SPA_NETWORK_BURST_INFLIGHT_THRESHOLD = 2;
 const MAX_ACCESSIBILITY_SAMPLE_LABELS = 6;
 const MAX_ACCESSIBILITY_ACTIONABLE_ROLE_KEYS = 6;
 const MAX_ACCESSIBILITY_OBJECT_CANDIDATES = 24;
+const ACCESSIBILITY_OBJECT_CANDIDATE_POOL_LIMIT = 160;
 const ACCESSIBILITY_ACTIONABLE_ROLES = new Set([
   'button',
   'link',
@@ -640,6 +641,12 @@ interface RawAXNode {
   actions?: unknown;
 }
 
+interface RankedAccessibilityObjectCandidate {
+  candidate: CDPAccessibilityObjectCandidate;
+  index: number;
+  score: number;
+}
+
 function summarizeAccessibilityTree(treeResult: unknown): CDPAccessibilitySummary | undefined {
   const result = asRecord(treeResult);
   if (!result) return undefined;
@@ -664,7 +671,7 @@ function summarizeAccessibilityTree(treeResult: unknown): CDPAccessibilitySummar
   const roleCounts = new Map<string, number>();
   const sampleLabels = new Set<string>();
   const objectCandidateSet = new Set<string>();
-  const objectCandidates: CDPAccessibilityObjectCandidate[] = [];
+  const objectCandidatePool: RankedAccessibilityObjectCandidate[] = [];
   const stateSignals: CDPAccessibilityStateSignals = {
     checkedCount: 0,
     selectedCount: 0,
@@ -706,16 +713,21 @@ function summarizeAccessibilityTree(treeResult: unknown): CDPAccessibilitySummar
             ? `axNodeId:${locator.axNodeId}`
             : `${normalizedRole}||${label || ''}`;
       if (
-        objectCandidates.length < MAX_ACCESSIBILITY_OBJECT_CANDIDATES &&
+        objectCandidatePool.length < ACCESSIBILITY_OBJECT_CANDIDATE_POOL_LIMIT &&
         !objectCandidateSet.has(candidateKey)
       ) {
         objectCandidateSet.add(candidateKey);
-        objectCandidates.push({
+        const candidate: CDPAccessibilityObjectCandidate = {
           role: normalizedRole,
           ...(label ? { label } : {}),
           ...(locator ? { locator } : {}),
           actionTypes,
           state,
+        };
+        objectCandidatePool.push({
+          candidate,
+          index: objectCandidatePool.length,
+          score: scoreAccessibilityObjectCandidate(candidate),
         });
       }
     }
@@ -742,8 +754,82 @@ function summarizeAccessibilityTree(treeResult: unknown): CDPAccessibilitySummar
           ? Number((locatorCandidateCount / actionableNodeCount).toFixed(4))
           : 0,
     },
-    objectCandidates,
+    objectCandidates: selectAccessibilityObjectCandidates(objectCandidatePool),
   };
+}
+
+function selectAccessibilityObjectCandidates(
+  pool: RankedAccessibilityObjectCandidate[],
+): CDPAccessibilityObjectCandidate[] {
+  if (pool.length <= MAX_ACCESSIBILITY_OBJECT_CANDIDATES) {
+    return pool.map((item) => item.candidate);
+  }
+
+  return [...pool]
+    .sort((left, right) => right.score - left.score || left.index - right.index)
+    .slice(0, MAX_ACCESSIBILITY_OBJECT_CANDIDATES)
+    .map((item) => item.candidate);
+}
+
+function scoreAccessibilityObjectCandidate(candidate: CDPAccessibilityObjectCandidate): number {
+  let score = 0;
+  const role = candidate.role.toLowerCase();
+  const label = candidate.label ?? '';
+
+  if (candidate.locator?.backendDOMNodeId !== undefined) score += 24;
+  if (candidate.locator?.axNodeId) score += 8;
+  if (candidate.actionTypes.includes('click')) score += 16;
+  if (candidate.actionTypes.includes('focus')) score += 12;
+  if (candidate.actionTypes.includes('setvalue')) score += 18;
+
+  if (role === 'searchbox' || role === 'textbox') score += 64;
+  else if (role === 'link') score += 44;
+  else if (role === 'button') score += 36;
+  else if (role === 'checkbox' || role === 'radio' || role === 'switch') score += 34;
+  else if (role === 'combobox' || role === 'listbox' || role === 'option') score += 30;
+  else if (role === 'tab' || role === 'menuitem' || role === 'menuitemcheckbox') score += 22;
+
+  if (looksLikeStableObjectLabel(label)) score += 56;
+  if (looksLikeMeaningfulContentLabel(label)) score += 24;
+  if (looksLikeUtilityAccessibilityLabel(label)) score -= 72;
+  if (label.length <= 2 && !/[\p{Script=Han}]/u.test(label)) score -= 24;
+  if (candidate.state.disabled === true) score -= 48;
+  if (candidate.state.selected === true || candidate.state.checked === true) score += 6;
+
+  return score;
+}
+
+function looksLikeStableObjectLabel(label: string): boolean {
+  const normalized = label.trim();
+  if (!normalized) return false;
+  if (/^[\w.-]+\/[\w.-]+$/.test(normalized)) return true;
+  if (/^[\w.-]+\.[a-z]{2,}(?:\/\S*)?$/i.test(normalized)) return true;
+  if (/^https?:\/\//i.test(normalized)) return true;
+  if (/#[0-9]{1,8}\b/.test(normalized)) return true;
+  return false;
+}
+
+function looksLikeMeaningfulContentLabel(label: string): boolean {
+  const normalized = label.trim();
+  if (normalized.length < 6) return false;
+  if (/[\p{Script=Han}]/u.test(normalized)) return normalized.length >= 6;
+  return normalized.split(/\s+/).filter(Boolean).length >= 3;
+}
+
+function looksLikeUtilityAccessibilityLabel(label: string): boolean {
+  const normalized = label.trim().toLowerCase();
+  if (!normalized) return true;
+  if (
+    /^(menu|more|close|cancel|back|next|previous|share|copy|refresh|reload|settings|help|search|sign in|sign up|login|logout|skip|open|collapse|expand)$/i.test(
+      normalized,
+    )
+  ) {
+    return true;
+  }
+  if (/^(star|fork|watch|notifications?|profile|avatar|theme|language|filter)$/i.test(normalized)) {
+    return true;
+  }
+  return false;
 }
 
 export async function probeNodeVisibility(

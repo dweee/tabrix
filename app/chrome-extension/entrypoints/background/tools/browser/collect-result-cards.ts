@@ -1105,9 +1105,7 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
         normalize(link.innerText || link.textContent || link.getAttribute('aria-label')),
       )
       .filter((line) => line.length >= 4 && line.length <= 140 && !shellPattern.test(line));
-    const bestLinkText = linkTexts
-      .filter((line) => !metaPattern.test(line))
-      .sort((left, right) => right.length - left.length)[0];
+    const bestLinkText = linkTexts.find((line) => !metaPattern.test(line));
     if (bestLinkText) return bestLinkText;
 
     for (const line of lines) {
