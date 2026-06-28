@@ -46,7 +46,16 @@ export function buildTaskContextEnvelope(
   }
 
   const runOwnedTabIds = taskContext.getRunOwnedTabIds();
-  const cleanupPolicy = readRuntimePolicyString(attachment.requestArgs, 'cleanupPolicy');
+  const runOwnedRuntimePolicy = taskContext.getRunOwnedRuntimePolicy();
+  const desiredExecutionMode =
+    readRuntimePolicyString(attachment.requestArgs, 'desiredExecutionMode') ??
+    runOwnedRuntimePolicy.desiredExecutionMode;
+  const focusPolicy =
+    readRuntimePolicyString(attachment.requestArgs, 'focusPolicy') ??
+    runOwnedRuntimePolicy.focusPolicy;
+  const cleanupPolicy =
+    readRuntimePolicyString(attachment.requestArgs, 'cleanupPolicy') ??
+    runOwnedRuntimePolicy.cleanupPolicy;
   const finalizeStatus = buildTaskOwnedSessionFinalizeStatus({
     cleanupPolicy,
     runOwnedTabCount: runOwnedTabIds.length,
@@ -73,8 +82,8 @@ export function buildTaskContextEnvelope(
       taskSessionId: attachment.taskContextKey,
       runOwnedTabCount: runOwnedTabIds.length,
       runOwnedTabIds,
-      desiredExecutionMode: readRuntimePolicyString(attachment.requestArgs, 'desiredExecutionMode'),
-      focusPolicy: readRuntimePolicyString(attachment.requestArgs, 'focusPolicy'),
+      desiredExecutionMode,
+      focusPolicy,
       cleanupPolicy,
       finalizeStatus,
       nextAction: buildTaskOwnedSessionNextAction(finalizeStatus),

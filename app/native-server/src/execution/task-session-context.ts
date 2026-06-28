@@ -334,6 +334,9 @@ export interface TaskRunOwnedTabClaim {
   aiClaimedAtMs: number | null;
   aiFinalizedAtMs: number | null;
   aiClaimReason: string | null;
+  desiredExecutionMode: string | null;
+  focusPolicy: string | null;
+  cleanupPolicy: string | null;
 }
 
 export interface NoteReadPageInput {
@@ -1765,9 +1768,34 @@ export class TaskSessionContext {
           aiClaimedAtMs: claim.aiClaimedAtMs ?? previous?.aiClaimedAtMs ?? Date.now(),
           aiFinalizedAtMs: claim.aiFinalizedAtMs ?? previous?.aiFinalizedAtMs ?? null,
           aiClaimReason: claim.aiClaimReason ?? previous?.aiClaimReason ?? 'native_run_owned_tab',
+          desiredExecutionMode:
+            claim.desiredExecutionMode ?? previous?.desiredExecutionMode ?? null,
+          focusPolicy: claim.focusPolicy ?? previous?.focusPolicy ?? null,
+          cleanupPolicy: claim.cleanupPolicy ?? previous?.cleanupPolicy ?? null,
         });
       }
     }
+  }
+
+  public getRunOwnedRuntimePolicy(): {
+    desiredExecutionMode: string | null;
+    focusPolicy: string | null;
+    cleanupPolicy: string | null;
+  } {
+    const policy = {
+      desiredExecutionMode: null as string | null,
+      focusPolicy: null as string | null,
+      cleanupPolicy: null as string | null,
+    };
+    for (const tabId of this.getRunOwnedTabIds()) {
+      const claim = this.runOwnedTabClaims.get(tabId);
+      if (!claim) continue;
+      policy.desiredExecutionMode ??= claim.desiredExecutionMode;
+      policy.focusPolicy ??= claim.focusPolicy;
+      policy.cleanupPolicy ??= claim.cleanupPolicy;
+      if (policy.desiredExecutionMode && policy.focusPolicy && policy.cleanupPolicy) break;
+    }
+    return policy;
   }
 
   public releaseRunOwnedTab(tabId: number): void {

@@ -11,6 +11,9 @@ describe('TaskSessionContext run-owned tab claims', () => {
       aiClaimState: 'claimed',
       aiClaimedAtMs: 1000,
       aiClaimReason: 'native_background_navigation_claim',
+      desiredExecutionMode: 'run_owned',
+      focusPolicy: 'no_steal',
+      cleanupPolicy: 'close_run_owned',
     });
 
     context.noteCleanup({
@@ -27,6 +30,27 @@ describe('TaskSessionContext run-owned tab claims', () => {
       aiClaimedAtMs: 1000,
       aiFinalizedAtMs: expect.any(Number),
       aiClaimReason: 'chrome_close_tabs_cleanup',
+      desiredExecutionMode: 'run_owned',
+      focusPolicy: 'no_steal',
+      cleanupPolicy: 'close_run_owned',
+    });
+  });
+
+  it('surfaces runtime policy inherited from active run-owned tab claims', () => {
+    const context = new TaskSessionContext({ readBudget: 5 });
+
+    context.noteRunOwnedTab(123, {
+      aiClaimId: 'claim-123',
+      aiClaimState: 'claimed',
+      desiredExecutionMode: 'run_owned',
+      focusPolicy: 'no_steal',
+      cleanupPolicy: 'close_run_owned',
+    });
+
+    expect(context.getRunOwnedRuntimePolicy()).toEqual({
+      desiredExecutionMode: 'run_owned',
+      focusPolicy: 'no_steal',
+      cleanupPolicy: 'close_run_owned',
     });
   });
 });

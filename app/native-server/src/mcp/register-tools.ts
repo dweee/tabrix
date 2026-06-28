@@ -944,6 +944,9 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
                 aiClaimState: 'claimed' as const,
                 aiClaimedAtMs: Date.now(),
                 aiClaimReason: 'native_background_navigation_claim',
+                desiredExecutionMode: 'run_owned',
+                focusPolicy: 'no_steal',
+                cleanupPolicy: 'close_run_owned',
               }
             : null;
           taskContext.noteRunOwnedTab(returnedTabId, claim);
@@ -957,10 +960,20 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
         const explicitTabId = readPositiveInteger(args, 'tabId');
         const createdTabForUrl = extractCreatedTabForUrlFromCallToolResult(response.data);
         if (returnedTabId !== null && explicitTabId === null && createdTabForUrl) {
-          taskContext.noteRunOwnedTab(returnedTabId);
+          const claim = {
+            aiRunId: null,
+            aiClaimId: `web_fetcher_${returnedTabId}`,
+            aiClaimState: 'claimed' as const,
+            aiClaimedAtMs: Date.now(),
+            aiClaimReason: 'native_background_web_fetcher_claim',
+            desiredExecutionMode: 'run_owned',
+            focusPolicy: 'no_steal',
+            cleanupPolicy: 'close_run_owned',
+          };
+          taskContext.noteRunOwnedTab(returnedTabId, claim);
           sessionManager
             .getOrCreateExternalTaskContext(`mcp:auto:tab:${returnedTabId}`)
-            .noteRunOwnedTab(returnedTabId);
+            .noteRunOwnedTab(returnedTabId, claim);
         }
       }
       if (shouldInvalidateReadAfterWindowFocusChange(name, outgoingArgs)) {
