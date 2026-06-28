@@ -941,6 +941,8 @@ class NavigateTool extends BaseBrowserToolExecutor {
                   settleReason: settleResult?.reason || null,
                   waitedMs: settleResult?.waitedMs || 0,
                   readyState: settleResult?.readyState || null,
+                  activated: background !== true,
+                  focusPolicy: background === true ? 'background' : 'foreground',
                   postActionDelta,
                   ...buildNavigationReadinessFields({
                     settled: settleResult?.settled ?? false,

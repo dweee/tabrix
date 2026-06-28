@@ -187,11 +187,14 @@ describe('browser settle guidance', () => {
       windowId: 9,
       active: false,
     });
+    expect(chrome.windows.update).not.toHaveBeenCalled();
     const payload = JSON.parse((result.content[0] as { text: string }).text);
     expect(payload).toMatchObject({
       success: true,
       windowId: 9,
       targetWindowReason: 'same_site_existing_window',
+      activated: false,
+      focusPolicy: 'background',
       pageReadable: true,
     });
   });
