@@ -497,10 +497,22 @@ describe('action-postcondition-verifier — output contract', () => {
 });
 
 describe('action-postcondition-verifier — R4A region-state postconditions', () => {
-  it('maps search, detail, login-submit, and OTP-request candidate intents to region-state postconditions', () => {
+  it('maps search, filter, detail, login-submit, and OTP-request candidate intents to region-state postconditions', () => {
     expect(
       inferRegionStatePostconditionKindForIntent({
         intent: 'search.submit',
+        actionKind: 'click',
+      }),
+    ).toBe('search_results_updated');
+    expect(
+      inferRegionStatePostconditionKindForIntent({
+        intent: 'search.apply_filter.time_range',
+        actionKind: 'click',
+      }),
+    ).toBe('search_results_updated');
+    expect(
+      inferRegionStatePostconditionKindForIntent({
+        intent: 'search.apply_filter.sort',
         actionKind: 'click',
       }),
     ).toBe('search_results_updated');

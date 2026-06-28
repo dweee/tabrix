@@ -46,9 +46,17 @@ function normalizeIntent(candidateAction: CandidateActionInput | undefined): str
     : null;
 }
 
+function isSearchApplyFilterIntent(
+  intent: CandidateActionInput['intent'] | string | undefined,
+): boolean {
+  return typeof intent === 'string' && intent.startsWith('search.apply_filter.');
+}
+
 function expectedBusinessEvidenceForIntent(
   intent: CandidateActionInput['intent'] | undefined,
 ): ActionBusinessVerificationPlan['expectedEvidence'] {
+  if (isSearchApplyFilterIntent(intent)) return 'search_results_or_url_query_changed';
+
   switch (intent) {
     case 'auth.accept_terms':
       return 'agreement_state_changed_or_dialog_present';
@@ -86,6 +94,7 @@ function shouldReadBackBeforeRetry(input: {
     input.intent === 'filter.open' ||
     input.intent === 'filter.option_select' ||
     input.intent === 'filter.time_range_select' ||
+    isSearchApplyFilterIntent(input.intent) ||
     input.intent === 'search.category_select'
   );
 }
