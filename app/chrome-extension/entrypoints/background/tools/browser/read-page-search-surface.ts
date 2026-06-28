@@ -32,6 +32,8 @@ const TEXT_SEARCH_TOOLBAR_REF_PATTERN = /^ref_text_search_toolbar_/;
 const TEXT_FILTER_PANEL_REF_PATTERN = /^ref_text_filter_panel_/;
 const SEARCH_INPUT_IDENTITY_PATTERN = /\b(search|query)\b|搜索|查找/i;
 const SEARCH_TOOLBAR_VERTICAL_BAND_PX = 180;
+const SEARCH_TOOLBAR_ROW_ALIGNMENT_PX = 80;
+const SEARCH_TOOLBAR_HORIZONTAL_GAP_PX = 128;
 const SEARCH_SUBMIT_PATTERN = /\b(search|find|query)\b|搜索|查找/i;
 const COLLECTION_METRIC_PATTERN =
   /(?:收藏|saves?|saved|favorites?|favourites?|collected)\s*[:：]?\s*([0-9][0-9,.]*\s*(?:万|千|k|m)?)/i;
@@ -167,6 +169,15 @@ function isCategoryLabel(value: unknown): boolean {
   return CATEGORY_LABEL_PATTERN.test(normalizeText(value));
 }
 
+function isSearchToolbarOptionAnchorLabel(value: unknown): boolean {
+  const label = filterSemanticLabel(value);
+  return (
+    FILTER_PANEL_OPTION_PATTERN.test(label) ||
+    CONTENT_TYPE_FILTER_OPTION_PATTERN.test(label) ||
+    TIME_RANGE_FILTER_OPTION_PATTERN.test(label)
+  );
+}
+
 function rectTop(element: ReadPageInteractiveElement | undefined): number | undefined {
   const y = element?.rect?.y;
   return typeof y === 'number' && Number.isFinite(y) ? y : undefined;
@@ -179,7 +190,8 @@ function isSearchToolbarAnchor(element: ReadPageInteractiveElement): boolean {
     (SEARCH_INPUT_ROLE_PATTERN.test(role) && SEARCH_SUBMIT_PATTERN.test(name || role)) ||
     isFilterLabel(name) ||
     isSortMenuLabel(name) ||
-    isCategoryLabel(name)
+    isCategoryLabel(name) ||
+    isSearchToolbarOptionAnchorLabel(name)
   );
 }
 
@@ -199,6 +211,100 @@ function isSearchToolbarBandElement(
   if (topAnchor === undefined) return true;
 
   return currentTop - topAnchor <= SEARCH_TOOLBAR_VERTICAL_BAND_PX;
+}
+
+function rectCenterY(element: ReadPageInteractiveElement): number | undefined {
+  const rect = element.rect;
+  if (!rect) return undefined;
+  const y = rect.y;
+  const height = rect.height;
+  if (
+    typeof y !== 'number' ||
+    typeof height !== 'number' ||
+    !Number.isFinite(y) ||
+    !Number.isFinite(height)
+  ) {
+    return undefined;
+  }
+  return y + height / 2;
+}
+
+function rectLeft(element: ReadPageInteractiveElement): number | undefined {
+  const x = element.rect?.x;
+  return typeof x === 'number' && Number.isFinite(x) ? x : undefined;
+}
+
+function rectRight(element: ReadPageInteractiveElement): number | undefined {
+  const rect = element.rect;
+  if (!rect) return undefined;
+  const x = rect.x;
+  const width = rect.width;
+  if (
+    typeof x !== 'number' ||
+    typeof width !== 'number' ||
+    !Number.isFinite(x) ||
+    !Number.isFinite(width)
+  ) {
+    return undefined;
+  }
+  return x + width;
+}
+
+function isSearchToolbarRowElement(
+  element: ReadPageInteractiveElement,
+  interactiveElements: readonly ReadPageInteractiveElement[],
+): boolean {
+  if (!isSearchToolbarBandElement(element, interactiveElements)) return false;
+  const centerY = rectCenterY(element);
+  const left = rectLeft(element);
+  const right = rectRight(element);
+  if (centerY === undefined || left === undefined || right === undefined) return true;
+
+  const rowAnchors = interactiveElements.filter((anchor) => {
+    if (anchor.ref === element.ref) return false;
+    if (!isSearchToolbarAnchor(anchor)) return false;
+    const anchorCenterY = rectCenterY(anchor);
+    return (
+      anchorCenterY !== undefined &&
+      Math.abs(anchorCenterY - centerY) <= SEARCH_TOOLBAR_ROW_ALIGNMENT_PX
+    );
+  });
+
+  if (rowAnchors.length === 0) return true;
+
+  const rowLeft = Math.min(
+    ...rowAnchors.map(rectLeft).filter((value): value is number => value !== undefined),
+  );
+  const rowRight = Math.max(
+    ...rowAnchors.map(rectRight).filter((value): value is number => value !== undefined),
+  );
+  if (!Number.isFinite(rowLeft) || !Number.isFinite(rowRight)) return true;
+
+  if (
+    left <= rowRight + SEARCH_TOOLBAR_HORIZONTAL_GAP_PX &&
+    right >= rowLeft - SEARCH_TOOLBAR_HORIZONTAL_GAP_PX
+  ) {
+    return true;
+  }
+
+  return interactiveElements.some((anchor) => {
+    if (anchor.ref === element.ref) return false;
+    if (!isSearchToolbarOptionAnchorLabel(anchor.name)) return false;
+    const anchorCenterY = rectCenterY(anchor);
+    const anchorLeft = rectLeft(anchor);
+    const anchorRight = rectRight(anchor);
+    if (anchorCenterY === undefined || anchorLeft === undefined || anchorRight === undefined) {
+      return false;
+    }
+    const verticalBelowGap = anchorCenterY - centerY;
+    const horizontalGap =
+      anchorRight < left ? left - anchorRight : right < anchorLeft ? anchorLeft - right : 0;
+    return (
+      verticalBelowGap > 0 &&
+      verticalBelowGap <= SEARCH_TOOLBAR_VERTICAL_BAND_PX * 2 &&
+      horizontalGap <= SEARCH_TOOLBAR_HORIZONTAL_GAP_PX
+    );
+  });
 }
 
 function isFilterPanelOptionLabel(value: unknown): boolean {
@@ -1100,7 +1206,10 @@ export function buildSearchSurface(params: {
     );
   }
 
-  const filterElement = params.interactiveElements.find((element) => isFilterLabel(element.name));
+  const filterElement = params.interactiveElements.find(
+    (element) =>
+      isFilterLabel(element.name) && isSearchToolbarRowElement(element, params.interactiveElements),
+  );
   if (filterElement) {
     controls.push(
       controlForElement({
@@ -1113,8 +1222,10 @@ export function buildSearchSurface(params: {
     );
   }
 
-  const sortMenuElement = params.interactiveElements.find((element) =>
-    isSortMenuLabel(element.name),
+  const sortMenuElement = params.interactiveElements.find(
+    (element) =>
+      isSortMenuLabel(element.name) &&
+      isSearchToolbarRowElement(element, params.interactiveElements),
   );
   if (sortMenuElement) {
     controls.push(

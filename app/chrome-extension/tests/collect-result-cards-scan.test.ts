@@ -173,6 +173,80 @@ describe('collect result cards DOM scan', () => {
     expect(xpathLocators?.[1]?.value).toContain('normalize-space');
   });
 
+  it('does not objectize an out-of-band side panel filter label as search filter trigger', () => {
+    setViewport();
+    document.body.innerHTML = `
+      <main role="list" data-testid="list" data-rect="0,100,820,580">
+        <section data-testid="toolbar" data-rect="20,80,760,48">
+          <button data-testid="sort-current" data-rect="40,88,80,36" aria-selected="true">综合</button>
+        </section>
+        <article role="listitem" data-testid="card-alpha" data-rect="20,140,260,180">
+          <a data-testid="link-alpha" data-rect="28,148,240,112" href="https://example.test/note/alpha">AI 图片创作提示词合集</a>
+          <span>作者 1</span>
+          <span>1 天前</span>
+          <span>收藏 100</span>
+        </article>
+        <article role="listitem" data-testid="card-beta" data-rect="300,140,260,180">
+          <a data-testid="link-beta" data-rect="308,148,240,112" href="https://example.test/note/beta">一周内 AI 绘图工具推荐</a>
+          <span>作者 2</span>
+          <span>2 天前</span>
+          <span>收藏 101</span>
+        </article>
+        <article role="listitem" data-testid="card-gamma" data-rect="580,140,260,180">
+          <a data-testid="link-gamma" data-rect="588,148,220,112" href="https://example.test/note/gamma">AI 生图高级感关键词</a>
+          <span>作者 3</span>
+          <span>3 天前</span>
+          <span>收藏 102</span>
+        </article>
+      </main>
+      <aside data-testid="assistant-panel" data-rect="1000,80,240,580">
+        <span data-testid="assistant-filter-label" data-rect="1160,92,40,24">筛选</span>
+        <p data-testid="assistant-copy" data-rect="1008,132,200,80">这里是内容摘要，不是搜索筛选工具栏。</p>
+      </aside>
+    `;
+    installRects();
+
+    const scan = scanVisibleResultCardsInPage();
+
+    expect(
+      scan.candidateActions.find(
+        (action) => action.label === '筛选' && action.intent === 'search.open_filters',
+      ),
+    ).toBeUndefined();
+    expect(scan.candidateActions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: '综合',
+          intent: 'search.apply_filter.sort',
+        }),
+      ]),
+    );
+  });
+
+  it('strips sensitive and opaque query parameters from result-card URLs', () => {
+    setViewport();
+    renderCards([
+      {
+        key: 'tokenized',
+        title: 'AI 图片创作提示词合集',
+        href: 'https://example.test/note/alpha?xsec_token=PRIVATE_TOKEN_VALUE_123456789&xsec_source=web_feed&signature=abcdef1234567890abcdef1234567890&keep=public',
+        y: 140,
+      },
+    ]);
+
+    const scan = scanVisibleResultCardsInPage();
+    const [card] = scan.cards;
+
+    expect(card.url).toBe('https://example.test/note/alpha?keep=public');
+    expect(card.actionTarget?.url).toBe('https://example.test/note/alpha?keep=public');
+    expect(card.actionTarget?.openAction?.toolArgs.url).toBe(
+      'https://example.test/note/alpha?keep=public',
+    );
+    expect(JSON.stringify(card)).not.toContain('xsec_token');
+    expect(JSON.stringify(card)).not.toContain('PRIVATE_TOKEN_VALUE');
+    expect(JSON.stringify(card)).not.toContain('signature');
+  });
+
   it('prefers unobstructed duplicate filter options over covered labels', () => {
     setViewport();
     document.body.innerHTML = `

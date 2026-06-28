@@ -222,6 +222,102 @@ describe('buildSearchSurface', () => {
     expect(surface?.queryState).toBe('empty');
   });
 
+  it('does not treat an out-of-band side panel filter label as the search filter trigger', () => {
+    const surface = buildSearchSurface({
+      assistantGuidance: guidance,
+      interactiveElements: [
+        interactive({
+          ref: 'ref_search',
+          role: 'searchbox',
+          name: 'Search',
+          rect: { x: 496, y: 83, width: 879, height: 41 },
+        }),
+        interactive({
+          ref: 'ref_sort_default',
+          role: 'button',
+          name: '综合',
+          rect: { x: 122, y: 116, width: 64, height: 36 },
+        }),
+        interactive({
+          ref: 'ref_side_panel_filter',
+          role: 'button',
+          name: '筛选',
+          rect: { x: 1591, y: 116, width: 84, height: 40 },
+        }),
+      ],
+      candidateActions: [
+        candidate({
+          id: 'ca_side_panel_filter',
+          targetRef: 'ref_side_panel_filter',
+          intent: 'filter.open',
+        }),
+      ],
+      visibleRegionRows: visibleRows(),
+    });
+
+    expect(surface?.controls.some((control) => control.kind === 'filter_trigger')).toBe(false);
+    expect(surface?.controls.map((control) => control.kind)).toContain('search_input');
+  });
+
+  it('does not treat a far side panel filter label as search trigger when only one toolbar chip is observed', () => {
+    const surface = buildSearchSurface({
+      assistantGuidance: guidance,
+      interactiveElements: [
+        interactive({
+          ref: 'ref_sort_default',
+          role: 'button',
+          name: '综合',
+          rect: { x: 122, y: 116, width: 64, height: 36 },
+        }),
+        interactive({
+          ref: 'ref_side_panel_filter',
+          role: 'button',
+          name: '筛选',
+          rect: { x: 1607, y: 126, width: 32, height: 19 },
+        }),
+      ],
+      candidateActions: [
+        candidate({
+          id: 'ca_side_panel_filter',
+          targetRef: 'ref_side_panel_filter',
+          intent: 'filter.open',
+        }),
+      ],
+      visibleRegionRows: visibleRows(),
+    });
+
+    expect(surface?.controls.some((control) => control.kind === 'filter_trigger')).toBe(false);
+    expect(surface?.controls.find((control) => control.label === '综合')).toBeDefined();
+  });
+
+  it('keeps a locator-backed filter trigger when it is aligned with the search toolbar row', () => {
+    const surface = buildSearchSurface({
+      assistantGuidance: guidance,
+      interactiveElements: [
+        interactive({
+          ref: 'ref_search',
+          role: 'searchbox',
+          name: 'Search',
+          rect: { x: 240, y: 80, width: 640, height: 40 },
+        }),
+        interactive({
+          ref: 'ref_filter',
+          role: 'button',
+          name: '筛选',
+          rect: { x: 900, y: 82, width: 72, height: 36 },
+        }),
+      ],
+      candidateActions: [
+        candidate({ id: 'ca_filter', targetRef: 'ref_filter', intent: 'filter.open' }),
+      ],
+    });
+
+    expect(surface?.controls.find((control) => control.kind === 'filter_trigger')).toMatchObject({
+      targetRef: 'ref_filter',
+      candidateActionId: 'ca_filter',
+    });
+  });
+
   it('surfaces visible toolbar labels as unresolved when no target refs are available', () => {
     const surface = buildSearchSurface({
       assistantGuidance: guidance,

@@ -645,6 +645,25 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
     return `ref_result_card_${stableIdentityHash(identity)}`;
   };
 
+  const sensitiveUrlParamPattern =
+    /(?:^|[_-])(authorization|auth|cookie|csrf|xsrf|session|sid|secret|signature|sig|token|xsec|access[_-]?token|refresh[_-]?token|api[_-]?key|credential|oauth)(?:$|[_-])/i;
+  const opaqueUrlValuePattern = /^[A-Za-z0-9._~+/=-]{24,}$/;
+
+  const sanitizeResultCardUrlForAi = (href: string): string => {
+    try {
+      const url = new URL(href, location.href);
+      for (const [key, value] of Array.from(url.searchParams.entries())) {
+        if (sensitiveUrlParamPattern.test(key) || opaqueUrlValuePattern.test(value)) {
+          url.searchParams.delete(key);
+        }
+      }
+      url.hash = '';
+      return url.href;
+    } catch {
+      return normalize(href).replace(/[?#].*$/, '');
+    }
+  };
+
   const stablePageTargetRef = (kind: string, label: string): string =>
     `ref_${kind}_${stableIdentityHash(`${location.hostname.toLowerCase()}|${kind}|${normalize(label).toLowerCase()}`)}`;
 
@@ -810,6 +829,43 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
         return filterTriggerPattern.test(label) || classifyFilterLabel(label) !== 'unknown';
       },
     );
+    const filterOptionRects = [...candidateElements, ...textElements]
+      .filter((element): element is Element => element instanceof Element)
+      .map((element) => {
+        const label = labelForControl(element);
+        if (
+          !label ||
+          filterTriggerPattern.test(label) ||
+          classifyFilterLabel(label) === 'unknown'
+        ) {
+          return null;
+        }
+        const control = closestClickableControl(element);
+        if (!control) return null;
+        const rect = control.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) return null;
+        return rect;
+      })
+      .filter((rect): rect is DOMRect => Boolean(rect));
+
+    const isPlausibleFilterTrigger = (control: Element): boolean => {
+      if (filterOptionRects.length === 0) return true;
+      const rect = control.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return false;
+      const centerY = rect.top + rect.height / 2;
+      const maxHorizontalGap = Math.max(360, window.innerWidth * 0.22);
+      return filterOptionRects.some((optionRect) => {
+        const optionCenterY = optionRect.top + optionRect.height / 2;
+        const verticalGap = Math.abs(optionCenterY - centerY);
+        const horizontalGap =
+          optionRect.right < rect.left
+            ? rect.left - optionRect.right
+            : rect.right < optionRect.left
+              ? optionRect.left - rect.right
+              : 0;
+        return verticalGap <= 128 && horizontalGap <= maxHorizontalGap;
+      });
+    };
 
     for (const element of [...candidateElements, ...textElements].slice(0, 500)) {
       if (!(element instanceof Element)) continue;
@@ -821,6 +877,7 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
       if (!isTrigger && filterKind === 'unknown') continue;
       const control = closestClickableControl(element);
       if (!control) continue;
+      if (isTrigger && !isPlausibleFilterTrigger(control)) continue;
       const hitScore = centerHitScore(control);
       if (hitScore < 0) continue;
       const selector = selectorForElement(control);
@@ -1242,7 +1299,8 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
     const primaryLink = primaryLinkForCard(links, title);
     const href = primaryLink?.link.href ?? links.find((link) => normalize(link.href))?.href;
     if (!href) continue;
-    const key = `${title.toLowerCase()}|${href || ''}`;
+    const safeHref = sanitizeResultCardUrlForAi(href);
+    const key = `${title.toLowerCase()}|${normalizedHrefForTargetIdentity(href)}`;
     if (seenKeys.has(key)) continue;
     seenKeys.add(key);
 
@@ -1312,7 +1370,7 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
       ? {
           actionType: 'click' as const,
           targetKind: 'result_card_link' as const,
-          url: primaryLink.link.href,
+          url: safeHref,
           ...(primaryLinkSelector ? { selector: primaryLinkSelector } : {}),
           ...(primaryLinkText ? { text: primaryLinkText } : {}),
           executionScope: resultCardCandidateAction
@@ -1320,7 +1378,7 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
             : ('session_url' as const),
           openAction: {
             toolName: 'chrome_navigate' as const,
-            toolArgs: { url: primaryLink.link.href },
+            toolArgs: { url: safeHref },
             executionScope: 'session_url' as const,
             reason: 'result_card_href' as const,
             confidence: Math.min(0.9, confidence + 0.02),
@@ -1352,7 +1410,7 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
 
     cards.push({
       title,
-      ...(href ? { url: href } : {}),
+      ...(safeHref ? { url: safeHref } : {}),
       ...(actionTarget ? { actionTarget } : {}),
       ...(primaryText ? { primaryText } : {}),
       ...(secondaryText ? { secondaryText } : {}),
