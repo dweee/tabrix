@@ -176,6 +176,28 @@ function normalizeText(value: unknown): string {
     .trim();
 }
 
+const GENERIC_CONTENT_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{5,}$/i;
+
+const NON_CONTENT_ROUTE_SEGMENTS = new Set([
+  'account',
+  'api',
+  'auth',
+  'assets',
+  'category',
+  'channel',
+  'login',
+  'notification',
+  'notifications',
+  'profile',
+  'search',
+  'settings',
+  'static',
+  'tag',
+  'tags',
+  'user',
+  'users',
+]);
+
 function normalizeResultCardUrlKey(value: unknown): string {
   const raw = normalizeText(value);
   if (!raw) return '';
@@ -184,11 +206,13 @@ function normalizeResultCardUrlKey(value: unknown): string {
     const lowerHost = url.hostname.toLowerCase();
     const segments = url.pathname.split('/').filter(Boolean);
     const leaf = segments[segments.length - 1] ?? '';
-    if (segments.length >= 2 && /^[a-z0-9][a-z0-9_-]{5,}$/i.test(leaf)) {
-      const collection = segments[segments.length - 2].toLowerCase();
-      if (/^(explore|search[_-]?result|result)$/.test(collection)) {
-        return `${url.protocol}//${lowerHost}/content/${leaf.toLowerCase()}`;
-      }
+    const parentSegment = (segments[segments.length - 2] ?? '').toLowerCase();
+    if (
+      segments.length >= 2 &&
+      GENERIC_CONTENT_ID_PATTERN.test(leaf) &&
+      !NON_CONTENT_ROUTE_SEGMENTS.has(parentSegment)
+    ) {
+      return `${url.protocol}//${lowerHost}/content/${leaf.toLowerCase()}`;
     }
     return `${url.protocol}//${lowerHost}${url.pathname}`.toLowerCase();
   } catch {

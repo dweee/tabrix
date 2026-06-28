@@ -42,7 +42,7 @@ describe('resultCardKey', () => {
       resultCardKey(
         card({
           title: 'AI image workflow',
-          url: 'https://content.example/search_result/6a2be61300000000210164c2?tracking=abc',
+          url: 'https://content.example/posts/6a2be61300000000210164c2?tracking=abc',
         }),
       ),
     ).toBe('ai image workflow|https://content.example/content/6a2be61300000000210164c2');
@@ -50,10 +50,29 @@ describe('resultCardKey', () => {
       resultCardKey(
         card({
           title: 'AI image workflow',
-          url: 'https://content.example/explore/6a2be61300000000210164c2',
+          url: 'https://content.example/articles/6a2be61300000000210164c2',
         }),
       ),
     ).toBe('ai image workflow|https://content.example/content/6a2be61300000000210164c2');
+  });
+
+  it('does not normalize obvious account or API routes as content cards', () => {
+    expect(
+      resultCardKey(
+        card({
+          title: 'AI image workflow',
+          url: 'https://content.example/profile/6a2be61300000000210164c2?tracking=abc',
+        }),
+      ),
+    ).toBe('ai image workflow|https://content.example/profile/6a2be61300000000210164c2');
+    expect(
+      resultCardKey(
+        card({
+          title: 'AI image workflow',
+          url: 'https://content.example/api/6a2be61300000000210164c2?tracking=abc',
+        }),
+      ),
+    ).toBe('ai image workflow|https://content.example/api/6a2be61300000000210164c2');
   });
 });
 
