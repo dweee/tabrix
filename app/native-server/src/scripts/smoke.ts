@@ -1232,6 +1232,14 @@ export async function runSmoke(options: SmokeOptions = {}): Promise<number> {
     if (!debugSmoke) return;
     process.stderr.write(`[smoke] ${label}\n`);
   };
+  const refreshStatusSnapshot = async (): Promise<void> => {
+    if (protocolOnly) return;
+    const status = await probeStatus(
+      buildCompanionUrl(mcpUrl, 'status'),
+      buildAuthHeaders(authToken),
+    );
+    if (status.snapshot) latestStatusSnapshot = status.snapshot;
+  };
 
   try {
     if (options.allTools && protocolOnly) {
@@ -1385,6 +1393,7 @@ export async function runSmoke(options: SmokeOptions = {}): Promise<number> {
         throw new Error(`Failed to clear browser launch override: ${overrideCleared.detail}`);
       }
 
+      await refreshStatusSnapshot();
       const result = buildSmokeResult({
         ok: steps.every((step) => step.ok),
         baseUrl: smokeServer?.baseUrl || mcpUrl,
@@ -1505,6 +1514,7 @@ export async function runSmoke(options: SmokeOptions = {}): Promise<number> {
         await mcp.callTool('chrome_switch_tab', { tabId: originalTabId });
       }
 
+      await refreshStatusSnapshot();
       const result = buildSmokeResult({
         ok: steps.every((step) => step.ok),
         baseUrl: smokeServer?.baseUrl || mcpUrl,
@@ -1598,6 +1608,7 @@ export async function runSmoke(options: SmokeOptions = {}): Promise<number> {
         await mcp.callTool('chrome_switch_tab', { tabId: originalTabId });
       }
 
+      await refreshStatusSnapshot();
       const result = buildSmokeResult({
         ok: steps.every((step) => step.ok),
         baseUrl: smokeServer?.baseUrl || mcpUrl,
@@ -1991,6 +2002,7 @@ export async function runSmoke(options: SmokeOptions = {}): Promise<number> {
     }
   }
 
+  await refreshStatusSnapshot();
   const result = buildSmokeResult({
     ok: steps.every((step) => step.ok),
     baseUrl: smokeServer?.baseUrl || mcpUrl,
