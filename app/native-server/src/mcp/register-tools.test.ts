@@ -5443,7 +5443,7 @@ describe('handleToolCall execution wrapper', () => {
 
     it('marks web-fetcher-created tabs as run-owned for explicit close_tabs cleanup', async () => {
       markBridgeReady();
-      jest
+      const bridgeSpy = jest
         .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
         .mockResolvedValueOnce({
           status: 'success',
@@ -5478,7 +5478,23 @@ describe('handleToolCall execution wrapper', () => {
           },
         } as never);
 
-      await handleToolCall('chrome_get_web_content', { url: 'https://example.test/list' });
+      await handleToolCall('chrome_get_web_content', {
+        url: 'https://example.test/list',
+        runtimePolicy: {
+          desiredExecutionMode: 'run_owned',
+          focusPolicy: 'no_steal',
+          cleanupPolicy: 'close_run_owned',
+        },
+      });
+      expect((bridgeSpy.mock.calls[0][0] as any).args).toMatchObject({
+        url: 'https://example.test/list',
+        background: true,
+        runtimePolicy: {
+          desiredExecutionMode: 'run_owned',
+          focusPolicy: 'no_steal',
+          cleanupPolicy: 'close_run_owned',
+        },
+      });
       const closeResult = await handleToolCall('chrome_close_tabs', { tabIds: [78] });
       const closePayload = JSON.parse(String(closeResult.content[0].text));
 

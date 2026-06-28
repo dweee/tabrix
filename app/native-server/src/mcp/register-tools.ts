@@ -156,8 +156,13 @@ import {
 
 const DEFAULT_AUTO_TASK_CONTEXT_KEY = 'mcp:auto:tab:default';
 
-function applyTaskOwnedBackgroundNavigationPolicy(toolName: string, args: unknown): unknown {
-  if (toolName !== TOOL_NAMES.BROWSER.NAVIGATE) return args;
+const BACKGROUND_CAPABLE_BROWSER_TOOLS = new Set<string>([
+  TOOL_NAMES.BROWSER.NAVIGATE,
+  TOOL_NAMES.BROWSER.WEB_FETCHER,
+]);
+
+function applyTaskOwnedBackgroundExecutionPolicy(toolName: string, args: unknown): unknown {
+  if (!BACKGROUND_CAPABLE_BROWSER_TOOLS.has(toolName)) return args;
   if (!args || typeof args !== 'object') return args;
   if (readBoolean(args, 'background') !== null) return args;
 
@@ -390,7 +395,7 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
     // scenarios that explicitly want a fresh tab still get it.
     const primaryTabController = getDefaultPrimaryTabController();
     let outgoingArgs: any = resolvePrimaryTabOutgoingArgs(name, args, primaryTabController);
-    outgoingArgs = applyTaskOwnedBackgroundNavigationPolicy(name, outgoingArgs);
+    outgoingArgs = applyTaskOwnedBackgroundExecutionPolicy(name, outgoingArgs);
     outgoingArgs = applyTaskOwnedFinalizeCleanupPolicy(name, outgoingArgs, taskContextEarly);
     taskContextAttachment.requestArgs = outgoingArgs;
     // Task Session Context read-budget gate. Only the `chrome_read_page`
