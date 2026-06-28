@@ -81,20 +81,6 @@ function truncateRouteString(value: string): string {
   return `${value.slice(0, MAX_ROUTE_LENGTH)}...[truncated:${value.length}]`;
 }
 
-function shouldRedactQueryParam(key: string): boolean {
-  const normalized = key.toLowerCase();
-  return (
-    normalized === 'code' ||
-    normalized === 'ticket' ||
-    normalized === 'api_key' ||
-    normalized === 'apikey' ||
-    normalized === 'access_key' ||
-    normalized === 'secret_key' ||
-    normalized === 'client_secret' ||
-    shouldRedactKey(key, 'browser_object_route')
-  );
-}
-
 function sanitizeSearchParams(
   searchParams: URLSearchParams,
   allowPersonalBrowserStateStorage: boolean,
@@ -103,13 +89,7 @@ function sanitizeSearchParams(
     const serialized = searchParams.toString();
     return serialized ? `?${serialized}` : '';
   }
-  const sanitized = new URLSearchParams();
-  for (const [key, value] of searchParams.entries()) {
-    if (shouldRedactQueryParam(key)) continue;
-    sanitized.append(key, value);
-  }
-  const serialized = sanitized.toString();
-  return serialized ? `?${serialized}` : '';
+  return '';
 }
 
 function sanitizeCurrentRoute(parsed: URL, allowPersonalBrowserStateStorage: boolean): string {

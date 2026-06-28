@@ -30,6 +30,7 @@ export type BrowserWorldTabOpenedBySource =
   | 'user_or_unknown'
   | 'unknown';
 export type BrowserWorldCleanupEligibility = 'eligible' | 'not_eligible' | 'unknown';
+export type BrowserWorldAiRunClaimState = 'claimed' | 'finalized';
 export type BrowserWorldBaselineReadinessStatus =
   | 'fresh'
   | 'resynced'
@@ -65,6 +66,12 @@ export interface BrowserWorldTabObject {
   lastAiOperationAtMs: number | null;
   lastAiOperationConfidence: number | null;
   lastAiOperationReason: string | null;
+  aiRunId: string | null;
+  aiClaimId: string | null;
+  aiClaimState: BrowserWorldAiRunClaimState | null;
+  aiClaimedAtMs: number | null;
+  aiFinalizedAtMs: number | null;
+  aiClaimReason: string | null;
   createdAtMs: number;
   updatedAtMs: number;
   closedAtMs: number | null;
@@ -403,6 +410,12 @@ export interface BrowserWorldTabAttributeGroups {
     lastAiOperationAtMs: number | null;
     lastAiOperationConfidence: number | null;
     lastAiOperationReason: string | null;
+    aiRunId: string | null;
+    aiClaimId: string | null;
+    aiClaimState: BrowserWorldAiRunClaimState | null;
+    aiClaimedAtMs: number | null;
+    aiFinalizedAtMs: number | null;
+    aiClaimReason: string | null;
   };
   operability: {
     canTabrixOperate: boolean | null;
@@ -437,6 +450,12 @@ export interface BrowserWorldTabStateSummary {
   lastAiOperationAtMs: number | null;
   lastAiOperationConfidence: number | null;
   lastAiOperationReason: string | null;
+  aiRunId: string | null;
+  aiClaimId: string | null;
+  aiClaimState: BrowserWorldAiRunClaimState | null;
+  aiClaimedAtMs: number | null;
+  aiFinalizedAtMs: number | null;
+  aiClaimReason: string | null;
   canTabrixOperate: boolean | null;
   operabilityReason: string;
   cleanupEligibility: BrowserWorldCleanupEligibility;
@@ -524,6 +543,9 @@ export interface BrowserWorldEvent {
   discardedChanged?: boolean;
   aiOperation?: string | null;
   aiOperationReason?: string | null;
+  aiRunId?: string | null;
+  aiClaimId?: string | null;
+  aiClaimState?: BrowserWorldAiRunClaimState | null;
   windowState?: string | null;
   windowVisibilityState?: BrowserWorldWindowObject['visibilityState'];
   canTabrixOperate?: boolean | null;
@@ -551,6 +573,12 @@ interface BrowserWorldPersistedAiTabOwnership {
   lastAiOperationAtMs: number | null;
   lastAiOperationConfidence: number | null;
   lastAiOperationReason: string | null;
+  aiRunId: string | null;
+  aiClaimId: string | null;
+  aiClaimState: BrowserWorldAiRunClaimState | null;
+  aiClaimedAtMs: number | null;
+  aiFinalizedAtMs: number | null;
+  aiClaimReason: string | null;
 }
 
 type BrowserWorldAiTabOwnershipStorageArea = Pick<chrome.storage.StorageArea, 'get' | 'set'>;
@@ -626,6 +654,17 @@ function normalizePersistedAiTabOwnership(
     typeof record.lastAiOperationReason === 'string'
       ? record.lastAiOperationReason.slice(0, 120)
       : null;
+  const aiRunId = typeof record.aiRunId === 'string' ? safeAiSessionLabel(record.aiRunId) : null;
+  const aiClaimId =
+    typeof record.aiClaimId === 'string' ? safeAiSessionLabel(record.aiClaimId) : null;
+  const aiClaimState =
+    record.aiClaimState === 'claimed' || record.aiClaimState === 'finalized'
+      ? record.aiClaimState
+      : null;
+  const aiClaimedAtMs = readInteger(record.aiClaimedAtMs);
+  const aiFinalizedAtMs = readInteger(record.aiFinalizedAtMs);
+  const aiClaimReason =
+    typeof record.aiClaimReason === 'string' ? safeAiClaimReason(record.aiClaimReason) : null;
   return {
     tabId,
     markedAtMs,
@@ -637,6 +676,12 @@ function normalizePersistedAiTabOwnership(
     lastAiOperationAtMs,
     lastAiOperationConfidence,
     lastAiOperationReason,
+    aiRunId,
+    aiClaimId,
+    aiClaimState,
+    aiClaimedAtMs,
+    aiFinalizedAtMs,
+    aiClaimReason,
   };
 }
 
@@ -711,6 +756,12 @@ function rememberPersistedAiTabOwnership(
     lastAiOperationAtMs: previous?.lastAiOperationAtMs ?? null,
     lastAiOperationConfidence: previous?.lastAiOperationConfidence ?? null,
     lastAiOperationReason: previous?.lastAiOperationReason ?? null,
+    aiRunId: previous?.aiRunId ?? null,
+    aiClaimId: previous?.aiClaimId ?? null,
+    aiClaimState: previous?.aiClaimState ?? null,
+    aiClaimedAtMs: previous?.aiClaimedAtMs ?? null,
+    aiFinalizedAtMs: previous?.aiFinalizedAtMs ?? null,
+    aiClaimReason: previous?.aiClaimReason ?? null,
     ...patch,
   });
   void savePersistedAiTabOwnership();
@@ -747,6 +798,19 @@ function safeAiOperationLabel(operation: string): string {
   if (!trimmed || trimmed.length > 80) return 'unknown_ai_operation';
   if (!/^[a-z][a-z0-9_-]*$/i.test(trimmed)) return 'unknown_ai_operation';
   return trimmed;
+}
+
+function safeAiSessionLabel(value: string | null | undefined): string | null {
+  const trimmed = String(value || '').trim();
+  if (!trimmed || trimmed.length > 120) return null;
+  if (!/^[a-z0-9][a-z0-9_-]*$/i.test(trimmed)) return null;
+  return trimmed;
+}
+
+function safeAiClaimReason(value: string | null | undefined): string | null {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) return null;
+  return safeAiOperationLabel(trimmed);
 }
 
 function tabUrl(tab: Pick<chrome.tabs.Tab, 'url' | 'pendingUrl'>): string {
@@ -1079,6 +1143,12 @@ function normalizeTab(
       previous?.lastAiOperationReason ??
       persistedAiOwnership?.lastAiOperationReason ??
       (openedBy === 'ai' ? 'marked_by_tabrix_navigation_before_tabs_onCreated' : null),
+    aiRunId: previous?.aiRunId ?? persistedAiOwnership?.aiRunId ?? null,
+    aiClaimId: previous?.aiClaimId ?? persistedAiOwnership?.aiClaimId ?? null,
+    aiClaimState: previous?.aiClaimState ?? persistedAiOwnership?.aiClaimState ?? null,
+    aiClaimedAtMs: previous?.aiClaimedAtMs ?? persistedAiOwnership?.aiClaimedAtMs ?? null,
+    aiFinalizedAtMs: previous?.aiFinalizedAtMs ?? persistedAiOwnership?.aiFinalizedAtMs ?? null,
+    aiClaimReason: previous?.aiClaimReason ?? persistedAiOwnership?.aiClaimReason ?? null,
     createdAtMs: previous?.createdAtMs ?? observedAt,
     updatedAtMs: observedAt,
     closedAtMs: null,
@@ -1880,6 +1950,131 @@ export function markBrowserWorldTabAiOperated(
     openedBySource: previous?.openedBySource,
     aiOperation: safeOperation,
     aiOperationReason: safeReason,
+  });
+}
+
+export function claimBrowserWorldTabForAiRun(
+  tabId: number | null | undefined,
+  options: {
+    runId: string;
+    claimId?: string | null;
+    operation?: string | null;
+    reason?: string | null;
+  },
+): void {
+  if (typeof tabId !== 'number' || tabId < 0) return;
+  const aiRunId = safeAiSessionLabel(options.runId);
+  if (!aiRunId) return;
+  const claimedAtMs = nextAiOperationMs();
+  const aiClaimId = safeAiSessionLabel(options.claimId) ?? aiRunId;
+  const operation = safeAiOperationLabel(options.operation ?? 'run_claim');
+  const reason = safeAiClaimReason(options.reason) ?? 'claimed_by_ai_run';
+  rememberPersistedAiTabOwnership(tabId, {
+    markedAtMs: claimedAtMs,
+    reason,
+    lastAiOperation: operation,
+    lastAiOperationAtMs: claimedAtMs,
+    lastAiOperationConfidence: 0.95,
+    lastAiOperationReason: reason,
+    aiRunId,
+    aiClaimId,
+    aiClaimState: 'claimed',
+    aiClaimedAtMs: claimedAtMs,
+    aiFinalizedAtMs: null,
+    aiClaimReason: reason,
+  });
+  const previous = tabsById.get(tabId);
+  if (previous) {
+    const cleanup = deriveCleanupEligibility({
+      openedBy: 'ai',
+      canOperate: previous.canTabrixOperate,
+    });
+    tabsById.set(tabId, {
+      ...previous,
+      openedBy: 'ai',
+      openedBySource: 'ai_tool',
+      openedByConfidence: Math.max(previous.openedByConfidence, 0.95),
+      openedByReason: previous.openedBy === 'ai' ? previous.openedByReason : reason,
+      aiOperationState: 'recently_operated',
+      lastAiOperation: operation,
+      lastAiOperationAtMs: claimedAtMs,
+      lastAiOperationConfidence: 0.95,
+      lastAiOperationReason: reason,
+      aiRunId,
+      aiClaimId,
+      aiClaimState: 'claimed',
+      aiClaimedAtMs: claimedAtMs,
+      aiFinalizedAtMs: null,
+      aiClaimReason: reason,
+      cleanupEligibility: cleanup.cleanupEligibility,
+      cleanupEligibilityReason: cleanup.cleanupEligibilityReason,
+      updatedAtMs: claimedAtMs,
+    });
+  }
+  pushEvent({
+    eventKind: 'ai_tab_marked',
+    tabId,
+    windowId: previous?.windowId ?? null,
+    openedBy: 'ai',
+    openedBySource: 'ai_tool',
+    aiOperation: operation,
+    aiOperationReason: reason,
+    aiRunId,
+    aiClaimId,
+    aiClaimState: 'claimed',
+  });
+}
+
+export function finalizeBrowserWorldTabAiRunClaim(
+  tabId: number | null | undefined,
+  options: { runId?: string | null; claimId?: string | null; reason?: string | null } = {},
+): void {
+  if (typeof tabId !== 'number' || tabId < 0) return;
+  const previous = tabsById.get(tabId);
+  const persisted = persistedAiTabOwnershipById.get(tabId) ?? null;
+  const currentRunId = previous?.aiRunId ?? persisted?.aiRunId ?? null;
+  const currentClaimId = previous?.aiClaimId ?? persisted?.aiClaimId ?? null;
+  const expectedRunId = safeAiSessionLabel(options.runId ?? null);
+  const expectedClaimId = safeAiSessionLabel(options.claimId ?? null);
+  if (expectedRunId && currentRunId && expectedRunId !== currentRunId) return;
+  if (expectedClaimId && currentClaimId && expectedClaimId !== currentClaimId) return;
+  const finalizedAtMs = nextAiOperationMs();
+  const reason = safeAiClaimReason(options.reason) ?? 'finalized_by_ai_run';
+  rememberPersistedAiTabOwnership(tabId, {
+    lastAiOperation: 'run_finalize',
+    lastAiOperationAtMs: finalizedAtMs,
+    lastAiOperationConfidence: 0.95,
+    lastAiOperationReason: reason,
+    aiRunId: currentRunId,
+    aiClaimId: currentClaimId,
+    aiClaimState: 'finalized',
+    aiFinalizedAtMs: finalizedAtMs,
+    aiClaimReason: reason,
+  });
+  if (previous) {
+    tabsById.set(tabId, {
+      ...previous,
+      lastAiOperation: 'run_finalize',
+      lastAiOperationAtMs: finalizedAtMs,
+      lastAiOperationConfidence: 0.95,
+      lastAiOperationReason: reason,
+      aiClaimState: 'finalized',
+      aiFinalizedAtMs: finalizedAtMs,
+      aiClaimReason: reason,
+      updatedAtMs: finalizedAtMs,
+    });
+  }
+  pushEvent({
+    eventKind: 'ai_tab_marked',
+    tabId,
+    windowId: previous?.windowId ?? null,
+    openedBy: previous?.openedBy ?? (persisted ? 'ai' : undefined),
+    openedBySource: previous?.openedBySource ?? (persisted ? 'ai_tool' : undefined),
+    aiOperation: 'run_finalize',
+    aiOperationReason: reason,
+    aiRunId: currentRunId,
+    aiClaimId: currentClaimId,
+    aiClaimState: 'finalized',
   });
 }
 

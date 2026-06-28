@@ -743,6 +743,7 @@ function buildTabStateGroup(
   const aiOperation = ownershipRuntime?.currentTabLastAiOperation ?? null;
   const aiOperationConfidence = ownershipRuntime?.currentTabLastAiOperationConfidence ?? null;
   const aiOperationReason = ownershipRuntime?.currentTabLastAiOperationReason ?? null;
+  const aiClaimState = ownershipRuntime?.currentTabAiClaimState ?? null;
   const operationTarget = buildReadTargetOperationBrief({
     tabId,
     ownershipRuntime,
@@ -757,7 +758,7 @@ function buildTabStateGroup(
   });
   return groupState({
     status: active === true ? 'active' : active === false ? 'background' : 'unknown',
-    summary: `Tab state: readTargetTab=${Number.isInteger(tabId) ? tabId : 'unknown'} is ${active === true ? 'active in its window' : active === false ? 'background/not active in its window' : 'activity unknown'}; status=${status}; browserActiveTab=${ownershipRuntime?.browserActiveTabIdKnown ? formatNullableNumber(browserActiveTabId) : 'unknown'}; readTargetIsBrowserActive=${formatTriState(readTargetIsBrowserActive)}; primaryRunTab=${formatNullableNumber(primaryTabId)}; owner=${owner}; openedBySource=${ownershipRuntime?.currentTabOpenedBySource ?? 'unknown'}; operable=${formatTriState(operability)}; operationTarget=${operationTarget.operationTargetRole}; actionReadiness=${actionReadiness.actionReadiness}; canProceedToPageLevelCheck=${formatTriState(actionReadiness.canProceedToPageLevelCheck)}; requiredBeforeAction=${actionReadiness.requiredBeforeAction}; shouldReselectBeforeAction=${formatTriState(operationTarget.shouldReselectBeforeAction)}; nextRequiredCheck=${operationTarget.nextRequiredCheck}; aiOperation=${aiOperation ?? 'none'}; aiOperationConfidence=${aiOperationConfidence ?? 'unknown'}; aiOperationReason=${aiOperationReason ?? 'unknown'}; browserWorldActionable=${ownershipRuntime?.browserWorldActionableObjectChangeSummary ?? 'unknown'}; cleanup=${cleanup}; protection=${protection}.`,
+    summary: `Tab state: readTargetTab=${Number.isInteger(tabId) ? tabId : 'unknown'} is ${active === true ? 'active in its window' : active === false ? 'background/not active in its window' : 'activity unknown'}; status=${status}; browserActiveTab=${ownershipRuntime?.browserActiveTabIdKnown ? formatNullableNumber(browserActiveTabId) : 'unknown'}; readTargetIsBrowserActive=${formatTriState(readTargetIsBrowserActive)}; primaryRunTab=${formatNullableNumber(primaryTabId)}; owner=${owner}; openedBySource=${ownershipRuntime?.currentTabOpenedBySource ?? 'unknown'}; operable=${formatTriState(operability)}; operationTarget=${operationTarget.operationTargetRole}; actionReadiness=${actionReadiness.actionReadiness}; canProceedToPageLevelCheck=${formatTriState(actionReadiness.canProceedToPageLevelCheck)}; requiredBeforeAction=${actionReadiness.requiredBeforeAction}; shouldReselectBeforeAction=${formatTriState(operationTarget.shouldReselectBeforeAction)}; nextRequiredCheck=${operationTarget.nextRequiredCheck}; aiOperation=${aiOperation ?? 'none'}; aiOperationConfidence=${aiOperationConfidence ?? 'unknown'}; aiOperationReason=${aiOperationReason ?? 'unknown'}; aiClaimState=${aiClaimState ?? 'none'}; browserWorldActionable=${ownershipRuntime?.browserWorldActionableObjectChangeSummary ?? 'unknown'}; cleanup=${cleanup}; protection=${protection}.`,
     facts: {
       objectKind: 'BrowserTabObject',
       readTargetTabId: tabId,
@@ -790,6 +791,12 @@ function buildTabStateGroup(
       lastAiOperationAtMs: ownershipRuntime?.currentTabLastAiOperationAtMs ?? null,
       lastAiOperationConfidence: aiOperationConfidence,
       lastAiOperationReason: aiOperationReason,
+      aiRunId: ownershipRuntime?.currentTabAiRunId ?? null,
+      aiClaimId: ownershipRuntime?.currentTabAiClaimId ?? null,
+      aiClaimState,
+      aiClaimedAtMs: ownershipRuntime?.currentTabAiClaimedAtMs ?? null,
+      aiFinalizedAtMs: ownershipRuntime?.currentTabAiFinalizedAtMs ?? null,
+      aiClaimReason: ownershipRuntime?.currentTabAiClaimReason ?? null,
       browserWorldObjectChangeSummary: ownershipRuntime?.browserWorldObjectChangeSummary ?? null,
       browserWorldActionableObjectChangeSummary:
         ownershipRuntime?.browserWorldActionableObjectChangeSummary ?? null,

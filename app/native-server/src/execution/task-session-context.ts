@@ -308,6 +308,12 @@ export interface TaskPageRuntimeFields {
   currentTabLastAiOperationAtMs?: number | null;
   currentTabLastAiOperationConfidence?: number | null;
   currentTabLastAiOperationReason?: string | null;
+  currentTabAiRunId?: string | null;
+  currentTabAiClaimId?: string | null;
+  currentTabAiClaimState?: import('@tabrix/shared').ReadPageAiRunClaimState | null;
+  currentTabAiClaimedAtMs?: number | null;
+  currentTabAiFinalizedAtMs?: number | null;
+  currentTabAiClaimReason?: string | null;
   currentTabCanTabrixOperate?: boolean | null;
   currentTabOperabilityReason?: string | null;
   currentTabRuntimeStateSource?: 'browser_world_inventory' | 'chrome_tab_snapshot' | 'unknown';
@@ -319,6 +325,15 @@ export interface TaskPageRuntimeFields {
   currentPageStability?: string | null;
   currentPageSnapshotUsableForBusinessAction?: boolean | null;
   currentPageLoadReadinessNextStepHint?: string | null;
+}
+
+export interface TaskRunOwnedTabClaim {
+  aiRunId: string | null;
+  aiClaimId: string | null;
+  aiClaimState: import('@tabrix/shared').ReadPageAiRunClaimState | null;
+  aiClaimedAtMs: number | null;
+  aiFinalizedAtMs: number | null;
+  aiClaimReason: string | null;
 }
 
 export interface NoteReadPageInput {
@@ -753,6 +768,7 @@ export class TaskSessionContext {
   private lifecycleEventCount = 0;
   private readonly lifecycleTimeline: TaskLifecycleEvent[] = [];
   private readonly runOwnedTabIds = new Set<number>();
+  private readonly runOwnedTabClaims = new Map<number, TaskRunOwnedTabClaim>();
 
   /**
    * Most recent `choose_context` decision recorded for this task. The
@@ -1711,6 +1727,9 @@ export class TaskSessionContext {
   public noteCleanup(input: { action: string; targetIds?: ReadonlyArray<number> | null }): void {
     if (input.targetIds) {
       for (const tabId of input.targetIds) {
+        this.finalizeRunOwnedTabClaim(tabId, {
+          reason: `${input.action}_cleanup`,
+        });
         this.runOwnedTabIds.delete(tabId);
       }
     }
@@ -1734,9 +1753,20 @@ export class TaskSessionContext {
     }));
   }
 
-  public noteRunOwnedTab(tabId: number): void {
+  public noteRunOwnedTab(tabId: number, claim?: Partial<TaskRunOwnedTabClaim> | null): void {
     if (Number.isInteger(tabId) && tabId > 0) {
       this.runOwnedTabIds.add(tabId);
+      if (claim) {
+        const previous = this.runOwnedTabClaims.get(tabId) ?? null;
+        this.runOwnedTabClaims.set(tabId, {
+          aiRunId: claim.aiRunId ?? previous?.aiRunId ?? null,
+          aiClaimId: claim.aiClaimId ?? previous?.aiClaimId ?? null,
+          aiClaimState: claim.aiClaimState ?? previous?.aiClaimState ?? 'claimed',
+          aiClaimedAtMs: claim.aiClaimedAtMs ?? previous?.aiClaimedAtMs ?? Date.now(),
+          aiFinalizedAtMs: claim.aiFinalizedAtMs ?? previous?.aiFinalizedAtMs ?? null,
+          aiClaimReason: claim.aiClaimReason ?? previous?.aiClaimReason ?? 'native_run_owned_tab',
+        });
+      }
     }
   }
 
@@ -1746,12 +1776,35 @@ export class TaskSessionContext {
     }
   }
 
+  public finalizeRunOwnedTabClaim(
+    tabId: number,
+    input: { finalizedAtMs?: number | null; reason?: string | null } = {},
+  ): void {
+    if (!Number.isInteger(tabId) || tabId <= 0) return;
+    const previous = this.runOwnedTabClaims.get(tabId);
+    if (!previous) return;
+    this.runOwnedTabClaims.set(tabId, {
+      ...previous,
+      aiClaimState: 'finalized',
+      aiFinalizedAtMs: input.finalizedAtMs ?? Date.now(),
+      aiClaimReason: input.reason ?? previous.aiClaimReason,
+    });
+  }
+
   public isRunOwnedTab(tabId: number): boolean {
     return this.runOwnedTabIds.has(tabId);
   }
 
   public getRunOwnedTabIds(): readonly number[] {
     return Array.from(this.runOwnedTabIds).sort((left, right) => left - right);
+  }
+
+  public getRunOwnedTabClaim(tabId: number | null | undefined): TaskRunOwnedTabClaim | null {
+    const normalizedTabId =
+      typeof tabId === 'number' && Number.isInteger(tabId) && tabId > 0 ? tabId : null;
+    if (normalizedTabId === null) return null;
+    const claim = this.runOwnedTabClaims.get(normalizedTabId);
+    return claim ? { ...claim } : null;
   }
 
   private buildBeforePageRegionsForInteraction(tabId: number | null): ReadPageRegion[] {
@@ -2616,6 +2669,12 @@ function cloneTaskPageRuntimeFields(input: TaskPageRuntimeFields): TaskPageRunti
     currentTabLastAiOperationAtMs: input.currentTabLastAiOperationAtMs,
     currentTabLastAiOperationConfidence: input.currentTabLastAiOperationConfidence,
     currentTabLastAiOperationReason: input.currentTabLastAiOperationReason,
+    currentTabAiRunId: input.currentTabAiRunId,
+    currentTabAiClaimId: input.currentTabAiClaimId,
+    currentTabAiClaimState: input.currentTabAiClaimState,
+    currentTabAiClaimedAtMs: input.currentTabAiClaimedAtMs,
+    currentTabAiFinalizedAtMs: input.currentTabAiFinalizedAtMs,
+    currentTabAiClaimReason: input.currentTabAiClaimReason,
     currentTabCanTabrixOperate: input.currentTabCanTabrixOperate,
     currentTabOperabilityReason: input.currentTabOperabilityReason,
     currentTabRuntimeStateSource: input.currentTabRuntimeStateSource,

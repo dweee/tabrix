@@ -228,6 +228,20 @@ export function extractCreatedTabForUrlFromCallToolResult(data: unknown): boolea
   return false;
 }
 
+export function extractPostActionIdFromCallToolResult(data: unknown): string | null {
+  for (const payload of extractObjectPayloadsFromCallToolResult(data)) {
+    const postActionDelta =
+      payload.postActionDelta && typeof payload.postActionDelta === 'object'
+        ? (payload.postActionDelta as Record<string, unknown>)
+        : null;
+    const actionId = postActionDelta?.actionId;
+    if (typeof actionId === 'string' && actionId.trim().length > 0) {
+      return actionId.trim();
+    }
+  }
+  return null;
+}
+
 function extractPositiveIntegerArrayFromCallToolResult(data: unknown, key: string): number[] {
   const payloads = extractObjectPayloadsFromCallToolResult(data);
   const ids = new Set<number>();

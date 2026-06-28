@@ -43,7 +43,7 @@ import {
 } from './read-page-ownership-runtime';
 import { readReadPageMode } from './read-page-request-shape';
 import { stripReadPageDiagnosticNoiseForOutput } from './read-page-ai-output';
-import { readString } from './register-tool-value-readers';
+import { readObject, readString } from './register-tool-value-readers';
 import { getBridgeSnapshot } from './bridge-recovery';
 import { classifySourceRouteHonesty } from '../runtime/source-route-honesty';
 import {
@@ -273,6 +273,15 @@ export function attachAiFacingDeltaContext(
   });
   payload.taskResumeReadiness = taskResumeReadiness;
   payload.deltaContext = deltaContext;
+  const browserPageObjectCompact =
+    browserPageObject?.compact ??
+    mergeOwnershipRuntimeIntoBrowserPageObjectCompact(
+      payload.browserPageObjectCompact,
+      ownershipRuntime,
+    );
+  if (browserPageObjectCompact) {
+    payload.browserPageObjectCompact = browserPageObjectCompact;
+  }
   // Gap 3 closeout: keep the legacy pageDeltaReport only as an internal
   // compatibility input. The public MCP read_page surface should expose the
   // unified delta contract via deltaContext + postActionDeltaEvidence.
@@ -343,4 +352,30 @@ function buildStructuredReadGate(
     nowMs: Date.now(),
     gateId: `structured-read-gate:${projection.projectionId}`,
   });
+}
+
+function mergeOwnershipRuntimeIntoBrowserPageObjectCompact(
+  compactValue: unknown,
+  ownershipRuntime: ReturnType<typeof buildAiFacingOwnershipRuntimeSummary>,
+): unknown {
+  const compact = readObject(compactValue);
+  if (!compact) return null;
+  const facts = readObject(compact.facts);
+  const tabFacts = readObject(facts?.tab);
+  if (!facts || !tabFacts) return compactValue;
+  return {
+    ...compact,
+    facts: {
+      ...facts,
+      tab: {
+        ...tabFacts,
+        aiRunId: ownershipRuntime.currentTabAiRunId ?? null,
+        aiClaimId: ownershipRuntime.currentTabAiClaimId ?? null,
+        aiClaimState: ownershipRuntime.currentTabAiClaimState ?? null,
+        aiClaimedAtMs: ownershipRuntime.currentTabAiClaimedAtMs ?? null,
+        aiFinalizedAtMs: ownershipRuntime.currentTabAiFinalizedAtMs ?? null,
+        aiClaimReason: ownershipRuntime.currentTabAiClaimReason ?? null,
+      },
+    },
+  };
 }

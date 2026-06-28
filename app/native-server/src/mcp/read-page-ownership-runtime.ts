@@ -53,6 +53,7 @@ export function readTaskPageRuntimeFields(payload: Record<string, unknown>): Tas
   const openedBy = readNestedString('currentTabOpenedBy');
   const openedBySource = readNestedString('currentTabOpenedBySource');
   const aiOperationState = readNestedString('currentTabAiOperationState');
+  const aiClaimState = readNestedString('currentTabAiClaimState');
   const runtimeStateSource = readNestedString('currentTabRuntimeStateSource');
 
   return {
@@ -139,6 +140,22 @@ export function readTaskPageRuntimeFields(payload: Record<string, unknown>): Tas
     currentTabLastAiOperationReason:
       readNestedString('currentTabLastAiOperationReason') ??
       readCompactString('lastAiOperationReason'),
+    currentTabAiRunId: readNestedString('currentTabAiRunId') ?? readCompactString('aiRunId'),
+    currentTabAiClaimId: readNestedString('currentTabAiClaimId') ?? readCompactString('aiClaimId'),
+    currentTabAiClaimState:
+      (aiClaimState === 'claimed' || aiClaimState === 'finalized' ? aiClaimState : null) ??
+      (() => {
+        const compactAiClaimState = readCompactString('aiClaimState');
+        return compactAiClaimState === 'claimed' || compactAiClaimState === 'finalized'
+          ? compactAiClaimState
+          : null;
+      })(),
+    currentTabAiClaimedAtMs:
+      readNestedInteger('currentTabAiClaimedAtMs') ?? readCompactInteger('aiClaimedAtMs'),
+    currentTabAiFinalizedAtMs:
+      readNestedInteger('currentTabAiFinalizedAtMs') ?? readCompactInteger('aiFinalizedAtMs'),
+    currentTabAiClaimReason:
+      readNestedString('currentTabAiClaimReason') ?? readCompactString('aiClaimReason'),
     currentTabCanTabrixOperate:
       readNestedBoolean('currentTabCanTabrixOperate') ?? readCompactBoolean('canTabrixOperate'),
     currentTabOperabilityReason:
@@ -227,6 +244,7 @@ export function buildAiFacingOwnershipRuntimeSummary(args: {
   } = runtimeFields;
   const isCurrentTabRunOwnedByTask =
     currentTabId !== null && taskContext.isRunOwnedTab(currentTabId);
+  const taskRunOwnedClaim = taskContext.getRunOwnedTabClaim(currentTabId);
   const currentOwnerType: BrowserPageOwnerType = projection.ownerType;
   const currentTabRunOwnershipVerdict =
     currentTabId === null
@@ -300,6 +318,16 @@ export function buildAiFacingOwnershipRuntimeSummary(args: {
     currentTabLastAiOperationAtMs: runtimeFields.currentTabLastAiOperationAtMs ?? null,
     currentTabLastAiOperationConfidence: runtimeFields.currentTabLastAiOperationConfidence ?? null,
     currentTabLastAiOperationReason: runtimeFields.currentTabLastAiOperationReason ?? null,
+    currentTabAiRunId: runtimeFields.currentTabAiRunId ?? taskRunOwnedClaim?.aiRunId ?? null,
+    currentTabAiClaimId: runtimeFields.currentTabAiClaimId ?? taskRunOwnedClaim?.aiClaimId ?? null,
+    currentTabAiClaimState:
+      runtimeFields.currentTabAiClaimState ?? taskRunOwnedClaim?.aiClaimState ?? null,
+    currentTabAiClaimedAtMs:
+      runtimeFields.currentTabAiClaimedAtMs ?? taskRunOwnedClaim?.aiClaimedAtMs ?? null,
+    currentTabAiFinalizedAtMs:
+      runtimeFields.currentTabAiFinalizedAtMs ?? taskRunOwnedClaim?.aiFinalizedAtMs ?? null,
+    currentTabAiClaimReason:
+      runtimeFields.currentTabAiClaimReason ?? taskRunOwnedClaim?.aiClaimReason ?? null,
     currentTabCanTabrixOperate: runtimeFields.currentTabCanTabrixOperate ?? null,
     currentTabOperabilityReason: runtimeFields.currentTabOperabilityReason ?? null,
     currentTabRuntimeStateSource: runtimeFields.currentTabRuntimeStateSource ?? 'unknown',

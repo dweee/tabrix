@@ -40,6 +40,7 @@ import {
 import { logger } from '../logging/logger';
 import {
   extractCreatedTabForUrlFromCallToolResult,
+  extractPostActionIdFromCallToolResult,
   extractTabIdFromCallToolResult,
   extractRequestedLayer,
   READ_PAGE_DEFAULT_LAYER,
@@ -935,10 +936,20 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
         const returnedTabId = extractTabIdFromCallToolResult(response.data);
         const explicitTabId = readPositiveInteger(args, 'tabId');
         if (returnedTabId !== null && explicitTabId === null) {
-          taskContext.noteRunOwnedTab(returnedTabId);
+          const actionId = extractPostActionIdFromCallToolResult(response.data);
+          const claim = actionId
+            ? {
+                aiRunId: actionId,
+                aiClaimId: `navigate_${returnedTabId}`,
+                aiClaimState: 'claimed' as const,
+                aiClaimedAtMs: Date.now(),
+                aiClaimReason: 'native_background_navigation_claim',
+              }
+            : null;
+          taskContext.noteRunOwnedTab(returnedTabId, claim);
           sessionManager
             .getOrCreateExternalTaskContext(`mcp:auto:tab:${returnedTabId}`)
-            .noteRunOwnedTab(returnedTabId);
+            .noteRunOwnedTab(returnedTabId, claim);
         }
       }
       if (taskContext && name === TOOL_NAMES.BROWSER.WEB_FETCHER) {

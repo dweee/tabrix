@@ -3,6 +3,7 @@ import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from '@tabrix/shared';
 import { captureFrameOnAction, isAutoCaptureActive } from './gif-auto-capture';
 import {
+  claimBrowserWorldTabForAiRun,
   markBrowserWorldTabAiCreated,
   markBrowserWorldTabAiOperated,
 } from '../../browser-world-inventory';
@@ -66,6 +67,21 @@ function recordNavigationPendingAction(tabId: number | null | undefined, actionI
     actionId,
     targetObjectId: null,
     targetRef: null,
+  });
+}
+
+function claimBackgroundNavigationRun(
+  tabId: number | null | undefined,
+  actionId: string,
+  actionKind: NavigationActionKind,
+  background: boolean | undefined,
+): void {
+  if (background !== true) return;
+  claimBrowserWorldTabForAiRun(tabId, {
+    runId: actionId,
+    claimId: `${actionKind}_${tabId ?? 'unknown'}`,
+    operation: actionKind,
+    reason: 'background_navigation_claim',
   });
 }
 
@@ -652,6 +668,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
           : 'activate_existing_tab';
         const actionId = createNavigationActionId(actionKind, updatedTab.id);
         recordNavigationPendingAction(updatedTab.id, actionId);
+        claimBackgroundNavigationRun(updatedTab.id, actionId, actionKind, background);
         const postActionDelta = buildNavigationPostActionDelta({
           actionId,
           actionKind,
@@ -726,6 +743,12 @@ class NavigateTool extends BaseBrowserToolExecutor {
               settleResult.tab.id,
             );
             recordNavigationPendingAction(settleResult.tab.id, actionId);
+            claimBackgroundNavigationRun(
+              settleResult.tab.id,
+              actionId,
+              'navigate_new_window_tab',
+              background,
+            );
             const postActionDelta = buildNavigationPostActionDelta({
               actionId,
               actionKind: 'navigate_new_window_tab',
@@ -825,6 +848,12 @@ class NavigateTool extends BaseBrowserToolExecutor {
                 timeoutNavigationTab.id,
               );
               recordNavigationPendingAction(timeoutNavigationTab.id, actionId);
+              claimBackgroundNavigationRun(
+                timeoutNavigationTab.id,
+                actionId,
+                'navigate_new_tab',
+                background,
+              );
               const postActionDelta = buildNavigationPostActionDelta({
                 actionId,
                 actionKind: 'navigate_new_tab',
@@ -923,6 +952,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
           const finalTabId = settleResult?.tab.id || newTab.id || null;
           const actionId = createNavigationActionId('navigate_new_tab', finalTabId);
           recordNavigationPendingAction(finalTabId, actionId);
+          claimBackgroundNavigationRun(finalTabId, actionId, 'navigate_new_tab', background);
           const postActionDelta = buildNavigationPostActionDelta({
             actionId,
             actionKind: 'navigate_new_tab',
@@ -990,6 +1020,12 @@ class NavigateTool extends BaseBrowserToolExecutor {
                 settleResult.tab.id,
               );
               recordNavigationPendingAction(settleResult.tab.id, actionId);
+              claimBackgroundNavigationRun(
+                settleResult.tab.id,
+                actionId,
+                'navigate_fallback_window_tab',
+                background,
+              );
               const postActionDelta = buildNavigationPostActionDelta({
                 actionId,
                 actionKind: 'navigate_fallback_window_tab',

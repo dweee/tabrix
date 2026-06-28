@@ -26,14 +26,14 @@ export function recordCloseTabsSuccessPostprocess(input: {
     closedTabIds,
     primaryTabController: input.primaryTabController,
   });
-  for (const tabId of [...closedTabIds, ...invalidTabIds]) {
-    input.taskContext.releaseRunOwnedTab(tabId);
-    input.sessionManager.releaseExternalTaskContext(buildAutoTabTaskContextKey(tabId));
-  }
   input.taskContext.noteCleanup({
     action: 'chrome_close_tabs',
     targetIds: readNumericArray(input.args, 'tabIds'),
   });
+  for (const tabId of [...closedTabIds, ...invalidTabIds]) {
+    input.taskContext.releaseRunOwnedTab(tabId);
+    input.sessionManager.releaseExternalTaskContext(buildAutoTabTaskContextKey(tabId));
+  }
   maybeRecordCloseTabsSuccessLifecycleArtifact({
     args: input.args,
     result: input.result,

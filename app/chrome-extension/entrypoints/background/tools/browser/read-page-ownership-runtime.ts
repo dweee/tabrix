@@ -90,6 +90,12 @@ export function buildReadPageOwnershipRuntimeSummary(params: {
     currentTabLastAiOperationAtMs: params.browserWorldTab?.lastAiOperationAtMs ?? null,
     currentTabLastAiOperationConfidence: lastAiOperationConfidence,
     currentTabLastAiOperationReason: lastAiOperationReason,
+    currentTabAiRunId: params.browserWorldTab?.aiRunId ?? null,
+    currentTabAiClaimId: params.browserWorldTab?.aiClaimId ?? null,
+    currentTabAiClaimState: params.browserWorldTab?.aiClaimState ?? null,
+    currentTabAiClaimedAtMs: params.browserWorldTab?.aiClaimedAtMs ?? null,
+    currentTabAiFinalizedAtMs: params.browserWorldTab?.aiFinalizedAtMs ?? null,
+    currentTabAiClaimReason: params.browserWorldTab?.aiClaimReason ?? null,
     currentTabCanTabrixOperate: params.browserWorldTab?.canTabrixOperate ?? null,
     currentTabOperabilityReason: params.browserWorldTab?.operabilityReason ?? null,
     currentTabRuntimeStateSource: params.browserWorldTab

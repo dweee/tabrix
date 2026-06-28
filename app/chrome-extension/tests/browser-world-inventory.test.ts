@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  claimBrowserWorldTabForAiRun,
+  finalizeBrowserWorldTabAiRunClaim,
   getBrowserWorldSnapshot,
   initBrowserWorldInventory,
   markBrowserWorldTabAiCreated,
@@ -822,6 +824,70 @@ describe('browser world inventory', () => {
     );
     expect(snapshot.summary.recentActivityLedger.historyFallback.limitation).toContain(
       'not that a specific tab was just closed or opened',
+    );
+    expectRecentEventsPublicSafe(snapshot.recentEvents);
+  });
+
+  it('tracks AI run claim and finalize state without persisting private page details', async () => {
+    const localStore: Record<string, unknown> = {};
+    (chrome.storage as any).local = makeStorageArea(localStore);
+    initBrowserWorldInventory();
+    await getBrowserWorldSnapshot();
+
+    claimBrowserWorldTabForAiRun(10, {
+      runId: 'run_background_check',
+      claimId: 'claim_10',
+      operation: 'background_scenario',
+      reason: 'background_session_claim',
+    });
+
+    let snapshot = await getBrowserWorldSnapshot();
+    const claimedTab = snapshot.tabs.find((tab) => tab.tabId === 10);
+    expect(claimedTab).toMatchObject({
+      openedBy: 'ai',
+      openedBySource: 'ai_tool',
+      aiOperationState: 'recently_operated',
+      lastAiOperation: 'background_scenario',
+      aiRunId: 'run_background_check',
+      aiClaimId: 'claim_10',
+      aiClaimState: 'claimed',
+      aiFinalizedAtMs: null,
+      aiClaimReason: 'background_session_claim',
+      cleanupEligibility: 'eligible',
+    });
+    expect(snapshot.summary.currentTabAttributeGroups?.ownership).toMatchObject({
+      aiRunId: 'run_background_check',
+      aiClaimId: 'claim_10',
+      aiClaimState: 'claimed',
+      aiClaimReason: 'background_session_claim',
+    });
+
+    finalizeBrowserWorldTabAiRunClaim(10, {
+      runId: 'run_background_check',
+      claimId: 'claim_10',
+      reason: 'background_session_finalize',
+    });
+
+    snapshot = await getBrowserWorldSnapshot();
+    const finalizedTab = snapshot.tabs.find((tab) => tab.tabId === 10);
+    expect(finalizedTab).toMatchObject({
+      aiRunId: 'run_background_check',
+      aiClaimId: 'claim_10',
+      aiClaimState: 'finalized',
+      lastAiOperation: 'run_finalize',
+      aiClaimReason: 'background_session_finalize',
+    });
+    expect(finalizedTab?.aiFinalizedAtMs).toEqual(expect.any(Number));
+    expectPersistedAiOwnershipPublicSafe(localStore['tabrix.browserWorld.aiTabOwnership.v1']);
+    expect(localStore['tabrix.browserWorld.aiTabOwnership.v1']).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          tabId: 10,
+          aiRunId: 'run_background_check',
+          aiClaimId: 'claim_10',
+          aiClaimState: 'finalized',
+        }),
+      ]),
     );
     expectRecentEventsPublicSafe(snapshot.recentEvents);
   });

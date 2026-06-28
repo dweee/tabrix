@@ -9,6 +9,19 @@ import {
   resetBrowserWorldInventoryForTests,
 } from '@/entrypoints/background/browser-world-inventory';
 
+function makeStorageArea(store: Record<string, unknown>) {
+  return {
+    get: vi.fn(async (keys: string[]) => {
+      const result: Record<string, unknown> = {};
+      for (const key of keys) result[key] = store[key];
+      return result;
+    }),
+    set: vi.fn(async (items: Record<string, unknown>) => {
+      Object.assign(store, items);
+    }),
+  };
+}
+
 describe('browser settle guidance', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -123,6 +136,8 @@ describe('browser settle guidance', () => {
   });
 
   it('opens new tabs in an existing same-site window before falling back to last-focused', async () => {
+    const localStore: Record<string, unknown> = {};
+    (chrome.storage as any).local = makeStorageArea(localStore);
     vi.spyOn(navigateTool as any, 'tryGetTab').mockResolvedValue(null);
     (chrome.windows.get as unknown as ReturnType<typeof vi.fn>).mockImplementation(
       async (id: number) => ({ id }),
@@ -197,6 +212,18 @@ describe('browser settle guidance', () => {
       focusPolicy: 'background',
       pageReadable: true,
     });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(localStore['tabrix.browserWorld.aiTabOwnership.v1']).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          tabId: 91,
+          aiRunId: expect.stringMatching(/^navigate-navigate_new_tab-91-\d+$/),
+          aiClaimId: 'navigate_new_tab_91',
+          aiClaimState: 'claimed',
+          aiClaimReason: 'background_navigation_claim',
+        }),
+      ]),
+    );
   });
 
   it('keeps fallback window creation in background mode when no existing window is available', async () => {

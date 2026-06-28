@@ -1754,6 +1754,8 @@ export type ReadPageProtectedScopeVerdict = 'protected' | 'not_protected' | 'unk
 
 export type ReadPageCleanupEligibilityVerdict = 'eligible' | 'not_eligible' | 'unknown';
 
+export type ReadPageAiRunClaimState = 'claimed' | 'finalized';
+
 export type ReadPageProtectReason =
   | 'current_tab_unknown'
   | 'not_run_owned_by_task'
@@ -1800,6 +1802,12 @@ export interface ReadPageOwnershipRuntimeSummary {
   currentTabLastAiOperationAtMs?: number | null;
   currentTabLastAiOperationConfidence?: number | null;
   currentTabLastAiOperationReason?: string | null;
+  currentTabAiRunId?: string | null;
+  currentTabAiClaimId?: string | null;
+  currentTabAiClaimState?: ReadPageAiRunClaimState | null;
+  currentTabAiClaimedAtMs?: number | null;
+  currentTabAiFinalizedAtMs?: number | null;
+  currentTabAiClaimReason?: string | null;
   currentTabCanTabrixOperate?: boolean | null;
   currentTabOperabilityReason?: string | null;
   currentTabRuntimeStateSource?: 'browser_world_inventory' | 'chrome_tab_snapshot' | 'unknown';

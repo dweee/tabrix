@@ -15,6 +15,7 @@ const expectedDeclarationFragments = [
   'interface BrowserFactSnapshot',
   'interface BrowserFactSnapshotEnvelope',
   'type ReadPageRequestedLayer',
+  'type ReadPageAiRunClaimState',
   'interface ReadPageCompactSnapshot',
   'interface ReadPageVisibleRegionRows',
   'type MemoryPersistenceMode',
