@@ -37,6 +37,67 @@ function reusableObjectSourceProvenance(values: unknown[]): string[] {
   ].slice(0, 8);
 }
 
+function buildSnapshotActionByTargetRef(
+  snapshotValue: unknown,
+): Map<string, Record<string, unknown>> {
+  const snapshot = readObject(snapshotValue);
+  const targets = readArray(snapshot?.actionableTargets);
+  const byRef = new Map<string, Record<string, unknown>>();
+  for (const rawTarget of targets) {
+    const target = readObject(rawTarget);
+    if (!target) continue;
+    const refs = [
+      readString(target.targetRef),
+      readString(target.ref),
+      readString(target.targetId),
+      readString(target.id),
+    ].filter((ref): ref is string => Boolean(ref));
+    for (const ref of refs) {
+      if (!byRef.has(ref)) byRef.set(ref, target);
+    }
+  }
+  return byRef;
+}
+
+function actionSourceProvenance(
+  action: Record<string, unknown>,
+  snapshotAction: Record<string, unknown> | undefined,
+): string[] {
+  const directDetails = readArray(action.sourceProvenanceDetail);
+  const snapshotDetails = readArray(snapshotAction?.sourceProvenanceDetail);
+  return reusableObjectSourceProvenance([
+    ...(directDetails.length > 0 ? directDetails : [readString(action.sourceProvenance)]),
+    ...snapshotDetails,
+    readString(snapshotAction?.sourceProvenance),
+  ]);
+}
+
+function readReadPageSourceRoute(
+  payload: Record<string, unknown>,
+  trace: MemoryTrace,
+): string | null {
+  return readString(
+    payload.sourceRoute,
+    readNestedObject(payload, 'sourceRouteHonesty')?.verdict,
+    payload.selectedDataSource,
+    trace.sourceRoute,
+  );
+}
+
+function readReadPageSelectedDataSource(
+  payload: Record<string, unknown>,
+  trace: MemoryTrace,
+): string | null {
+  return readString(payload.selectedDataSource, trace.selectedDataSource);
+}
+
+function readReadPageSourceFreshness(
+  payload: Record<string, unknown>,
+  trace: MemoryTrace,
+): string | null {
+  return readString(payload.freshness, trace.freshness);
+}
+
 export function recordReadPageRegionAndActionObjects(input: {
   trace: MemoryTrace;
   payload: Record<string, unknown>;
@@ -60,6 +121,10 @@ export function recordReadPageRegionAndActionObjects(input: {
   const actionInputs = readArray(input.payload.candidateActions);
   const actions =
     actionInputs.length > 0 ? actionInputs : buildReadPageActionFallbacksFromSnapshot(snapshot);
+  const snapshotActionByTargetRef = buildSnapshotActionByTargetRef(snapshot);
+  const sourceRoute = readReadPageSourceRoute(input.payload, input.trace);
+  const selectedDataSource = readReadPageSelectedDataSource(input.payload, input.trace);
+  const sourceFreshness = readReadPageSourceFreshness(input.payload, input.trace);
 
   for (const [index, rawRegion] of regions.slice(0, 40).entries()) {
     const region = readObject(rawRegion);
@@ -82,8 +147,9 @@ export function recordReadPageRegionAndActionObjects(input: {
       parentObjectId: input.parentObjectId ?? null,
       browserContextKey: input.browserContextKey ?? input.trace.browserContextKey ?? null,
       tabId: input.tabId,
-      sourceRoute: readString(input.payload.sourceRoute, input.trace.sourceRoute),
-      sourceFreshness: readString(input.payload.freshness, input.trace.freshness),
+      sourceRoute,
+      selectedDataSource,
+      sourceFreshness,
       lifecycleState: readString(region.state, 'observed'),
       canTabrixOperate: readActionabilityBoolean(region.targetability),
       targetability: sanitizeValue(
@@ -149,12 +215,9 @@ export function recordReadPageRegionAndActionObjects(input: {
         parentObjectId,
         browserContextKey: input.browserContextKey ?? input.trace.browserContextKey ?? null,
         tabId: input.tabId,
-        sourceRoute: readString(input.payload.sourceRoute, input.trace.sourceRoute),
-        sourceFreshness: readString(
-          child.freshness,
-          input.payload.freshness,
-          input.trace.freshness,
-        ),
+        sourceRoute,
+        selectedDataSource,
+        sourceFreshness: readString(child.freshness, sourceFreshness),
         lifecycleState: 'observed',
         canTabrixOperate: readActionabilityBoolean(child.targetability),
         targetability: sanitizeValue(
@@ -197,6 +260,7 @@ export function recordReadPageRegionAndActionObjects(input: {
     const action = readObject(rawAction);
     if (!action) continue;
     const targetRef = readString(action.targetRef, action.id) ?? `target-${index}`;
+    const snapshotAction = snapshotActionByTargetRef.get(targetRef);
     const targetIdentityKey = actionTargetIdentityKey({
       action,
       targetRef,
@@ -218,8 +282,9 @@ export function recordReadPageRegionAndActionObjects(input: {
       objectType: 'action_target',
       browserContextKey: input.browserContextKey ?? input.trace.browserContextKey ?? null,
       tabId: input.tabId,
-      sourceRoute: readString(input.payload.sourceRoute, input.trace.sourceRoute),
-      sourceFreshness: readString(input.payload.freshness, input.trace.freshness),
+      sourceRoute,
+      selectedDataSource,
+      sourceFreshness,
       lifecycleState: 'observed',
       canTabrixOperate: readActionabilityBoolean(action.actionability),
       operabilityReason: readString(action.actionabilityReason),
@@ -259,11 +324,7 @@ export function recordReadPageRegionAndActionObjects(input: {
           intent: readString(action.intent),
           label: readString(action.label, action.text, action.accessibleName, action.name),
           stableLocatorChain: normalizeStableLocatorChain(action.locatorChain),
-          sourceProvenance: reusableObjectSourceProvenance(
-            readArray(action.sourceProvenanceDetail).length
-              ? readArray(action.sourceProvenanceDetail)
-              : [readString(action.sourceProvenance)],
-          ),
+          sourceProvenance: actionSourceProvenance(action, snapshotAction),
           expectedResult: readString(action.nextRequiredCheck),
           matchReason: readString(action.matchReason),
           actionability: readString(action.actionability),

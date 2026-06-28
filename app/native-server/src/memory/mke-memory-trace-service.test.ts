@@ -1639,6 +1639,98 @@ describe('MkeMemoryTraceService', () => {
     }
   });
 
+  it('records AI-facing read-page source route and selected data source in Browser Objects', async () => {
+    const { db } = openMemoryDb({ dbPath: ':memory:' });
+    const traceRepo = new MemoryTraceRepository(db);
+    const browserObjectRepo = new BrowserObjectRepository(db);
+    const traceService = new MkeMemoryTraceService(traceRepo, browserObjectRepo);
+
+    try {
+      traceService.recordToolCall({
+        taskId: 'read-page-ai-source-task',
+        taskIntent: 'read the current page with object awareness',
+        aiClient: 'jest',
+        toolName: 'chrome_read_page',
+        stepId: 'read-page-ai-source-step',
+        sequenceIndex: 1,
+        requestParams: { tabId: 404 },
+        requestAtMs: NOW_MS,
+        responseAtMs: NOW_MS + 220,
+        result: textResult({
+          page: {
+            title: 'Actions documentation',
+            url: 'https://docs.example/actions',
+          },
+          summary: { pageRole: 'multi_region_page', quality: 'fresh' },
+          pageProjection: {
+            pageRole: 'multi_region_page',
+            pageModelKey: 'page:docs.example:multi_region_page',
+            chosenDataSource: 'markdown',
+            tabId: 404,
+          },
+          selectedDataSource: 'dom_region_rows',
+          sourceRouteHonesty: { verdict: 'dom_fallback' },
+          freshness: 'fresh',
+          tabId: 404,
+          pageObjectSnapshot: {
+            snapshotId: 'rpos_docs_404_1',
+            pageRole: 'multi_region_page',
+            sourceProvenance: ['dom', 'ax', 'cdp'],
+            actionableTargets: [
+              {
+                targetId: 'target-doc-search',
+                targetRef: 'ref-doc-search',
+                label: 'Search docs',
+                kind: 'input',
+                sourceProvenanceDetail: ['dom', 'ax', 'cdp', 'coordinates'],
+                locatorChain: [{ type: 'aria', value: 'Search docs' }],
+              },
+            ],
+            objectCount: 1,
+            actionableObjectCount: 1,
+          },
+          candidateActions: [
+            {
+              id: 'target-doc-search',
+              targetRef: 'ref-doc-search',
+              actionType: 'fill',
+              label: 'Search docs',
+              locatorChain: [{ type: 'aria', value: 'Search docs' }],
+              actionability: true,
+            },
+          ],
+        }),
+        resultSummary: 'read-page with AI-facing source choice',
+      });
+
+      await traceService.flushAsyncWrites();
+
+      const objects = browserObjectRepo.listRecent({ limit: 20, offset: 0 });
+      const page = objects.find((object) => object.objectType === 'page');
+      const actionTarget = objects.find((object) => object.objectType === 'action_target');
+
+      expect(page).toMatchObject({
+        objectType: 'page',
+        sourceRoute: 'dom_fallback',
+        selectedDataSource: 'dom_region_rows',
+        sourceFreshness: 'fresh',
+      });
+      expect(actionTarget).toMatchObject({
+        objectType: 'action_target',
+        sourceRoute: 'dom_fallback',
+        selectedDataSource: 'dom_region_rows',
+        sourceFreshness: 'fresh',
+      });
+      expect(actionTarget?.facts).toMatchObject({
+        sourceProvenance: ['dom', 'ax', 'cdp'],
+      });
+      expect(JSON.stringify(actionTarget)).not.toContain('coordinates');
+    } finally {
+      traceService.discardPendingAsyncWrites();
+      db.close();
+    }
+  });
+
   it('projects read-page region child objects into the Object Library graph', async () => {
     const { db } = openMemoryDb({ dbPath: ':memory:' });
     const traceRepo = new MemoryTraceRepository(db);

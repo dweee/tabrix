@@ -257,6 +257,23 @@ function recordReadPageObjects(input: {
       ? 'user_verification_required'
       : readString(compactTabFacts?.operabilityReason, projection?.operabilityReason);
 
+  const aiFacingSelectedDataSource = readString(
+    payload.selectedDataSource,
+    projection?.chosenDataSource,
+    trace.selectedDataSource,
+  );
+  const sourceRoute = readString(
+    payload.sourceRoute,
+    readNestedObject(payload, 'sourceRouteHonesty')?.verdict,
+    aiFacingSelectedDataSource,
+    trace.sourceRoute,
+  );
+  const sourceFreshness = readString(
+    payload.freshness,
+    projection?.sourceFreshness,
+    trace.freshness,
+  );
+
   const pageObject = upsertBrowserObject(browserObjects, {
     siteFamily,
     pageUrlPattern: urlFields.pattern ?? trace.pageUrlPattern,
@@ -270,8 +287,8 @@ function recordReadPageObjects(input: {
     tabId,
     windowId: readNumber(payload.windowId, trace.windowId),
     ownerType: normalizeOwnerType(readString(projection?.ownerType)),
-    sourceRoute: readString(payload.sourceRoute, trace.sourceRoute),
-    selectedDataSource: readString(projection?.chosenDataSource, payload.selectedDataSource),
+    sourceRoute,
+    selectedDataSource: aiFacingSelectedDataSource,
     sourceLineage: sanitizeValue(
       {
         sourceTruthChain: projection?.sourceTruthChain,
@@ -279,7 +296,7 @@ function recordReadPageObjects(input: {
       },
       'browser_object',
     ),
-    sourceFreshness: readString(projection?.sourceFreshness, payload.freshness, trace.freshness),
+    sourceFreshness,
     lifecycleState: blockedSurface ? 'restricted' : readString(compact?.status, 'updated'),
     canTabrixOperate,
     operabilityReason,

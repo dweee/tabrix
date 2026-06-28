@@ -112,4 +112,58 @@ describe('read-page child object projection', () => {
     expect(JSON.stringify(captured)).not.toContain('coordinates');
     expect(JSON.stringify(captured)).not.toContain('screenshot');
   });
+
+  it('merges action target source provenance from the page object snapshot when candidate actions are compact', () => {
+    const captured: BrowserObjectInput[] = [];
+
+    recordReadPageRegionAndActionObjects({
+      trace: trace(),
+      payload: {
+        selectedDataSource: 'dom_region_rows',
+        sourceRouteHonesty: { verdict: 'dom_fallback' },
+        pageObjectSnapshot: {
+          actionableTargets: [
+            {
+              targetId: 'open-search',
+              targetRef: 'ref-search',
+              sourceProvenance: 'cdp',
+              sourceProvenanceDetail: ['dom', 'ax', 'cdp', 'coordinates'],
+            },
+          ],
+        },
+        candidateActions: [
+          {
+            id: 'open-search',
+            actionType: 'click',
+            targetRef: 'ref-search',
+            label: 'Search',
+            locatorChain: [{ type: 'aria', value: 'Search' }],
+          },
+        ],
+      },
+      observedAt: '2026-06-27T00:00:01.000Z',
+      browserContextKey: 'ctx-1',
+      siteFamily: 'generic',
+      rootRoute: 'example.test/search',
+      currentRoute: 'example.test/search',
+      pageModelKey: 'example.test/search',
+      pageRole: 'search_results',
+      tabId: 10,
+      redactionState: 'redacted',
+      upsertBrowserObject: (objectInput) => {
+        captured.push(objectInput);
+        return { browserObjectId: `bo-${captured.length}` } as BrowserObject;
+      },
+    });
+
+    const actionTarget = captured.find((object) => object.objectType === 'action_target');
+    expect(actionTarget).toMatchObject({
+      sourceRoute: 'dom_fallback',
+      selectedDataSource: 'dom_region_rows',
+    });
+    expect(actionTarget?.facts).toMatchObject({
+      sourceProvenance: ['dom', 'ax', 'cdp'],
+    });
+    expect(JSON.stringify(actionTarget)).not.toContain('coordinates');
+  });
 });
