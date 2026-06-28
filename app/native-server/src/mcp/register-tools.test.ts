@@ -6302,6 +6302,106 @@ describe('handleToolCall execution wrapper', () => {
       );
     });
 
+    it('fresh read after a search apply-filter candidate proves result-list refresh before continuing', async () => {
+      markBridgeReady();
+      const auto = sessionManager.getOrCreateExternalTaskContext('mcp:auto:tab:11');
+      auto.noteRunOwnedTab(11);
+      Object.defineProperty(auto, 'readBudget', { value: 4, writable: false });
+
+      mockReadPageRoundTrip(
+        readPagePayloadWithRegions({
+          projectionId: 'projection_before_apply_filter',
+          tabId: 11,
+          pageRegions: [contentListRegion('before_filter')],
+        }),
+      );
+      await handleToolCall('chrome_read_page', {
+        tabId: 11,
+        requestedLayer: 'L0+L1',
+      });
+
+      jest
+        .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
+        .mockResolvedValueOnce({
+          status: 'success',
+          data: {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  observedOutcome: 'no_observed_change',
+                  postActionReadback: {
+                    kind: 'post_action_readback_v1',
+                    actionKind: 'click',
+                    status: 'fresh_read_required',
+                    candidateActionIntent: 'search.apply_filter.time_range',
+                    expectedEvidence: 'search_results_or_url_query_changed',
+                    observedOutcome: 'no_observed_change',
+                    dispatchSucceeded: true,
+                    freshReadRequired: true,
+                    sameTabVerificationRequired: true,
+                    businessSuccessProven: false,
+                    readbackSource: 'tool_dispatch_only',
+                    requiredNextAction: 'chrome_read_page_force_refresh_same_tab',
+                    reason: 'click_dispatch_observed_no_observed_change',
+                    claimBoundary: 'test readback requires fresh same-tab read',
+                  },
+                }),
+              },
+            ],
+            isError: false,
+          },
+        } as never);
+      await handleToolCall('chrome_click_element', {
+        tabId: 11,
+        ref: 'ref_filter_time_range',
+        candidateAction: {
+          id: 'ca_apply_filter_time_range',
+          actionType: 'click',
+          targetRef: 'ref_filter_time_range',
+          confidence: 0.9,
+          matchReason: 'generic search filter candidate',
+          locatorChain: [{ type: 'ref', value: 'ref_filter_time_range' }],
+          intent: 'search.apply_filter.time_range',
+        },
+      });
+
+      mockReadPageRoundTrip(
+        readPagePayloadWithRegions({
+          projectionId: 'projection_after_apply_filter',
+          tabId: 11,
+          pageRegions: [contentListRegion('after_filter')],
+          includeTopNRows: true,
+        }),
+      );
+      const result = await handleToolCall('chrome_read_page', {
+        tabId: 11,
+        requestedLayer: 'L0+L1',
+      });
+      const payload = JSON.parse(String(result.content[0].text));
+
+      expect(payload.regionStatePostconditions).toEqual([
+        {
+          actionKind: 'click',
+          result: expect.objectContaining({
+            actionId: 'ca_apply_filter_time_range',
+            kind: 'search_results_updated',
+            verdict: 'passed',
+            reason: 'result_collection_changed_after_action',
+          }),
+        },
+      ]);
+      expect(payload.taskResumeReadiness).toMatchObject({
+        status: 'postcondition_passed_ready',
+        canResumeOriginalTask: true,
+        nextStep: 'continue_original_task',
+        tabId: 11,
+        reason: 'region_state_search_results_updated_passed:result_collection_changed_after_action',
+      });
+      expect(auto.readPageCount).toBe(2);
+    });
+
     it('fresh read after an auth submit candidate proves login only when the auth prompt disappears and account state appears', async () => {
       markBridgeReady();
       const auto = sessionManager.getOrCreateExternalTaskContext('mcp:auto:tab:1');
