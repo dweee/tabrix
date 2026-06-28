@@ -112,6 +112,7 @@ interface ScrollStepResult {
   pixelsBelow: number;
   scrollTarget: 'window' | 'element';
   interactionDispatched?: boolean;
+  scrollIntoViewDispatched?: boolean;
 }
 
 function candidateActionDedupeKey(action: PageCandidateAction): string {
@@ -286,8 +287,6 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
     '[class*="Card"]',
     '[class*="item"]',
     '[class*="Item"]',
-    '[class*="note"]',
-    '[class*="Note"]',
   ].join(',');
 
   const textLines = (element: Element): string[] => {
@@ -318,6 +317,20 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
     if (rect.right < 0 || rect.left > window.innerWidth) return false;
     const style = window.getComputedStyle(element);
     return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+  };
+
+  const elementIsRendered = (element: Element): boolean => {
+    const rect = element.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return false;
+    let current: Element | null = element;
+    while (current && current !== document.documentElement) {
+      const style = window.getComputedStyle(current);
+      if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+        return false;
+      }
+      current = current.parentElement;
+    }
+    return true;
   };
 
   const centerHitScore = (element: Element): number => {
@@ -440,12 +453,17 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
       '.current',
       '.applied',
       '.checked',
+      '[class*="active" i]',
+      '[class*="selected" i]',
+      '[class*="current" i]',
+      '[class*="applied" i]',
+      '[class*="checked" i]',
     ].join(',');
     const filters: AppliedSearchFilter[] = [];
     const seen = new Set<string>();
     for (const element of Array.from(document.querySelectorAll(activeSelectors))) {
       if (!(element instanceof Element)) continue;
-      if (!elementIsVisible(element)) continue;
+      if (!elementIsRendered(element)) continue;
       const rect = element.getBoundingClientRect();
       if (rect.width <= 0 || rect.height <= 0) continue;
       if (rect.width > Math.max(480, window.innerWidth * 0.45)) continue;
@@ -491,7 +509,7 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
       groups,
       appliedFilters,
       claimBoundary:
-        'Filter state is inferred from active/selected DOM controls and bounded URL adapters. It proves visible page state, not global server ranking correctness.',
+        'Filter state is inferred from rendered active/selected DOM controls and bounded URL adapters. It proves current rendered page state, not global server ranking correctness.',
     };
   };
 
@@ -628,6 +646,15 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
   const stablePageTargetRef = (kind: string, label: string): string =>
     `ref_${kind}_${stableIdentityHash(`${location.hostname.toLowerCase()}|${kind}|${normalize(label).toLowerCase()}`)}`;
 
+  const resultCardSelector = [
+    'article',
+    '[role="article"]',
+    '[role="listitem"]',
+    'li',
+    '[class*="card" i]',
+    '[class*="item" i]',
+  ].join(',');
+
   const isElementScrollable = (element: Element): boolean => {
     const htmlElement = element as HTMLElement;
     if (htmlElement.scrollHeight <= htmlElement.clientHeight + 8) return false;
@@ -636,12 +663,12 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
       const overflowY = `${style.overflowY} ${style.overflow}`;
       if (
         !/(auto|scroll|overlay)/i.test(overflowY) &&
-        element.querySelectorAll('article, [role="listitem"], a[href]').length === 0
+        element.querySelectorAll(`${resultCardSelector}, a[href]`).length === 0
       ) {
         return false;
       }
     } catch {
-      if (element.querySelectorAll('article, [role="listitem"], a[href]').length === 0) {
+      if (element.querySelectorAll(`${resultCardSelector}, a[href]`).length === 0) {
         return false;
       }
     }
@@ -1256,7 +1283,9 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
     const resultCardTargetRef = stableResultCardTargetRef(title, href);
     const primaryLinkHitVerified =
       Boolean(primaryLink) && !primaryLink?.reasons.includes('visible_detail_link_unverified_hit');
-    const primaryLinkCanBindClickTarget = Boolean(primaryLink && primaryLinkSelector);
+    const primaryLinkCanBindClickTarget = Boolean(
+      primaryLink && primaryLinkSelector && primaryLinkHitVerified,
+    );
     const primaryLinkMatchReason = primaryLinkHitVerified
       ? 'result_card_primary_link'
       : 'result_card_visible_detail_link';
@@ -1451,34 +1480,77 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
 }
 
 export function scrollPageBy(stepPx: number): ScrollStepResult {
+  const resultCardSelector = [
+    'article',
+    '[role="article"]',
+    '[role="listitem"]',
+    'li',
+    '[class*="card" i]',
+    '[class*="item" i]',
+  ].join(',');
+
+  const visibleResultLikeElements = (): HTMLElement[] =>
+    Array.from(document.querySelectorAll<HTMLElement>(resultCardSelector)).filter((element) => {
+      const rect = element.getBoundingClientRect();
+      if (rect.width <= 80 || rect.height <= 60) return false;
+      if (rect.bottom <= 0 || rect.top >= window.innerHeight) return false;
+      const text = `${element.innerText || element.textContent || ''}`.replace(/\s+/g, ' ').trim();
+      const hasMediaOrLink = element.querySelector('a[href], img, picture, video') !== null;
+      return hasMediaOrLink || text.length >= 8;
+    });
+
+  const lowestVisibleResultLikeElement = (): HTMLElement | null => {
+    const candidates = visibleResultLikeElements();
+    return (
+      candidates.sort(
+        (left, right) => right.getBoundingClientRect().bottom - left.getBoundingClientRect().bottom,
+      )[0] ?? null
+    );
+  };
+
+  const isScrollableElement = (element: HTMLElement): boolean => {
+    if (element === document.body || element === document.documentElement) return false;
+    if (element.scrollHeight <= element.clientHeight + 8) return false;
+    const rect = element.getBoundingClientRect();
+    if (
+      rect.width <= 80 ||
+      rect.height <= 120 ||
+      rect.bottom <= 0 ||
+      rect.top >= window.innerHeight
+    ) {
+      return false;
+    }
+    try {
+      const style = window.getComputedStyle(element);
+      const cardSignals = element.querySelectorAll(`${resultCardSelector}, a[href]`).length;
+      return (
+        /(auto|scroll|overlay)/i.test(`${style.overflowY} ${style.overflow}`) || cardSignals > 0
+      );
+    } catch {
+      return element.querySelectorAll(`${resultCardSelector}, a[href]`).length > 0;
+    }
+  };
+
+  const nearestScrollableAncestor = (element: HTMLElement | null): HTMLElement | null => {
+    let current = element?.parentElement ?? null;
+    while (current && current !== document.body && current !== document.documentElement) {
+      if (isScrollableElement(current)) return current;
+      current = current.parentElement;
+    }
+    return null;
+  };
+
   const findScrollableElement = (): HTMLElement | null => {
+    for (const card of visibleResultLikeElements()) {
+      const ancestor = nearestScrollableAncestor(card);
+      if (ancestor) return ancestor;
+    }
     const elements = Array.from(document.querySelectorAll<HTMLElement>('*'));
     let best: { element: HTMLElement; score: number } | null = null;
     for (const element of elements) {
-      if (element === document.body || element === document.documentElement) continue;
-      if (element.scrollHeight <= element.clientHeight + 8) continue;
+      if (!isScrollableElement(element)) continue;
       const rect = element.getBoundingClientRect();
-      if (
-        rect.width <= 80 ||
-        rect.height <= 120 ||
-        rect.bottom <= 0 ||
-        rect.top >= window.innerHeight
-      ) {
-        continue;
-      }
-      let style: CSSStyleDeclaration;
-      try {
-        style = window.getComputedStyle(element);
-      } catch {
-        continue;
-      }
-      const cardSignals = element.querySelectorAll('article, [role="listitem"], a[href]').length;
-      if (
-        !/(auto|scroll|overlay)/i.test(`${style.overflowY} ${style.overflow}`) &&
-        cardSignals === 0
-      ) {
-        continue;
-      }
+      const cardSignals = element.querySelectorAll(`${resultCardSelector}, a[href]`).length;
       const visibleHeight = Math.min(rect.bottom, window.innerHeight) - Math.max(rect.top, 0);
       const score = cardSignals * 10_000 + visibleHeight * Math.max(1, rect.width);
       if (!best || score > best.score) best = { element, score };
@@ -1489,7 +1561,11 @@ export function scrollPageBy(stepPx: number): ScrollStepResult {
   const scrollElement = findScrollableElement();
   const beforeY = scrollElement ? scrollElement.scrollTop : window.scrollY;
   if (scrollElement) {
-    scrollElement.scrollBy(0, stepPx);
+    if (typeof scrollElement.scrollBy === 'function') {
+      scrollElement.scrollBy(0, stepPx);
+    } else {
+      scrollElement.scrollTop += stepPx;
+    }
   } else {
     try {
       window.scrollBy(0, stepPx);
@@ -1499,6 +1575,7 @@ export function scrollPageBy(stepPx: number): ScrollStepResult {
   }
   let afterY = scrollElement ? scrollElement.scrollTop : window.scrollY;
   let interactionDispatched = false;
+  let scrollIntoViewDispatched = false;
   if (Math.abs(afterY - beforeY) < 4) {
     const target =
       document.elementFromPoint(
@@ -1526,6 +1603,19 @@ export function scrollPageBy(stepPx: number): ScrollStepResult {
       afterY = scrollElement ? scrollElement.scrollTop : window.scrollY;
     }
   }
+  if (Math.abs(afterY - beforeY) < 4) {
+    const lowestCard = lowestVisibleResultLikeElement();
+    if (lowestCard && typeof lowestCard.scrollIntoView === 'function') {
+      try {
+        lowestCard.scrollIntoView({ block: 'end', inline: 'nearest' });
+        scrollIntoViewDispatched = true;
+        afterY = scrollElement ? scrollElement.scrollTop : window.scrollY;
+      } catch {
+        // Some pages patch scrollIntoView or reject synthetic scrolling. The
+        // caller will observe no movement and keep the claim bounded.
+      }
+    }
+  }
   const scrollHeight = scrollElement
     ? scrollElement.scrollHeight
     : document.documentElement.scrollHeight || document.body.scrollHeight;
@@ -1538,38 +1628,73 @@ export function scrollPageBy(stepPx: number): ScrollStepResult {
     pixelsBelow: Math.max(0, scrollHeight - afterY - viewportHeight),
     scrollTarget: scrollElement ? 'element' : 'window',
     ...(interactionDispatched ? { interactionDispatched } : {}),
+    ...(scrollIntoViewDispatched ? { scrollIntoViewDispatched } : {}),
   };
 }
 
 export function scrollPageToTop(): ScrollStepResult {
+  const resultCardSelector = [
+    'article',
+    '[role="article"]',
+    '[role="listitem"]',
+    'li',
+    '[class*="card" i]',
+    '[class*="item" i]',
+  ].join(',');
+
+  const visibleResultLikeElements = (): HTMLElement[] =>
+    Array.from(document.querySelectorAll<HTMLElement>(resultCardSelector)).filter((element) => {
+      const rect = element.getBoundingClientRect();
+      if (rect.width <= 80 || rect.height <= 60) return false;
+      if (rect.bottom <= 0 || rect.top >= window.innerHeight) return false;
+      const text = `${element.innerText || element.textContent || ''}`.replace(/\s+/g, ' ').trim();
+      const hasMediaOrLink = element.querySelector('a[href], img, picture, video') !== null;
+      return hasMediaOrLink || text.length >= 8;
+    });
+
+  const isScrollableElement = (element: HTMLElement): boolean => {
+    if (element === document.body || element === document.documentElement) return false;
+    if (element.scrollHeight <= element.clientHeight + 8) return false;
+    const rect = element.getBoundingClientRect();
+    if (
+      rect.width <= 80 ||
+      rect.height <= 120 ||
+      rect.bottom <= 0 ||
+      rect.top >= window.innerHeight
+    ) {
+      return false;
+    }
+    try {
+      const style = window.getComputedStyle(element);
+      const cardSignals = element.querySelectorAll(`${resultCardSelector}, a[href]`).length;
+      return (
+        /(auto|scroll|overlay)/i.test(`${style.overflowY} ${style.overflow}`) || cardSignals > 0
+      );
+    } catch {
+      return element.querySelectorAll(`${resultCardSelector}, a[href]`).length > 0;
+    }
+  };
+
+  const nearestScrollableAncestor = (element: HTMLElement | null): HTMLElement | null => {
+    let current = element?.parentElement ?? null;
+    while (current && current !== document.body && current !== document.documentElement) {
+      if (isScrollableElement(current)) return current;
+      current = current.parentElement;
+    }
+    return null;
+  };
+
   const findScrollableElement = (): HTMLElement | null => {
+    for (const card of visibleResultLikeElements()) {
+      const ancestor = nearestScrollableAncestor(card);
+      if (ancestor) return ancestor;
+    }
     const elements = Array.from(document.querySelectorAll<HTMLElement>('*'));
     let best: { element: HTMLElement; score: number } | null = null;
     for (const element of elements) {
-      if (element === document.body || element === document.documentElement) continue;
-      if (element.scrollHeight <= element.clientHeight + 8) continue;
+      if (!isScrollableElement(element)) continue;
       const rect = element.getBoundingClientRect();
-      if (
-        rect.width <= 80 ||
-        rect.height <= 120 ||
-        rect.bottom <= 0 ||
-        rect.top >= window.innerHeight
-      ) {
-        continue;
-      }
-      let style: CSSStyleDeclaration;
-      try {
-        style = window.getComputedStyle(element);
-      } catch {
-        continue;
-      }
-      const cardSignals = element.querySelectorAll('article, [role="listitem"], a[href]').length;
-      if (
-        !/(auto|scroll|overlay)/i.test(`${style.overflowY} ${style.overflow}`) &&
-        cardSignals === 0
-      ) {
-        continue;
-      }
+      const cardSignals = element.querySelectorAll(`${resultCardSelector}, a[href]`).length;
       const visibleHeight = Math.min(rect.bottom, window.innerHeight) - Math.max(rect.top, 0);
       const score = cardSignals * 10_000 + visibleHeight * Math.max(1, rect.width);
       if (!best || score > best.score) best = { element, score };
@@ -1580,9 +1705,17 @@ export function scrollPageToTop(): ScrollStepResult {
   const scrollElement = findScrollableElement();
   const beforeY = scrollElement ? scrollElement.scrollTop : window.scrollY;
   if (scrollElement) {
-    scrollElement.scrollTo(0, 0);
+    if (typeof scrollElement.scrollTo === 'function') {
+      scrollElement.scrollTo(0, 0);
+    } else {
+      scrollElement.scrollTop = 0;
+    }
   } else {
-    window.scrollTo(0, 0);
+    try {
+      window.scrollTo(0, 0);
+    } catch {
+      /* jsdom and some locked pages do not expose native window scrolling. */
+    }
   }
   const afterY = scrollElement ? scrollElement.scrollTop : window.scrollY;
   const scrollHeight = scrollElement

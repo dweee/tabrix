@@ -282,4 +282,52 @@ describe('summarizeCollectedResultCardTargetability', () => {
       status: 'partial_stable_targets',
     });
   });
+
+  it('does not treat unverified partially visible detail links as stable click targets', () => {
+    const unverifiedTarget = {
+      actionType: 'click' as const,
+      targetKind: 'result_card_link' as const,
+      url: 'https://example.com/1',
+      selector: 'article a[href]',
+      executionScope: 'same_tab_fresh_snapshot' as const,
+      toolName: 'chrome_click_element' as const,
+      toolArgs: {
+        candidateAction: {
+          id: 'ca_click_ref_result_card_1',
+          actionType: 'click' as const,
+          targetRef: 'ref_result_card_1',
+          label: 'First card',
+          confidence: 0.88,
+          matchReason: 'result_card_visible_detail_link',
+          intent: 'content.open_detail' as const,
+          locatorChain: [
+            { type: 'ref', value: 'ref_result_card_1' },
+            { type: 'css', value: 'article a[href]' },
+          ],
+        },
+      },
+      rect: { x: 20, y: -260, width: 240, height: 320 },
+      center: { x: 140, y: -100 },
+      coordinateFrame: 'viewport' as const,
+      sourceScrollY: 480,
+      confidence: 0.84,
+      reasons: ['visible_detail_link_unverified_hit'],
+    };
+    const cards = [
+      card({
+        title: 'First card',
+        url: 'https://example.com/1',
+        actionTarget: unverifiedTarget,
+      }),
+    ];
+
+    expect(stableResultCardTarget(cards[0])).toBeNull();
+    expect(summarizeCollectedResultCardTargetability(cards)).toEqual({
+      stableClickTargetCount: 0,
+      urlFallbackCount: 1,
+      untargetableCount: 0,
+      targetRefCoverageRate: 0,
+      status: 'url_or_text_only',
+    });
+  });
 });

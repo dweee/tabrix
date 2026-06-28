@@ -84,6 +84,8 @@ export function stableResultCardTarget(
   const candidateActionId = candidate?.id;
   if (
     card?.actionTarget?.toolName !== 'chrome_click_element' ||
+    card.actionTarget.executionScope !== 'same_tab_fresh_snapshot' ||
+    card.actionTarget.reasons.includes('visible_detail_link_unverified_hit') ||
     typeof targetRef !== 'string' ||
     targetRef.length === 0 ||
     typeof candidateActionId !== 'string' ||

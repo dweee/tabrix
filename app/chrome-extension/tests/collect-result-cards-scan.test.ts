@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   scanVisibleResultCardsInPage,
   scrollPageBy,
+  scrollPageToTop,
 } from '@/entrypoints/background/tools/browser/collect-result-cards';
 
 function setViewport(): void {
@@ -279,6 +280,111 @@ describe('collect result cards DOM scan', () => {
     );
   });
 
+  it('recognizes substring active classes without treating result-card text as selected filters', () => {
+    setViewport();
+    document.body.innerHTML = `
+      <aside role="dialog" data-testid="filter-panel" data-rect="840,80,460,520">
+        <button class="filter-option selected-state" data-testid="sort-default" data-rect="880,120,116,44">综合</button>
+        <button class="filter-option is-active" data-testid="sort-most-saved" data-rect="1010,120,116,44">最多收藏</button>
+        <button class="tab-item tab-active" data-testid="type-image-text" data-rect="880,190,116,44">图文</button>
+        <button class="filter-option option-selected" data-testid="time-default" data-rect="880,260,116,44">不限</button>
+        <button class="filter-option is-active" data-testid="time-week" data-rect="1010,260,116,44">一周内</button>
+      </aside>
+      <main role="list" data-testid="list" data-rect="0,100,780,580">
+        <article role="listitem" data-testid="card-alpha" data-rect="20,140,260,180">
+          <a data-testid="link-alpha" data-rect="28,148,240,112" href="https://example.test/note/alpha">AI 图片创作最新视频排行榜</a>
+          <span>作者 1</span>
+          <span>一周内</span>
+          <span>收藏 100</span>
+        </article>
+      </main>
+    `;
+    installRects();
+
+    const scan = scanVisibleResultCardsInPage();
+
+    expect(scan.filterState).toMatchObject({
+      appliedLabels: ['图文', '最多收藏', '一周内'],
+      contentType: '图文',
+      sort: '最多收藏',
+      timeRange: '一周内',
+    });
+    expect(scan.filterState.groups.sort).toMatchObject({
+      selected: '最多收藏',
+      candidates: ['综合', '最多收藏'],
+      ambiguous: false,
+    });
+    expect(scan.filterState.groups.timeRange).toMatchObject({
+      selected: '一周内',
+      candidates: ['不限', '一周内'],
+      ambiguous: false,
+    });
+  });
+
+  it('keeps rendered offscreen selected filters as page state while not turning them into visible actions', () => {
+    setViewport();
+    document.body.innerHTML = `
+      <aside role="dialog" data-testid="filter-panel" data-rect="840,-360,460,520">
+        <button class="filter-option selected-state" data-testid="sort-default" data-rect="880,-320,116,44">综合</button>
+        <button class="filter-option is-active" data-testid="sort-most-saved" data-rect="1010,-320,116,44">最多收藏</button>
+        <button class="tab-item tab-active" data-testid="type-image-text" data-rect="880,-250,116,44">图文</button>
+        <button class="filter-option option-selected" data-testid="time-default" data-rect="880,-180,116,44">不限</button>
+        <button class="filter-option is-active" data-testid="time-week" data-rect="1010,-180,116,44">一周内</button>
+        <button class="filter-option is-active" data-testid="location-default" data-rect="880,24,116,44">不限</button>
+      </aside>
+      <main role="list" data-testid="list" data-rect="0,100,780,580">
+        <article role="listitem" data-testid="card-alpha" data-rect="20,140,260,180">
+          <a data-testid="link-alpha" data-rect="28,148,240,112" href="https://example.test/note/alpha">AI 图片创作提示词合集</a>
+          <span>作者 1</span>
+          <span>收藏 100</span>
+        </article>
+      </main>
+    `;
+    installRects();
+
+    const scan = scanVisibleResultCardsInPage();
+
+    expect(scan.filterState).toMatchObject({
+      appliedLabels: ['图文', '最多收藏', '一周内'],
+      contentType: '图文',
+      sort: '最多收藏',
+      timeRange: '一周内',
+    });
+    expect(scan.candidateActions).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ label: '最多收藏', actionability: true }),
+        expect.objectContaining({ label: '一周内', actionability: true }),
+      ]),
+    );
+  });
+
+  it('ignores hidden selected filter templates when collecting rendered page state', () => {
+    setViewport();
+    document.body.innerHTML = `
+      <aside role="dialog" data-testid="hidden-filter-template" data-rect="840,80,460,520" style="display: none;">
+        <button class="filter-option is-active" data-testid="hidden-sort-most-saved" data-rect="880,120,116,44">最多收藏</button>
+        <button class="tab-item tab-active" data-testid="hidden-type-image-text" data-rect="880,190,116,44">图文</button>
+        <button class="filter-option is-active" data-testid="hidden-time-week" data-rect="1010,260,116,44">一周内</button>
+      </aside>
+      <main role="list" data-testid="list" data-rect="0,100,780,580">
+        <article role="listitem" data-testid="card-alpha" data-rect="20,140,260,180">
+          <a data-testid="link-alpha" data-rect="28,148,240,112" href="https://example.test/content/alpha">AI 图片创作提示词合集</a>
+          <span>作者 1</span>
+          <span>收藏 100</span>
+        </article>
+      </main>
+    `;
+    installRects();
+
+    const scan = scanVisibleResultCardsInPage();
+
+    expect(scan.filterState.status).toBe('not_observed');
+    expect(scan.filterState.appliedLabels).toEqual([]);
+    expect(scan.filterState.contentType).toBeUndefined();
+    expect(scan.filterState.sort).toBeUndefined();
+    expect(scan.filterState.timeRange).toBeUndefined();
+  });
+
   it('does not prefer task-specific filter labels when a group has multiple non-default active values', () => {
     setViewport();
     document.body.innerHTML = `
@@ -402,9 +508,11 @@ describe('collect result cards DOM scan', () => {
         y: 24,
       },
     ]);
+    const link = document.querySelector('[data-testid="link-alpha"]');
+    if (!link) throw new Error('expected alpha link');
     Object.defineProperty(document, 'elementFromPoint', {
       configurable: true,
-      value: vi.fn(() => document.body),
+      value: vi.fn(() => link),
     });
 
     const scan = scanVisibleResultCardsInPage();
@@ -416,7 +524,7 @@ describe('collect result cards DOM scan', () => {
     expect(action).toMatchObject({
       actionType: 'click',
       intent: 'content.open_detail',
-      matchReason: 'result_card_visible_detail_link',
+      matchReason: 'result_card_primary_link',
       locatorChain: expect.arrayContaining([
         expect.objectContaining({
           type: 'css',
@@ -427,6 +535,33 @@ describe('collect result cards DOM scan', () => {
     expect(card.actionTarget?.openAction?.toolName).toBe('chrome_navigate');
     expect(scan.candidateActions.some((action) => action.intent === 'content.open_detail')).toBe(
       true,
+    );
+  });
+
+  it('keeps unverified visible detail links as URL fallback instead of stable click actions', () => {
+    setViewport();
+    renderCards([
+      {
+        key: 'alpha',
+        title: 'AI 图片创作提示词合集',
+        href: 'https://content.example/search_result/alpha123?tracking=redacted',
+        y: -120,
+      },
+    ]);
+    Object.defineProperty(document, 'elementFromPoint', {
+      configurable: true,
+      value: vi.fn(() => document.body),
+    });
+
+    const scan = scanVisibleResultCardsInPage();
+    const card = scan.cards[0];
+
+    expect(card.actionTarget?.executionScope).toBe('session_url');
+    expect(card.actionTarget?.toolName).toBeUndefined();
+    expect(card.actionTarget?.toolArgs).toBeUndefined();
+    expect(card.actionTarget?.openAction?.toolName).toBe('chrome_navigate');
+    expect(scan.candidateActions.some((action) => action.intent === 'content.open_detail')).toBe(
+      false,
     );
   });
 
@@ -554,6 +689,110 @@ describe('collect result cards DOM scan', () => {
     expect(scan.cards).toHaveLength(1);
   });
 
+  it('scrolls the nearest result-card container for class-based card streams', () => {
+    setViewport();
+    document.body.innerHTML = `
+      <div
+        data-testid="outer-shell"
+        data-rect="0,60,960,620"
+        style="overflow-y: auto;"
+      >
+        <a href="https://example.test/nav/a">Nav A</a>
+        <a href="https://example.test/nav/b">Nav B</a>
+        <section
+          data-testid="inner-results"
+          data-rect="0,80,900,560"
+          style="overflow-y: auto;"
+        >
+          <div class="note-card" data-testid="card-alpha" data-rect="20,120,260,180">
+            <a
+              data-testid="link-alpha"
+              data-rect="28,128,240,112"
+              href="https://example.test/note/alpha"
+            >AI 图片创作提示词合集</a>
+          </div>
+          <div class="note-card" data-testid="card-beta" data-rect="300,120,260,180">
+            <a
+              data-testid="link-beta"
+              data-rect="308,128,240,112"
+              href="https://example.test/note/beta"
+            >一周内 AI 绘图工具推荐</a>
+          </div>
+        </section>
+      </div>
+    `;
+    const outerShell = document.querySelector<HTMLElement>('[data-testid="outer-shell"]');
+    const innerResults = document.querySelector<HTMLElement>('[data-testid="inner-results"]');
+    if (!outerShell || !innerResults) throw new Error('expected nested scroll containers');
+    Object.defineProperty(outerShell, 'clientHeight', { value: 620, configurable: true });
+    Object.defineProperty(outerShell, 'scrollHeight', { value: 1800, configurable: true });
+    Object.defineProperty(outerShell, 'scrollTop', { value: 0, configurable: true });
+    Object.defineProperty(innerResults, 'clientHeight', { value: 560, configurable: true });
+    Object.defineProperty(innerResults, 'scrollHeight', { value: 1600, configurable: true });
+    let innerScrollTop = 120;
+    Object.defineProperty(innerResults, 'scrollTop', {
+      configurable: true,
+      get: () => innerScrollTop,
+      set: (value: number) => {
+        innerScrollTop = value;
+      },
+    });
+    Object.defineProperty(innerResults, 'scrollBy', {
+      configurable: true,
+      value: vi.fn((_x: number, y: number) => {
+        innerScrollTop += y;
+      }),
+    });
+    installRects();
+
+    const scroll = scrollPageBy(640);
+
+    expect(scroll.scrollTarget).toBe('element');
+    expect(scroll.beforeY).toBe(120);
+    expect(scroll.afterY).toBe(760);
+    expect(scroll.pixelsBelow).toBe(280);
+    expect(outerShell.scrollTop).toBe(0);
+  });
+
+  it('resets the nearest result-card container to top before cross-scroll collection', () => {
+    setViewport();
+    document.body.innerHTML = `
+      <section
+        data-testid="inner-results"
+        data-rect="0,80,900,560"
+        style="overflow-y: auto;"
+      >
+        <div class="result-card" data-testid="card-alpha" data-rect="20,120,260,180">
+          <a
+            data-testid="link-alpha"
+            data-rect="28,128,240,112"
+            href="https://example.test/note/alpha"
+          >AI 图片创作提示词合集</a>
+        </div>
+      </section>
+    `;
+    const innerResults = document.querySelector<HTMLElement>('[data-testid="inner-results"]');
+    if (!innerResults) throw new Error('expected inner result container');
+    Object.defineProperty(innerResults, 'clientHeight', { value: 560, configurable: true });
+    Object.defineProperty(innerResults, 'scrollHeight', { value: 1600, configurable: true });
+    let innerScrollTop = 480;
+    Object.defineProperty(innerResults, 'scrollTop', {
+      configurable: true,
+      get: () => innerScrollTop,
+      set: (value: number) => {
+        innerScrollTop = value;
+      },
+    });
+    installRects();
+
+    const scroll = scrollPageToTop();
+
+    expect(scroll.scrollTarget).toBe('element');
+    expect(scroll.beforeY).toBe(480);
+    expect(scroll.afterY).toBe(0);
+    expect(innerScrollTop).toBe(0);
+  });
+
   it('dispatches a wheel probe when normal page scrolling does not move', () => {
     setViewport();
     document.body.innerHTML = `
@@ -587,5 +826,50 @@ describe('collect result cards DOM scan', () => {
 
     expect(scroll.interactionDispatched).toBe(true);
     expect(wheelEvents).toEqual([640]);
+  });
+
+  it('falls back to scrolling the lowest visible result card into view', () => {
+    setViewport();
+    document.body.innerHTML = `
+      <main role="list" data-testid="list" data-rect="0,80,900,560">
+        <article role="listitem" data-testid="card-alpha" data-rect="20,120,260,180">
+          <a
+            data-testid="link-alpha"
+            data-rect="28,128,240,112"
+            href="https://example.test/note/alpha"
+          >AI 图片创作提示词合集</a>
+        </article>
+        <article role="listitem" data-testid="card-beta" data-rect="20,360,260,180">
+          <a
+            data-testid="link-beta"
+            data-rect="28,368,240,112"
+            href="https://example.test/note/beta"
+          >一周内 AI 绘图工具推荐</a>
+        </article>
+      </main>
+    `;
+    installRects();
+    const list = document.querySelector<HTMLElement>('[data-testid="list"]');
+    const betaCard = document.querySelector<HTMLElement>('[data-testid="card-beta"]');
+    if (!list || !betaCard) throw new Error('expected result list and beta card');
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(betaCard, 'scrollIntoView', {
+      configurable: true,
+      value: scrollIntoView,
+    });
+    Object.defineProperty(document, 'elementFromPoint', {
+      configurable: true,
+      value: vi.fn(() => list),
+    });
+    Object.defineProperty(window, 'scrollBy', {
+      configurable: true,
+      value: vi.fn(),
+    });
+
+    const scroll = scrollPageBy(640);
+
+    expect(scroll.interactionDispatched).toBe(true);
+    expect(scroll.scrollIntoViewDispatched).toBe(true);
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'end', inline: 'nearest' });
   });
 });
