@@ -54,6 +54,7 @@
     "benchmark:v23": "node ./scripts/benchmark-v23.mjs",
     "benchmark:v24": "node ./scripts/benchmark-v24.mjs",
     "benchmark:v25": "node ./scripts/benchmark-v25.mjs",
+    "benchmark:browser-object": "node ./scripts/browser-object-scenario-compare.mjs",
     "size:check": "node ./scripts/check-bundle-size.mjs",
     "verify": "pnpm run typecheck && pnpm run lint && pnpm run test:core",
     "ci:check": "pnpm run i18n:check && pnpm run docs:check && pnpm run governance:console && pnpm run governance:empty-catch && pnpm run typecheck && pnpm run lint && pnpm run test:core && pnpm run audit",
