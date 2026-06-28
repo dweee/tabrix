@@ -340,6 +340,7 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
       taskContext: taskContextEarly,
       taskContextKey: externalTaskKeyEarly ?? task.taskId,
       taskContextKeySource: externalTaskKeyEarly ? 'external_task_key' : 'internal_task_id',
+      requestArgs: args,
     };
 
     const nativeDispatch = await dispatchNativeToolIfAvailable({
@@ -367,6 +368,7 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
     const primaryTabController = getDefaultPrimaryTabController();
     let outgoingArgs: any = resolvePrimaryTabOutgoingArgs(name, args, primaryTabController);
     outgoingArgs = applyTaskOwnedBackgroundNavigationPolicy(name, outgoingArgs);
+    taskContextAttachment.requestArgs = outgoingArgs;
     // Task Session Context read-budget gate. Only the `chrome_read_page`
     // hot path is gated; everything else passes through. The gate is
     // fail-soft: when no task context is attached (persistence off, or

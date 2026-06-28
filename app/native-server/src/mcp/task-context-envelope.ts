@@ -21,6 +21,7 @@ export interface TaskContextAttachment {
   taskContext: TaskSessionContext | null;
   taskContextKey: string;
   taskContextKeySource: TaskContextKeySource;
+  requestArgs?: unknown;
 }
 
 export function buildTaskContextEnvelope(
@@ -44,6 +45,13 @@ export function buildTaskContextEnvelope(
     };
   }
 
+  const runOwnedTabIds = taskContext.getRunOwnedTabIds();
+  const cleanupPolicy = readRuntimePolicyString(attachment.requestArgs, 'cleanupPolicy');
+  const finalizeStatus = buildTaskOwnedSessionFinalizeStatus({
+    cleanupPolicy,
+    runOwnedTabCount: runOwnedTabIds.length,
+  });
+
   return {
     envelopeKind: 'task_context',
     status: 'attached',
@@ -59,7 +67,18 @@ export function buildTaskContextEnvelope(
     lastReadLayer: taskContext.lastReadLayer,
     lastReadSource: taskContext.lastReadSource,
     lifecycleEventCount: taskContext.getLifecycleTimeline().length,
-    runOwnedTabCount: taskContext.getRunOwnedTabIds().length,
+    runOwnedTabCount: runOwnedTabIds.length,
+    runOwnedTabIds,
+    taskOwnedSession: {
+      taskSessionId: attachment.taskContextKey,
+      runOwnedTabCount: runOwnedTabIds.length,
+      runOwnedTabIds,
+      desiredExecutionMode: readRuntimePolicyString(attachment.requestArgs, 'desiredExecutionMode'),
+      focusPolicy: readRuntimePolicyString(attachment.requestArgs, 'focusPolicy'),
+      cleanupPolicy,
+      finalizeStatus,
+      nextAction: buildTaskOwnedSessionNextAction(finalizeStatus),
+    },
     taskTotals: taskContext.getTaskTotals(),
     evidenceBoundary: {
       deterministicOnly: true,
@@ -67,6 +86,33 @@ export function buildTaskContextEnvelope(
       commercialDeliveryProven: false,
     },
   };
+}
+
+function readRuntimePolicyString(args: unknown, key: string): string | null {
+  const record = readObject(args);
+  const direct = readString(record?.[key]);
+  if (direct) return direct;
+  const runtimePolicy = readObject(record?.runtimePolicy);
+  return readString(runtimePolicy?.[key]);
+}
+
+function buildTaskOwnedSessionFinalizeStatus(input: {
+  cleanupPolicy: string | null;
+  runOwnedTabCount: number;
+}): 'cleanup_complete' | 'cleanup_required' | 'cleanup_not_requested' | 'cleanup_policy_unknown' {
+  if (input.cleanupPolicy === 'close_run_owned') {
+    return input.runOwnedTabCount === 0 ? 'cleanup_complete' : 'cleanup_required';
+  }
+  if (input.cleanupPolicy) return 'cleanup_not_requested';
+  return input.runOwnedTabCount > 0 ? 'cleanup_policy_unknown' : 'cleanup_not_requested';
+}
+
+function buildTaskOwnedSessionNextAction(
+  finalizeStatus: ReturnType<typeof buildTaskOwnedSessionFinalizeStatus>,
+): 'none' | 'call_chrome_close_tabs_for_run_owned_tabs' | 'decide_cleanup_policy' {
+  if (finalizeStatus === 'cleanup_required') return 'call_chrome_close_tabs_for_run_owned_tabs';
+  if (finalizeStatus === 'cleanup_policy_unknown') return 'decide_cleanup_policy';
+  return 'none';
 }
 
 export function attachTaskContextEnvelopeToJsonResult(

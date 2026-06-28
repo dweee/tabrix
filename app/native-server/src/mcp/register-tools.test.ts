@@ -1362,6 +1362,9 @@ describe('handleToolCall execution wrapper', () => {
     const cleanupResult = await handleToolCall('chrome_close_tabs', {
       tabIds: [77],
       taskSessionId: 'w4b-stale-run-owned',
+      runtimePolicy: {
+        cleanupPolicy: 'close_run_owned',
+      },
     });
 
     expect(cleanupResult.isError).toBe(false);
@@ -1370,6 +1373,16 @@ describe('handleToolCall execution wrapper', () => {
       verdict: 'allow',
       reason: 'run_owned_tab',
       runOwnedTabIds: [77],
+    });
+    expect(cleanupPayload.taskContextEnvelope).toMatchObject({
+      runOwnedTabCount: 0,
+      runOwnedTabIds: [],
+      taskOwnedSession: {
+        taskSessionId: 'w4b-stale-run-owned',
+        cleanupPolicy: 'close_run_owned',
+        finalizeStatus: 'cleanup_complete',
+        nextAction: 'none',
+      },
     });
 
     const strictClickResult = await handleToolCall('chrome_click_element', {
@@ -1429,9 +1442,19 @@ describe('handleToolCall execution wrapper', () => {
     const cleanupResult = await handleToolCall('chrome_close_tabs', {
       tabIds: [88],
       taskSessionId: 'w4b-closed-run-owned',
+      runtimePolicy: {
+        cleanupPolicy: 'close_run_owned',
+      },
     });
 
     expect(cleanupResult.isError).toBe(false);
+    const cleanupPayload = JSON.parse(String(cleanupResult.content[0].text));
+    expect(cleanupPayload.taskContextEnvelope.taskOwnedSession).toMatchObject({
+      taskSessionId: 'w4b-closed-run-owned',
+      cleanupPolicy: 'close_run_owned',
+      finalizeStatus: 'cleanup_complete',
+      nextAction: 'none',
+    });
 
     const nextNavigateResult = await handleToolCall('chrome_navigate', {
       url: 'https://example.test/next',
