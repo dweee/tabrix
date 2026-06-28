@@ -100,6 +100,35 @@ describe('browser-object-scenario-compare', () => {
     assert.ok(comparison.nextActions.some((action) => action.includes('session ownership')));
   });
 
+  it('treats explicit competitor login-blocked probe fields as a failed comparison gate', () => {
+    const competitor = summarizeCompetitorEvidence(
+      {
+        url: 'https://www.xiaohongshu.com/explore',
+        title: '小红书 - 你的生活兴趣社区',
+        loginBlocked: true,
+        searchBox: {
+          observed: true,
+          placeholder: '登录探索更多内容',
+          usableForSearch: false,
+        },
+        candidateCards: [],
+      },
+      { minCards: 10, requiredFilters: ['最多收藏'] },
+    );
+
+    assert.equal(competitor.ok, false);
+    assert.equal(competitor.visibleControls.loginBlocked, true);
+
+    const comparison = evaluateComparison({
+      tabrix: null,
+      competitor,
+      windows: null,
+      scenario: { id: 'search-filter-top10', minCards: 10, requiredFilters: ['最多收藏'] },
+    });
+
+    assert.ok(comparison.mustFix.includes('competitor-login-free'));
+  });
+
   it('builds a comparison report with concrete must-fix checks', () => {
     const tabrixCollect = {
       parsed: {

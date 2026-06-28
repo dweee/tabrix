@@ -269,9 +269,14 @@ export function summarizeCompetitorEvidence(input, options = {}) {
   const searchLike = Array.isArray(value.searchLike) ? value.searchLike : [];
   const candidateCards = Array.isArray(value.candidateCards) ? value.candidateCards : [];
   const firstControls = Array.isArray(value.firstControls) ? value.firstControls : [];
-  const loginBlocked = [...searchLike, ...firstControls].some((entry) =>
-    /登录|login/i.test(String(entry.name ?? '')),
-  );
+  const explicitLoginBlocked =
+    value.loginBlocked === true || value.searchBox?.usableForSearch === false;
+  const loginBlocked =
+    explicitLoginBlocked ||
+    [...searchLike, ...firstControls].some((entry) =>
+      /登录|login/i.test(String(entry.name ?? entry.text ?? entry.placeholder ?? entry.aria ?? '')),
+    ) ||
+    /登录|login/i.test(String(value.searchBox?.placeholder ?? ''));
   const requiredFilters = options.requiredFilters ?? [];
   const visibleNames = [...searchLike, ...firstControls].map((entry) => String(entry.name ?? ''));
   const missingFilters = requiredFilters.filter(
