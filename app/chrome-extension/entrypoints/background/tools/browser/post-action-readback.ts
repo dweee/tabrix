@@ -47,7 +47,7 @@ function normalizeIntent(candidateAction: CandidateActionInput | undefined): str
 }
 
 function isSearchApplyFilterIntent(
-  intent: CandidateActionInput['intent'] | string | undefined,
+  intent: CandidateActionInput['intent'] | string | null | undefined,
 ): boolean {
   return typeof intent === 'string' && intent.startsWith('search.apply_filter.');
 }

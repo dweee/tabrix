@@ -237,6 +237,7 @@ export async function buildModeOutput(params: {
     tabId: params.tabId,
     highValueObjects: extensionLayer.highValueObjects,
     candidateActions,
+    interactiveElements,
     frameId: params.frameContext?.frameId,
   });
 

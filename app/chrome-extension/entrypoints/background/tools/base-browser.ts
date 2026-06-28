@@ -74,6 +74,19 @@ interface ContentScriptInjectionTiming {
   totalMs: number;
 }
 
+function isStructuredClickHelperError(message: unknown, response: unknown): boolean {
+  if (!message || typeof message !== 'object') return false;
+  if ((message as { action?: unknown }).action !== 'clickElement') return false;
+  if (!response || typeof response !== 'object') return false;
+  if (!('error' in response)) return false;
+  return (
+    'reason' in response ||
+    'targetConsistency' in response ||
+    'actionRecovery' in response ||
+    'dispatchSucceeded' in response
+  );
+}
+
 function isTransientFrameRemovedError(message: string): boolean {
   return /Frame with ID \d+ was removed/i.test(message);
 }
@@ -209,7 +222,7 @@ export abstract class BaseBrowserToolExecutor implements ToolExecutor {
         ? await chrome.tabs.sendMessage(tabId, message, { frameId })
         : await chrome.tabs.sendMessage(tabId, message);
 
-    if (response && response.error) {
+    if (response && response.error && !isStructuredClickHelperError(message, response)) {
       throw new Error(String(response.error));
     }
 

@@ -1,4 +1,4 @@
-import type { ReadPageHighValueObject } from '@tabrix/shared';
+import type { ReadPageHighValueObject, ReadPageInteractiveElement } from '@tabrix/shared';
 
 import type { CandidateActionSeed } from './read-page-candidate-actions';
 import {
@@ -33,6 +33,7 @@ export function recordReadPageTargetPublication(params: {
   tabId: number;
   highValueObjects?: readonly ReadPageHighValueObject[] | null;
   candidateActions?: readonly CandidateActionSeed[] | null;
+  interactiveElements?: readonly ReadPageInteractiveElement[] | null;
   frameId?: number;
 }): void {
   if (Array.isArray(params.highValueObjects)) {
@@ -49,9 +50,9 @@ export function recordReadPageTargetPublication(params: {
     recordStableTargetRefSnapshot(params.tabId, entries);
   }
 
-  if (Array.isArray(params.candidateActions)) {
+  if (Array.isArray(params.candidateActions) || Array.isArray(params.interactiveElements)) {
     const entries: CandidateActionTargetLocatorEntry[] = [];
-    for (const candidateAction of params.candidateActions) {
+    for (const candidateAction of params.candidateActions ?? []) {
       const targetRef =
         typeof candidateAction?.targetRef === 'string' ? candidateAction.targetRef.trim() : '';
       if (!targetRef) continue;
@@ -65,6 +66,20 @@ export function recordReadPageTargetPublication(params: {
           : typeof params.frameId === 'number'
             ? { frameId: params.frameId }
             : {}),
+      });
+    }
+    for (const interactiveElement of params.interactiveElements ?? []) {
+      const targetRef =
+        typeof interactiveElement?.ref === 'string' ? interactiveElement.ref.trim() : '';
+      const selector =
+        typeof interactiveElement?.selector === 'string' ? interactiveElement.selector.trim() : '';
+      if (!targetRef || !selector) continue;
+      if (interactiveElement.actionability === 'not_actionable') continue;
+      entries.push({
+        targetRef,
+        selector,
+        selectorType: 'css',
+        ...(typeof params.frameId === 'number' ? { frameId: params.frameId } : {}),
       });
     }
     recordCandidateActionTargetLocatorsSnapshot(params.tabId, entries);

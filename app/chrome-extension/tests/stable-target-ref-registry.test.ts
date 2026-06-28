@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import type { ReadPageCandidateAction } from '@tabrix/shared';
+import type { ReadPageCandidateAction, ReadPageInteractiveElement } from '@tabrix/shared';
 import {
   __resetStableTargetRefRegistryForTests,
   getStableTargetRefRegistrySnapshot,
@@ -146,6 +146,40 @@ describe('B-011 stable-targetRef registry', () => {
       selector: '//*[@role="button" and normalize-space(.)="最多收藏"]',
       selectorType: 'xpath',
     });
+  });
+
+  it('records actionable interactive element refs so visible synthetic refs can be clicked later', () => {
+    recordReadPageTargetPublication({
+      tabId: 9,
+      interactiveElements: [
+        {
+          ref: 'ref_text_search_toolbar_123',
+          role: 'button',
+          name: '筛选',
+          selector: 'main [data-role="filter-trigger"]',
+          actionability: 'actionable',
+          matchSource: 'visible_text',
+        } satisfies ReadPageInteractiveElement,
+        {
+          ref: 'ref_text_search_toolbar_hidden',
+          role: 'button',
+          name: '隐藏筛选',
+          selector: 'main [data-role="hidden-filter-trigger"]',
+          actionability: 'not_actionable',
+          matchSource: 'visible_text',
+        } satisfies ReadPageInteractiveElement,
+      ],
+    });
+
+    expect(lookupCandidateActionTargetLocatorEntry(9, 'ref_text_search_toolbar_123')).toMatchObject(
+      {
+        selector: 'main [data-role="filter-trigger"]',
+        selectorType: 'css',
+      },
+    );
+    expect(
+      lookupCandidateActionTargetLocatorEntry(9, 'ref_text_search_toolbar_hidden'),
+    ).toBeUndefined();
   });
 
   it('replaces candidate action locator snapshot independently from stable refs', () => {

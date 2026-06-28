@@ -365,6 +365,9 @@ if (
 
       const looksLikeOverlay = (candidate) => {
         if (!(candidate instanceof Element)) return false;
+        if (isActionControl(candidate)) {
+          return false;
+        }
         const text = (candidate.textContent || '').trim();
         const signature = [
           candidate.id,
@@ -376,12 +379,17 @@ if (
         ]
           .filter(Boolean)
           .join(' ');
-        if (/\b(mask|modal|overlay|backdrop|drawer|dialog|popup|layer)\b/i.test(signature)) {
-          return true;
-        }
         const rect = candidate.getBoundingClientRect();
         const viewportArea = Math.max(1, window.innerWidth * window.innerHeight);
         const area = Math.max(1, rect.width * rect.height);
+        const modalSignature = /\b(modal|overlay|backdrop|drawer|dialog|popup)\b/i.test(signature);
+        const passiveMaskSignature = /\b(mask|layer)\b/i.test(signature);
+        if (modalSignature) {
+          return true;
+        }
+        if (passiveMaskSignature && area >= viewportArea * 0.35) {
+          return true;
+        }
         return area >= viewportArea * 0.45 && text.length < 20;
       };
 
@@ -511,6 +519,34 @@ if (
           if (expectedHref && actualHref && expectedHref === actualHref) {
             return {
               verdict: 'matched_by_same_href_action',
+              clickMethod,
+              expectedTarget: expectedInfo,
+              actualTarget: actualInfo,
+            };
+          }
+        }
+        if (actual instanceof Element) {
+          const expectedRect = expected.getBoundingClientRect();
+          const actualRect = actual.getBoundingClientRect();
+          const rectDelta =
+            Math.abs(expectedRect.left - actualRect.left) +
+            Math.abs(expectedRect.top - actualRect.top) +
+            Math.abs(expectedRect.width - actualRect.width) +
+            Math.abs(expectedRect.height - actualRect.height);
+          const sameVisualLayer = rectDelta <= 2;
+          const sameTag = expected.tagName === actual.tagName;
+          const expectedClass =
+            typeof expected.className === 'string'
+              ? expected.className
+              : expected.className?.baseVal || '';
+          const actualClass =
+            typeof actual.className === 'string'
+              ? actual.className
+              : actual.className?.baseVal || '';
+          const sameClass = expectedClass && actualClass && expectedClass === actualClass;
+          if (sameVisualLayer && sameTag && sameClass) {
+            return {
+              verdict: 'matched_by_visual_duplicate_action',
               clickMethod,
               expectedTarget: expectedInfo,
               actualTarget: actualInfo,
@@ -693,6 +729,7 @@ if (
             'matched_by_clickable_ancestor',
             'matched_by_shared_action_ancestor',
             'matched_by_same_href_action',
+            'matched_by_visual_duplicate_action',
           ].includes(blockedConsistency.verdict);
           if (['blocked_by_overlay', 'target_mismatch'].includes(blockedConsistency.verdict)) {
             return {

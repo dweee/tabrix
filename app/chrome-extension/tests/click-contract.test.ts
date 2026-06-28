@@ -1252,6 +1252,72 @@ describe('click-helper signals (end-to-end through jsdom)', () => {
     expect(response.signals.hashAfter).toBe('#detail');
   });
 
+  it('does not treat compact action links with mask-like class names as blocking overlays', async () => {
+    document.body.innerHTML = `
+      <article>
+        <a id="cover-link" class="cover mask" href="#detail">AI 图片创作提示词合集</a>
+        <a id="title-link" href="#detail">AI 图片创作提示词合集</a>
+      </article>
+    `;
+    const coverLink = document.getElementById('cover-link') as HTMLAnchorElement;
+    const titleLink = document.getElementById('title-link') as HTMLAnchorElement;
+    setRect(coverLink, { left: 20, top: 30, width: 240, height: 140 });
+    setRect(titleLink, { left: 20, top: 30, width: 240, height: 140 });
+    document.elementFromPoint = vi.fn(() => coverLink);
+
+    const response = await sendClickRequest({
+      action: 'clickElement',
+      selector: '#title-link',
+      waitForNavigation: false,
+      timeout: 1000,
+    });
+
+    expect(response.dispatchSucceeded).toBe(true);
+    expect(response.reason).not.toBe('blocked_by_overlay');
+    expect(response.elementInfo).toMatchObject({
+      tagName: 'A',
+      id: 'title-link',
+      targetConsistency: { verdict: 'matched_by_same_href_action' },
+    });
+    expect(response.signals.hashAfter).toBe('#detail');
+  });
+
+  it('allows a selector click when stacked card action layers share the same visual target', async () => {
+    document.body.innerHTML = `
+      <article>
+        <a id="cover-layer" class="cover mask" href="#expected"></a>
+        <a id="hit-layer" class="cover mask" href="#actual"></a>
+      </article>
+    `;
+    const coverLayer = document.getElementById('cover-layer') as HTMLAnchorElement;
+    const hitLayer = document.getElementById('hit-layer') as HTMLAnchorElement;
+    setRect(coverLayer, { left: 20, top: 30, width: 240, height: 140 });
+    setRect(hitLayer, { left: 20, top: 30, width: 240, height: 140 });
+    document.elementFromPoint = vi.fn(() => hitLayer);
+    let clicked = false;
+    coverLayer.addEventListener('click', () => {
+      clicked = true;
+    });
+
+    const response = await sendClickRequest({
+      action: 'clickElement',
+      selector: '#cover-layer',
+      waitForNavigation: false,
+      timeout: 1000,
+    });
+    expect(response).toMatchObject({
+      dispatchSucceeded: true,
+    });
+    expect(clicked).toBe(true);
+    expect(response.reason).not.toBe('target_mismatch');
+    expect(response.elementInfo).toMatchObject({
+      tagName: 'A',
+      id: 'cover-layer',
+      targetConsistency: { verdict: 'matched_by_visual_duplicate_action' },
+    });
+    expect(response.signals.hashAfter).toBe('#expected');
+  });
+
   it('allows a selector click when a filter label hits another layer in the same action control', async () => {
     document.body.innerHTML = `
       <button id="filter-option" type="button">
