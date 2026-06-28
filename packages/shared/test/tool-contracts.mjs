@@ -54,6 +54,28 @@ for (const name of P3_EXPLICIT_OPT_IN_TOOLS) {
   assert.equal(isExplicitOptInTool(name), true, `explicit opt-in helper must recognize "${name}"`);
 }
 
+const taskSessionTools = [
+  TOOL_NAMES.BROWSER.NAVIGATE,
+  TOOL_NAMES.BROWSER.READ_PAGE,
+  TOOL_NAMES.BROWSER.WEB_FETCHER,
+  TOOL_NAMES.BROWSER.SWITCH_TAB,
+  TOOL_NAMES.BROWSER.CLICK,
+  TOOL_NAMES.BROWSER.FILL,
+  TOOL_NAMES.BROWSER.KEYBOARD,
+  TOOL_NAMES.BROWSER.CLOSE_TABS,
+];
+
+for (const name of taskSessionTools) {
+  const properties = TOOL_SCHEMAS.find((schema) => schema.name === name)?.inputSchema?.properties;
+  assert.ok(properties?.taskSessionId, `${name} must expose taskSessionId for task-owned browser sessions`);
+  assert.ok(properties?.runtimePolicy, `${name} must expose runtimePolicy for task-owned browser sessions`);
+  assert.deepEqual(
+    properties.runtimePolicy.properties?.desiredExecutionMode?.enum,
+    ['run_owned', 'background', 'current_tab_readonly', 'collaboration'],
+    `${name} runtimePolicy.desiredExecutionMode must expose supported execution modes`,
+  );
+}
+
 console.log(
   JSON.stringify({
     status: 'PASS',

@@ -5295,6 +5295,50 @@ describe('handleToolCall execution wrapper', () => {
       expect(returnedTabContext?.getRunOwnedTabIds()).toEqual([77]);
     });
 
+    it('turns task-owned no-steal navigation policy into background browser execution', async () => {
+      markBridgeReady();
+      const bridgeSpy = jest
+        .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
+        .mockResolvedValueOnce({
+          status: 'success',
+          data: {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({ ok: true, tabId: 88, summary: 'opened in background' }),
+              },
+            ],
+            isError: false,
+          },
+        } as never);
+
+      const result = await handleToolCall('chrome_navigate', {
+        url: 'https://example.test/background-task',
+        taskSessionId: 'background-task',
+        runtimePolicy: {
+          desiredExecutionMode: 'background',
+          focusPolicy: 'no_steal',
+          cleanupPolicy: 'close_run_owned',
+          nonInterference: 'strict',
+        },
+      });
+
+      expect(result.isError).toBe(false);
+      expect((bridgeSpy.mock.calls[0][0] as any).args).toMatchObject({
+        url: 'https://example.test/background-task',
+        taskSessionId: 'background-task',
+        background: true,
+        runtimePolicy: {
+          desiredExecutionMode: 'background',
+          focusPolicy: 'no_steal',
+          cleanupPolicy: 'close_run_owned',
+          nonInterference: 'strict',
+        },
+      });
+      const taskContext = sessionManager.peekExternalTaskContext('background-task');
+      expect(taskContext?.isRunOwnedTab(88)).toBe(true);
+    });
+
     it('new focused navigation invalidates cached reads for other tab contexts', async () => {
       markBridgeReady();
       const existingTabContext = sessionManager.getOrCreateExternalTaskContext('mcp:auto:tab:10');

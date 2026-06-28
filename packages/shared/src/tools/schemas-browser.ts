@@ -1,6 +1,49 @@
 import { type Tool } from '@modelcontextprotocol/sdk/types.js';
 import { TOOL_NAMES } from './names';
 
+const TASK_SESSION_ID_PROPERTY = {
+  type: 'string',
+  description:
+    'Optional caller-provided task session key. Reuse the same value across navigate/read/switch/fetch/click/fill/keyboard/close_tabs so Tabrix can keep run-owned tabs, read budgets, action verification, and cleanup tied to one AI task.',
+};
+
+const RUNTIME_POLICY_PROPERTY = {
+  type: 'object',
+  description:
+    'Optional browser runtime policy for task-owned operation. Use desiredExecutionMode=background or run_owned with focusPolicy=no_steal when Tabrix should work in the background without taking over the user-visible Chrome tab.',
+  properties: {
+    desiredExecutionMode: {
+      type: 'string',
+      enum: ['run_owned', 'background', 'current_tab_readonly', 'collaboration'],
+      description:
+        'run_owned/background asks Tabrix to prefer task-owned tabs and avoid disturbing the user. collaboration means user-visible operation is expected.',
+    },
+    focusPolicy: {
+      type: 'string',
+      enum: ['no_steal', 'allow_foreground_when_required', 'user_confirmed'],
+      description:
+        'no_steal means do not focus windows or activate newly-created tabs unless a later explicit action requires it.',
+    },
+    cleanupPolicy: {
+      type: 'string',
+      enum: ['close_run_owned', 'keep_handoff', 'keep_deliverable'],
+      description:
+        'close_run_owned means the caller expects task-owned tabs to be cleaned up with chrome_close_tabs when the task is done.',
+    },
+    nonInterference: {
+      type: 'string',
+      enum: ['strict'],
+      description:
+        'strict blocks mutating actions on tabs that are not proven run-owned or explicitly user-confirmed.',
+    },
+  },
+};
+
+const TASK_RUNTIME_PROPERTIES = {
+  taskSessionId: TASK_SESSION_ID_PROPERTY,
+  runtimePolicy: RUNTIME_POLICY_PROPERTY,
+};
+
 export const BROWSER_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.GET_WINDOWS_AND_TABS,
@@ -132,6 +175,7 @@ export const BROWSER_SCHEMAS: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {
+        ...TASK_RUNTIME_PROPERTIES,
         filter: {
           type: 'string',
           description:
@@ -476,6 +520,7 @@ export const BROWSER_SCHEMAS: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {
+        ...TASK_RUNTIME_PROPERTIES,
         url: {
           type: 'string',
           description:
@@ -578,6 +623,7 @@ export const BROWSER_SCHEMAS: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {
+        ...TASK_RUNTIME_PROPERTIES,
         tabIds: {
           type: 'array',
           items: { type: 'number' },
@@ -608,6 +654,7 @@ export const BROWSER_SCHEMAS: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {
+        ...TASK_RUNTIME_PROPERTIES,
         tabId: {
           type: 'number',
           description: 'The ID of the tab to switch to.',
@@ -630,6 +677,7 @@ export const BROWSER_SCHEMAS: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {
+        ...TASK_RUNTIME_PROPERTIES,
         url: {
           type: 'string',
           description: 'URL to fetch content from. If not provided, uses the current active tab',
@@ -1118,6 +1166,7 @@ export const BROWSER_SCHEMAS: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {
+        ...TASK_RUNTIME_PROPERTIES,
         selector: {
           type: 'string',
           description: 'CSS selector or XPath for the element to click.',
@@ -1238,6 +1287,7 @@ export const BROWSER_SCHEMAS: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {
+        ...TASK_RUNTIME_PROPERTIES,
         selector: {
           type: 'string',
           description: 'CSS selector or XPath for the form element.',
@@ -1316,6 +1366,7 @@ export const BROWSER_SCHEMAS: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {
+        ...TASK_RUNTIME_PROPERTIES,
         keys: {
           type: 'string',
           description:

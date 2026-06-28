@@ -154,6 +154,33 @@ import {
 
 const DEFAULT_AUTO_TASK_CONTEXT_KEY = 'mcp:auto:tab:default';
 
+function applyTaskOwnedBackgroundNavigationPolicy(toolName: string, args: unknown): unknown {
+  if (toolName !== TOOL_NAMES.BROWSER.NAVIGATE) return args;
+  if (!args || typeof args !== 'object') return args;
+  if (readBoolean(args, 'background') !== null) return args;
+
+  const desiredExecutionMode = readRuntimePolicyString(args, 'desiredExecutionMode');
+  const focusPolicy = readRuntimePolicyString(args, 'focusPolicy');
+  const wantsBackground =
+    desiredExecutionMode === 'background' ||
+    desiredExecutionMode === 'run_owned' ||
+    focusPolicy === 'no_steal';
+  if (!wantsBackground) return args;
+
+  return {
+    ...(args as Record<string, unknown>),
+    background: true,
+  };
+}
+
+function readRuntimePolicyString(args: unknown, key: string): string | null {
+  const record = readObject(args);
+  const direct = readString(record?.[key]);
+  if (direct) return direct;
+  const runtimePolicy = readObject(record?.runtimePolicy);
+  return readString(runtimePolicy?.[key]);
+}
+
 async function invokeExtensionCommand(
   action: 'call_tool',
   payload: any,
@@ -339,6 +366,7 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
     // scenarios that explicitly want a fresh tab still get it.
     const primaryTabController = getDefaultPrimaryTabController();
     let outgoingArgs: any = resolvePrimaryTabOutgoingArgs(name, args, primaryTabController);
+    outgoingArgs = applyTaskOwnedBackgroundNavigationPolicy(name, outgoingArgs);
     // Task Session Context read-budget gate. Only the `chrome_read_page`
     // hot path is gated; everything else passes through. The gate is
     // fail-soft: when no task context is attached (persistence off, or
