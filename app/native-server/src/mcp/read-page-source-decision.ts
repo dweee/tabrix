@@ -266,6 +266,7 @@ function hasVisibleRowsEvidence(payload: Record<string, unknown>): boolean {
   const rowCount =
     readPositiveInteger(payload, 'rowCount') ??
     readPositiveInteger(payload, 'visibleRegionRowCount') ??
+    readPositiveInteger(payload, 'visibleDomRowsSelectedCount') ??
     readPositiveInteger(rowsPayload, 'rowCount');
   return (
     (payload.visibleRegionRowsUsed === true || rowsPayload.visibleRegionRowsUsed === true) &&

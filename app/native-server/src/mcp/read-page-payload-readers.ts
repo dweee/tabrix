@@ -38,8 +38,17 @@ export function readSelectedDataSource(
   if (projection.chosenDataSource === 'dom_region_rows' && hasReliableVisibleRows(payload)) {
     return projection.chosenDataSource;
   }
-  const selected = readString(payload.selectedDataSource) ?? readString(payload.dataSource);
-  if (selected === 'dom_region_rows') {
+  const candidates = [
+    readString(payload.selectedDataSource),
+    readString(payload.dataSource),
+    readString(payload.sourceDataSource),
+    readString(payload.kind),
+  ].filter((value): value is string => Boolean(value));
+  const selected = candidates[0];
+  if (candidates.includes('dom_region_rows')) {
+    if (hasReliableVisibleRows(payload)) {
+      return 'dom_region_rows';
+    }
     return projection.chosenDataSource === 'dom_region_rows'
       ? 'dom_json'
       : projection.chosenDataSource;
@@ -50,7 +59,13 @@ export function readSelectedDataSource(
 export function readPayloadSelectedDataSource(
   payload: Record<string, unknown>,
 ): ReadPageSelectedDataSource | null {
-  const selected = readString(payload.selectedDataSource) ?? readString(payload.dataSource);
+  const candidates = [
+    readString(payload.selectedDataSource),
+    readString(payload.dataSource),
+    readString(payload.sourceDataSource),
+    readString(payload.kind),
+  ].filter((value): value is string => Boolean(value));
+  const selected = candidates.includes('dom_region_rows') ? 'dom_region_rows' : candidates[0];
   return selected ? (selected as ReadPageSelectedDataSource) : null;
 }
 
@@ -59,6 +74,7 @@ export function hasReliableVisibleRows(payload: Record<string, unknown>): boolea
   const rowCount =
     readPositiveInteger(payload, 'rowCount') ??
     readPositiveInteger(payload, 'visibleRegionRowCount') ??
+    readPositiveInteger(payload, 'visibleDomRowsSelectedCount') ??
     readPositiveInteger(rowsPayload, 'rowCount');
   const coverage =
     readNumber(payload.targetRefCoverageRate) ?? readNumber(rowsPayload.targetRefCoverageRate);

@@ -1,0 +1,52 @@
+import type { BrowserPageThingProjection } from '@tabrix/shared';
+
+import { readPayloadSelectedDataSource, readSelectedDataSource } from './read-page-payload-readers';
+
+function projection(chosenDataSource: BrowserPageThingProjection['chosenDataSource']) {
+  return {
+    chosenDataSource,
+  } as BrowserPageThingProjection;
+}
+
+describe('read-page payload readers', () => {
+  it('keeps dom_region_rows when the AI-facing payload has reliable visible rows', () => {
+    expect(
+      readSelectedDataSource(
+        {
+          selectedDataSource: 'markdown',
+          kind: 'dom_region_rows',
+          sourceDataSource: 'dom_region_rows',
+          visibleRegionRowsUsed: true,
+          visibleDomRowsSelectedCount: 5,
+          rowExtractionConfidence: 0.9,
+          targetRefCoverageRate: 1,
+          regionQualityScore: 0.88,
+        },
+        projection('markdown'),
+      ),
+    ).toBe('dom_region_rows');
+    expect(
+      readPayloadSelectedDataSource({
+        selectedDataSource: 'markdown',
+        kind: 'dom_region_rows',
+        sourceDataSource: 'dom_region_rows',
+      }),
+    ).toBe('dom_region_rows');
+  });
+
+  it('does not promote a sparse single-row payload to dom_region_rows', () => {
+    expect(
+      readSelectedDataSource(
+        {
+          selectedDataSource: 'dom_region_rows',
+          visibleRegionRowsUsed: true,
+          rowCount: 1,
+          rowExtractionConfidence: 0.9,
+          targetRefCoverageRate: 1,
+          regionQualityScore: 0.88,
+        },
+        projection('markdown'),
+      ),
+    ).toBe('markdown');
+  });
+});
