@@ -67,6 +67,17 @@ function shouldProjectExperienceAfterAiFeedback(input: {
   );
 }
 
+function shouldInvalidateExperienceAfterAiFeedback(input: {
+  businessStatus: string;
+  experienceCandidate?: boolean | null;
+}): boolean {
+  return (
+    input.experienceCandidate === false ||
+    input.businessStatus === 'partial' ||
+    input.businessStatus === 'not_achieved'
+  );
+}
+
 export const handleMemoryRecordAiFeedback: NativeToolHandler = async (args, deps) => {
   const persistenceMode = deps.sessionManager.getPersistenceStatus().mode;
   if (persistenceMode === 'off' || !deps.sessionManager.memoryTraces) {
@@ -158,13 +169,16 @@ export const handleMemoryRecordAiFeedback: NativeToolHandler = async (args, deps
     evaluatorModel: readStringArg(object, 'evaluatorModel'),
     experienceCandidate: readBooleanArg(object, 'experienceCandidate'),
   });
-  const experienceRevocation =
-    readBooleanArg(object, 'experienceCandidate') === false
-      ? deps.sessionManager.revokeMkeExperienceForTrace({
-          traceId,
-          nowIso: new Date().toISOString(),
-        })
-      : null;
+  const shouldInvalidateExperience = shouldInvalidateExperienceAfterAiFeedback({
+    businessStatus,
+    experienceCandidate: readBooleanArg(object, 'experienceCandidate'),
+  });
+  const experienceRevocation = shouldInvalidateExperience
+    ? deps.sessionManager.revokeMkeExperienceForTrace({
+        traceId,
+        nowIso: new Date().toISOString(),
+      })
+    : null;
   const projection = eligibleForExperienceProjection
     ? await deps.sessionManager.flushAndProjectMkeAfterAiFeedback().catch((error: unknown) => {
         const message = error instanceof Error ? error.message : String(error);

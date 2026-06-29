@@ -1170,6 +1170,7 @@ export class ExperienceRecipeRepository {
   private readonly archiveStmt;
   private readonly listBySourceTraceHintStmt;
   private readonly updateSourceTraceIdsStmt;
+  private readonly requireScenarioRevalidationStmt;
   private readonly clearStmt;
 
   constructor(private readonly db: SqliteDatabase) {
@@ -1269,6 +1270,19 @@ export class ExperienceRecipeRepository {
             drift_state = @drift_state,
             archived_at = @archived_at,
             last_verified_at = @last_verified_at,
+            updated_at = @updated_at
+        WHERE experience_id = @experience_id`,
+    );
+    this.requireScenarioRevalidationStmt = db.prepare(
+      `UPDATE tabrix_experience_recipes
+        SET failure_count = failure_count + 1,
+            reliability_score = CASE
+              WHEN success_count + failure_count + 1 > 0
+                THEN ROUND(CAST(success_count AS REAL) / (success_count + failure_count + 1), 4)
+              ELSE reliability_score
+            END,
+            drift_state = 'needs_revalidation',
+            last_verified_at = NULL,
             updated_at = @updated_at
         WHERE experience_id = @experience_id`,
     );
@@ -1524,6 +1538,32 @@ export class ExperienceRecipeRepository {
     return {
       updatedCount,
       archivedCount,
+      affectedExperienceIds,
+    };
+  }
+
+  public requireScenarioRevalidation(input: {
+    scenarioKey: string;
+    nowIso: string;
+    excludeExperienceIds?: string[];
+  }): RemoveExperienceSourceTraceResult {
+    const excluded = new Set(input.excludeExperienceIds ?? []);
+    const recipes = this.findByScenario(input.scenarioKey, 50).filter(
+      (recipe) => recipe.driftState === 'verified_once' && !excluded.has(recipe.experienceId),
+    );
+    const affectedExperienceIds: string[] = [];
+
+    for (const recipe of recipes) {
+      this.requireScenarioRevalidationStmt.run({
+        experience_id: recipe.experienceId,
+        updated_at: input.nowIso,
+      });
+      affectedExperienceIds.push(recipe.experienceId);
+    }
+
+    return {
+      updatedCount: affectedExperienceIds.length,
+      archivedCount: 0,
       affectedExperienceIds,
     };
   }

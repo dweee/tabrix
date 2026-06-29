@@ -23,6 +23,7 @@ import {
 import { MkeMemoryTraceService } from '../memory/mke-memory-trace-service';
 import {
   MkeKnowledgeProjector,
+  buildMkePageModelKey,
   type MkeKnowledgeProjectionInput,
   type MkeKnowledgeProjectionResult,
 } from '../memory/mke-knowledge-projector';
@@ -774,10 +775,32 @@ export class SessionManager {
     if (!this.repos) {
       return { updatedCount: 0, archivedCount: 0, affectedExperienceIds: [] };
     }
-    return this.repos.experienceRecipe.removeSourceTrace({
+    const nowIso = input.nowIso ?? new Date().toISOString();
+    const sourceTraceResult = this.repos.experienceRecipe.removeSourceTrace({
       traceId: input.traceId,
-      nowIso: input.nowIso ?? new Date().toISOString(),
+      nowIso,
     });
+    const trace = this.repos.memoryTrace.get(input.traceId);
+    const pageModelKey = trace ? buildMkePageModelKey(trace) : null;
+    const scenarioRevalidationResult =
+      trace?.siteFamily && pageModelKey
+        ? this.repos.experienceRecipe.requireScenarioRevalidation({
+            scenarioKey: `mke:${trace.siteFamily}:${pageModelKey}`,
+            nowIso,
+            excludeExperienceIds: sourceTraceResult.affectedExperienceIds,
+          })
+        : { updatedCount: 0, archivedCount: 0, affectedExperienceIds: [] };
+
+    return {
+      updatedCount: sourceTraceResult.updatedCount + scenarioRevalidationResult.updatedCount,
+      archivedCount: sourceTraceResult.archivedCount + scenarioRevalidationResult.archivedCount,
+      affectedExperienceIds: [
+        ...new Set([
+          ...sourceTraceResult.affectedExperienceIds,
+          ...scenarioRevalidationResult.affectedExperienceIds,
+        ]),
+      ],
+    };
   }
 
   public countMkeExperienceRecipes(): number {

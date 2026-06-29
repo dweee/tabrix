@@ -783,6 +783,59 @@ describe('MKE core repositories', () => {
     }
   });
 
+  it('requires current-page revalidation for same-scenario verified Experience after later AI partial feedback', () => {
+    const { experienceRepo, close } = bootstrap();
+    try {
+      const recipe = experienceRepo.save(
+        templateRecipe({
+          sourceTraceIds: ['trace-success-1', 'trace-success-2'],
+          successCount: 2,
+          failureCount: 0,
+          reliabilityScore: 1,
+          driftState: 'verified_once',
+          lastVerifiedAt: '2026-06-06T10:01:00.000Z',
+        }),
+      );
+
+      expect(
+        experienceRepo.findReusableByContext({
+          siteFamily: 'generic-content-platform',
+          pageRole: 'creator_publish',
+          limit: 5,
+        }),
+      ).toHaveLength(1);
+
+      const result = experienceRepo.requireScenarioRevalidation({
+        scenarioKey: 'content_publish',
+        nowIso: '2026-06-06T10:04:00.000Z',
+      });
+      const updated = experienceRepo.get(recipe.experienceId);
+
+      expect(result).toEqual({
+        updatedCount: 1,
+        archivedCount: 0,
+        affectedExperienceIds: [recipe.experienceId],
+      });
+      expect(updated).toMatchObject({
+        failureCount: 1,
+        reliabilityScore: 0.6667,
+        driftState: 'needs_revalidation',
+        archivedAt: null,
+        lastVerifiedAt: null,
+        updatedAt: '2026-06-06T10:04:00.000Z',
+      });
+      expect(
+        experienceRepo.findReusableByContext({
+          siteFamily: 'generic-content-platform',
+          pageRole: 'creator_publish',
+          limit: 5,
+        }),
+      ).toHaveLength(0);
+    } finally {
+      close();
+    }
+  });
+
   it('rejects Experience templates that contain raw-sensitive fields', () => {
     const { experienceRepo, close } = bootstrap();
     try {

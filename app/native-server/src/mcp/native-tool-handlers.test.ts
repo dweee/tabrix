@@ -285,6 +285,11 @@ describe('native-tool-handlers · memory_record_ai_feedback', () => {
       aiFeedbackScore: 0.82,
     });
     const flushAndProjectMkeAfterAiFeedback = jest.fn();
+    const revokeMkeExperienceForTrace = jest.fn().mockReturnValue({
+      updatedCount: 1,
+      archivedCount: 0,
+      affectedExperienceIds: ['experience-needs-revalidation'],
+    });
 
     const result = await handler(
       {
@@ -295,7 +300,11 @@ describe('native-tool-handlers · memory_record_ai_feedback', () => {
         reasonCode: 'ai_identified_next_target',
         summary: 'AI found useful next-step targets, but the user goal is not complete yet.',
       },
-      makeDeps({ memoryTraces: { recordAiBusinessFeedback }, flushAndProjectMkeAfterAiFeedback }),
+      makeDeps({
+        memoryTraces: { recordAiBusinessFeedback },
+        flushAndProjectMkeAfterAiFeedback,
+        revokeMkeExperienceForTrace,
+      }),
     );
 
     expect(result.isError).toBe(false);
@@ -318,9 +327,17 @@ describe('native-tool-handlers · memory_record_ai_feedback', () => {
         knowledgeUpserted: null,
         experienceSaved: null,
         experienceIds: [],
+        experienceRevocation: {
+          updatedCount: 1,
+          archivedCount: 0,
+          affectedExperienceIds: ['experience-needs-revalidation'],
+        },
       },
     });
     expect(flushAndProjectMkeAfterAiFeedback).not.toHaveBeenCalled();
+    expect(revokeMkeExperienceForTrace).toHaveBeenCalledWith(
+      expect.objectContaining({ traceId: 'trace-1' }),
+    );
   });
 
   it('rejects missing traceId or invalid businessStatus', async () => {
