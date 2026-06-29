@@ -395,6 +395,86 @@ describe('collect result cards DOM scan', () => {
     });
   });
 
+  it('infers selected filters from visible styles inside a generic filter panel', () => {
+    setViewport();
+    document.body.innerHTML = `
+      <aside role="dialog" data-testid="filter-panel" data-rect="840,80,460,520">
+        <button data-testid="sort-default" data-rect="880,120,116,44" style="background: rgb(248, 248, 248); color: rgb(128, 128, 128); font-weight: 400;">综合</button>
+        <button data-testid="sort-most-saved" data-rect="1010,120,116,44" style="background: rgb(255, 238, 242); color: rgb(255, 36, 66); font-weight: 700;">最多收藏</button>
+        <button data-testid="type-video" data-rect="880,190,116,44" style="background: rgb(248, 248, 248); color: rgb(128, 128, 128); font-weight: 400;">视频</button>
+        <button data-testid="type-image-text" data-rect="1010,190,116,44" style="background: rgb(255, 238, 242); color: rgb(255, 36, 66); font-weight: 700;">图文</button>
+        <button data-testid="time-default" data-rect="880,260,116,44" style="background: rgb(248, 248, 248); color: rgb(128, 128, 128); font-weight: 400;">不限</button>
+        <button data-testid="time-week" data-rect="1010,260,116,44" style="background: rgb(255, 238, 242); color: rgb(255, 36, 66); font-weight: 700;">一周内</button>
+      </aside>
+      <main role="list" data-testid="list" data-rect="0,100,780,580">
+        <article role="listitem" data-testid="card-alpha" data-rect="20,140,260,180">
+          <a data-testid="link-alpha" data-rect="28,148,240,112" href="https://example.test/note/alpha">AI 图片创作提示词合集</a>
+        </article>
+      </main>
+    `;
+    installRects();
+
+    const scan = scanVisibleResultCardsInPage({ maxCards: 10 });
+
+    expect(scan.filterState).toMatchObject({
+      appliedLabels: ['图文', '最多收藏', '一周内'],
+      contentType: '图文',
+      sort: '最多收藏',
+      timeRange: '一周内',
+    });
+    expect(scan.filterState.filterGroups).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ groupId: 'content_type', source: 'visual_style_state' }),
+        expect.objectContaining({ groupId: 'sort', source: 'visual_style_state' }),
+        expect.objectContaining({ groupId: 'time_range', source: 'visual_style_state' }),
+      ]),
+    );
+  });
+
+  it('does not infer style-selected filters from result card text outside filter context', () => {
+    setViewport();
+    document.body.innerHTML = `
+      <main role="list" data-testid="list" data-rect="0,100,780,580">
+        <article role="listitem" data-testid="card-alpha" data-rect="20,140,260,180">
+          <a
+            data-testid="link-alpha"
+            data-rect="28,148,240,112"
+            href="https://example.test/note/alpha"
+            style="background: rgb(255, 238, 242); color: rgb(255, 36, 66); font-weight: 700;"
+          >一周内</a>
+        </article>
+      </main>
+    `;
+    installRects();
+
+    const scan = scanVisibleResultCardsInPage({ maxCards: 10 });
+
+    expect(scan.filterState.status).toBe('not_observed');
+    expect(scan.filterState.appliedLabels).toEqual([]);
+  });
+
+  it('does not infer selected filters from unrelated dialog content with filter-like labels', () => {
+    setViewport();
+    document.body.innerHTML = `
+      <section role="dialog" aria-label="推荐内容" data-testid="content-dialog" data-rect="840,80,420,360">
+        <button data-testid="topic-video" data-rect="880,120,116,44" style="background: rgb(255, 238, 242); color: rgb(255, 36, 66); font-weight: 700;">视频</button>
+        <button data-testid="topic-latest" data-rect="1010,120,116,44" style="background: rgb(255, 238, 242); color: rgb(255, 36, 66); font-weight: 700;">最新</button>
+        <button data-testid="topic-week" data-rect="880,190,116,44" style="background: rgb(255, 238, 242); color: rgb(255, 36, 66); font-weight: 700;">一周内</button>
+      </section>
+      <main role="list" data-testid="list" data-rect="0,100,780,580">
+        <article role="listitem" data-testid="card-alpha" data-rect="20,140,260,180">
+          <a data-testid="link-alpha" data-rect="28,148,240,112" href="https://example.test/note/alpha">AI 图片创作提示词合集</a>
+        </article>
+      </main>
+    `;
+    installRects();
+
+    const scan = scanVisibleResultCardsInPage({ maxCards: 10 });
+
+    expect(scan.filterState.status).toBe('not_observed');
+    expect(scan.filterState.appliedLabels).toEqual([]);
+  });
+
   it('keeps rendered offscreen selected filters as page state while not turning them into visible actions', () => {
     setViewport();
     document.body.innerHTML = `

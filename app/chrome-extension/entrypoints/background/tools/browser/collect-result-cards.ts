@@ -50,7 +50,7 @@ interface VisibleCardScanResult {
 interface AppliedSearchFilter {
   label: string;
   kind: 'content_type' | 'sort' | 'time_range' | 'unknown';
-  source: 'dom_active_state' | 'url_parameter_adapter';
+  source: 'dom_active_state' | 'visual_style_state' | 'url_parameter_adapter';
   confidence: number;
 }
 
@@ -95,7 +95,12 @@ interface PageCandidateAction {
 interface SearchFilterGroupState {
   selected: string | null;
   candidates: string[];
-  source: 'dom_active_state' | 'url_parameter_adapter' | 'mixed' | 'not_observed';
+  source:
+    | 'dom_active_state'
+    | 'visual_style_state'
+    | 'url_parameter_adapter'
+    | 'mixed'
+    | 'not_observed';
   confidence: number;
   ambiguous: boolean;
   reason: string;
@@ -265,6 +270,7 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
   const filterTriggerPattern = /^(筛选|已筛选|过滤|排序|filter|filters|filtered|sort|sort by)$/i;
   const filterContainerPattern =
     /(filter|filters|filtered|sort|dropdown|popover|popup|menu|dialog|modal|panel|drawer|筛选|排序)/i;
+  const explicitFilterContainerPattern = /(filter|filters|filtered|sort|筛选|排序)/i;
   const listContainerSelector = [
     '[role="feed"]',
     '[role="list"]',
@@ -406,15 +412,17 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
           ? 'mixed'
           : candidates[0]?.source === 'dom_active_state'
             ? 'dom_active_state'
-            : candidates[0]?.source === 'url_parameter_adapter'
-              ? 'url_parameter_adapter'
-              : 'not_observed',
+            : candidates[0]?.source === 'visual_style_state'
+              ? 'visual_style_state'
+              : candidates[0]?.source === 'url_parameter_adapter'
+                ? 'url_parameter_adapter'
+                : 'not_observed',
       confidence: selected?.confidence ?? 0,
       ambiguous,
       reason: selected
         ? ambiguous
           ? 'multiple active candidates were observed for this filter group; selected is the only non-default active value'
-          : 'selected filter inferred from active DOM state or bounded URL adapter'
+          : 'selected filter inferred from active DOM state, visual style, or bounded URL adapter'
         : ambiguous
           ? 'multiple non-default active candidates were observed; selected value is intentionally withheld'
           : 'no selected filter observed for this group',
@@ -463,31 +471,190 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
     ].join(',');
     const filters: AppliedSearchFilter[] = [];
     const seen = new Set<string>();
-    for (const element of Array.from(document.querySelectorAll(activeSelectors))) {
-      if (!(element instanceof Element)) continue;
-      if (!elementIsRendered(element)) continue;
-      const rect = element.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) continue;
-      if (rect.width > Math.max(480, window.innerWidth * 0.45)) continue;
-      const label = normalize(
+
+    const addFilter = (
+      label: string,
+      kind: AppliedSearchFilter['kind'],
+      source: AppliedSearchFilter['source'],
+      confidence: number,
+    ): void => {
+      const key = `${kind}:${label}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      filters.push({
+        label: canonicalFilterLabel(label),
+        kind,
+        source,
+        confidence,
+      });
+    };
+
+    const labelForFilterStateCandidate = (element: Element): string =>
+      normalize(
         ownVisibleText(element) ||
           element.getAttribute('aria-label') ||
           element.getAttribute('title') ||
           element.textContent ||
           '',
       );
+
+    const elementSemanticText = (element: Element): string => {
+      const values = [
+        element.getAttribute('aria-label'),
+        element.getAttribute('title'),
+        (element as HTMLElement).id,
+        (element as HTMLElement).className,
+      ];
+      for (const attr of Array.from(element.attributes)) values.push(attr.value);
+      return normalize(values.join(' '));
+    };
+
+    const hasGroupedFilterChoices = (context: Element): boolean => {
+      const byKind = new Map<AppliedSearchFilter['kind'], Set<string>>();
+      const candidates = Array.from(
+        context.querySelectorAll(
+          [
+            'button',
+            'a',
+            '[role="button"]',
+            '[role="menuitem"]',
+            '[role="option"]',
+            '[role="tab"]',
+            '[aria-label]',
+            '[title]',
+            '[tabindex]',
+            'span',
+            'li',
+          ].join(','),
+        ),
+      ).slice(0, 120);
+      for (const candidate of candidates) {
+        if (!(candidate instanceof Element)) continue;
+        if (!elementIsRendered(candidate)) continue;
+        const label = labelForFilterStateCandidate(candidate);
+        if (!label || label.length > 24) continue;
+        const kind = classifyFilterLabel(label);
+        if (kind === 'unknown') continue;
+        const labels = byKind.get(kind) ?? new Set<string>();
+        labels.add(canonicalFilterLabel(label));
+        byKind.set(kind, labels);
+      }
+      const groupedChoiceCount = Array.from(byKind.values()).filter(
+        (labels) => labels.size >= 2,
+      ).length;
+      return (
+        groupedChoiceCount >= 1 &&
+        Array.from(byKind.values()).flatMap((set) => [...set]).length >= 3
+      );
+    };
+
+    const filterContextForElement = (element: Element): Element | null => {
+      let current: Element | null = element;
+      let depth = 0;
+      while (current && current !== document.body && depth <= 6) {
+        const role = normalize(current.getAttribute('role')).toLowerCase();
+        const semanticText = elementSemanticText(current);
+        if (explicitFilterContainerPattern.test(semanticText)) return current;
+        if (
+          ['listbox', 'tablist', 'radiogroup'].includes(role) &&
+          hasGroupedFilterChoices(current)
+        ) {
+          return current;
+        }
+        if (
+          ['dialog', 'menu', 'menubar'].includes(role) &&
+          filterTriggerPattern.test(semanticText) &&
+          hasGroupedFilterChoices(current)
+        ) {
+          return current;
+        }
+        current = current.parentElement;
+        depth += 1;
+      }
+      return null;
+    };
+
+    const colorParts = (value: string): number[] => {
+      const match = value.match(/rgba?\(([^)]+)\)/i);
+      if (!match) return [];
+      return match[1]
+        .split(',')
+        .slice(0, 4)
+        .map((part) => Number.parseFloat(part.trim()));
+    };
+
+    const hasVisibleColor = (value: string): boolean => {
+      const parts = colorParts(value);
+      if (parts.length < 3) return false;
+      const alpha = parts.length >= 4 ? parts[3] : 1;
+      if (alpha <= 0.05) return false;
+      const [red, green, blue] = parts;
+      return Math.max(red, green, blue) - Math.min(red, green, blue) > 18;
+    };
+
+    const hasTintedBackground = (value: string): boolean => {
+      const parts = colorParts(value);
+      if (parts.length < 3) return false;
+      const alpha = parts.length >= 4 ? parts[3] : 1;
+      if (alpha <= 0.05) return false;
+      const [red, green, blue] = parts;
+      const nearWhite = red >= 248 && green >= 248 && blue >= 248;
+      const nearTransparentGray = Math.max(red, green, blue) - Math.min(red, green, blue) <= 6;
+      return !nearWhite && !nearTransparentGray;
+    };
+
+    const visualSelectedScore = (element: Element): number => {
+      const style = window.getComputedStyle(element);
+      const fontWeight = Number.parseInt(style.fontWeight || '400', 10);
+      return (
+        (fontWeight >= 600 ? 1 : 0) +
+        (hasTintedBackground(style.backgroundColor) ? 1 : 0) +
+        (hasVisibleColor(style.color) ? 1 : 0) +
+        (hasVisibleColor(style.borderColor) ? 1 : 0)
+      );
+    };
+
+    const renderedFilterCandidates = (selector: string): Element[] =>
+      Array.from(document.querySelectorAll(selector)).filter((element): element is Element => {
+        if (!(element instanceof Element)) return false;
+        if (!elementIsRendered(element)) return false;
+        const rect = element.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) return false;
+        if (rect.width > Math.max(480, window.innerWidth * 0.45)) return false;
+        return true;
+      });
+
+    for (const element of renderedFilterCandidates(activeSelectors)) {
+      if (!(element instanceof Element)) continue;
+      const label = labelForFilterStateCandidate(element);
       if (!label || label.length > 24) continue;
       const kind = classifyFilterLabel(label);
       if (kind === 'unknown') continue;
-      const key = `${kind}:${label}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      filters.push({
-        label: canonicalFilterLabel(label),
-        kind,
-        source: 'dom_active_state',
-        confidence: 0.9,
-      });
+      addFilter(label, kind, 'dom_active_state', 0.9);
+    }
+
+    const styleStateSelectors = [
+      'button',
+      'a',
+      '[role="button"]',
+      '[role="menuitem"]',
+      '[role="option"]',
+      '[role="tab"]',
+      '[aria-label]',
+      '[title]',
+      '[tabindex]',
+      'span',
+      'div',
+      'li',
+    ].join(',');
+    for (const element of renderedFilterCandidates(styleStateSelectors).slice(0, 600)) {
+      const label = labelForFilterStateCandidate(element);
+      if (!label || label.length > 24) continue;
+      const kind = classifyFilterLabel(label);
+      if (kind === 'unknown') continue;
+      if (!filterContextForElement(element)) continue;
+      if (visualSelectedScore(element) < 2) continue;
+      addFilter(label, kind, 'visual_style_state', 0.78);
     }
     const groups = {
       contentType: groupStateForKind(filters, 'content_type'),

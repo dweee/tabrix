@@ -1569,6 +1569,38 @@ describe('buildSearchSurface', () => {
     );
   });
 
+  it('surfaces a visible filter trigger even when the icon/text control has no resolved target yet', () => {
+    const surface = buildSearchSurface({
+      assistantGuidance: guidance,
+      interactiveElements: [],
+      candidateActions: [],
+      visibleTextContent: ['笔记 用户 问点点', '综合 宣传图 生成指令 免费版', '筛选'].join('\n'),
+    });
+
+    expect(surface?.visibleButUnresolved).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'filter_trigger',
+          label: '筛选',
+          source: 'visible_text_unresolved',
+        }),
+      ]),
+    );
+    expect(
+      surface?.visibleButUnresolved?.find(
+        (item) => item.kind === 'filter_trigger' && item.label === '筛选',
+      ),
+    ).not.toHaveProperty('candidateActionId');
+    expect(surface?.controls).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'filter_trigger',
+          actionability: true,
+        }),
+      ]),
+    );
+  });
+
   it('does not run the search projection when the caller did not ask for search work', () => {
     expect(
       buildSearchSurface({
