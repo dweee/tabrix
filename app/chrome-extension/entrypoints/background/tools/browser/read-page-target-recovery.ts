@@ -375,6 +375,7 @@ export function shouldRecoverSearchToolbarTargets(
   pageRole?: string,
 ): boolean {
   if (pageRole === 'search_results') return true;
+  if (pageRole === 'multi_region_page') return true;
   if (assistantGuidance?.taskKind === 'search') return true;
   return (assistantGuidance?.requestedObjects ?? []).some((item) =>
     ['search_input', 'result_cards', 'detail_metrics'].includes(item),

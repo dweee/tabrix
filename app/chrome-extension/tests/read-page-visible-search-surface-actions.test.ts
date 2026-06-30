@@ -76,6 +76,48 @@ describe('visible search surface action collection', () => {
     ]);
   });
 
+  it('scans multi-region pages so visible homepage search inputs become fill targets', async () => {
+    const executeScript = vi.fn().mockResolvedValue([
+      {
+        result: {
+          pageInfo: { url: 'https://example.test/explore' },
+          candidateActions: [
+            {
+              id: 'ca_fill_ref_search_input',
+              actionType: 'fill',
+              targetRef: 'ref_search_input',
+              label: 'Search ideas',
+              intent: 'search.enter_query',
+              matchReason: 'visible_search_input',
+              locatorChain: [
+                { type: 'ref', value: 'ref_search_input' },
+                { type: 'css', value: 'textarea[placeholder*="Search"]' },
+              ],
+              confidence: 0.9,
+            },
+          ],
+        },
+      },
+    ]);
+
+    const result = await collectVisibleSearchSurfaceActions({
+      tabId: 12,
+      currentUrl: 'https://example.test/explore',
+      pageRole: 'multi_region_page',
+      executeScript,
+    });
+
+    expect(executeScript).toHaveBeenCalled();
+    expect(result.actions).toEqual([
+      expect.objectContaining({
+        id: 'ca_fill_ref_search_input',
+        actionType: 'fill',
+        targetRef: 'ref_search_input',
+        intent: 'search.enter_query',
+      }),
+    ]);
+  });
+
   it('returns a sensing diagnostic when the scan fails', async () => {
     const result = await collectVisibleSearchSurfaceActions({
       tabId: 12,
