@@ -12,6 +12,7 @@ import {
   recordCandidateActionTargetLocatorsSnapshot,
   recordStableTargetRefSnapshot,
 } from '@/entrypoints/background/tools/browser/stable-target-ref-registry';
+import { consumePendingActionBinding } from '@/entrypoints/background/tools/browser/read-page-object-delta';
 
 describe('candidateAction bridge', () => {
   beforeEach(() => {
@@ -137,7 +138,12 @@ describe('candidateAction bridge', () => {
       observedOutcome: 'verification_required',
       lane: 'tabrix_owned',
     });
+    expect(payload.actionId).toMatch(/^hover-4106-\d+$/);
     expect(payload.verification.requiresFreshReadPage).toBe(true);
+    expect(consumePendingActionBinding(4106)).toMatchObject({
+      actionId: payload.actionId,
+      targetRef: 'ref_more',
+    });
   });
 
   it('resolves safe hover from candidateAction locator css with duplicate-safe selector lookup', async () => {
@@ -183,6 +189,69 @@ describe('candidateAction bridge', () => {
       expect.objectContaining({
         action: TOOL_MESSAGE_TYPES.DISPATCH_HOVER_FOR_REF,
         ref: 'ref_resolved_more',
+      }),
+      undefined,
+    );
+  });
+
+  it('falls back to visible text rebind when safe hover css locator is stale', async () => {
+    vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
+      id: 4109,
+      title: 'App',
+      url: 'https://example.com/app',
+    });
+    vi.spyOn(clickTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    const sendSpy = vi
+      .spyOn(clickTool as any, 'sendMessageToTab')
+      .mockImplementation(async (_tabId, message) => {
+        if (
+          message.action === TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR &&
+          message.useText === true
+        ) {
+          return { success: true, ref: 'ref_rebound_filter' };
+        }
+        if (message.action === TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR) {
+          return { success: false, error: 'selector not found: .stale-filter' };
+        }
+        if (message.action === TOOL_MESSAGE_TYPES.DISPATCH_HOVER_FOR_REF) {
+          return { success: true, target: { tagName: 'SPAN', text: 'Filters' } };
+        }
+        return { success: false, error: 'unexpected message' };
+      });
+
+    const result = await clickTool.execute({
+      interaction: 'hover',
+      candidateAction: {
+        targetRef: 'ref_text_search_toolbar_1',
+        label: 'Filters',
+        locatorChain: [{ type: 'css', value: '.stale-filter' }],
+      },
+    } as any);
+
+    expect(result.isError).toBe(false);
+    expect(sendSpy).toHaveBeenCalledWith(
+      4109,
+      expect.objectContaining({
+        action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
+        selector: '.stale-filter',
+      }),
+      undefined,
+    );
+    expect(sendSpy).toHaveBeenCalledWith(
+      4109,
+      expect.objectContaining({
+        action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
+        useText: true,
+        text: 'Filters',
+        allowMultiple: true,
+      }),
+      undefined,
+    );
+    expect(sendSpy).toHaveBeenCalledWith(
+      4109,
+      expect.objectContaining({
+        action: TOOL_MESSAGE_TYPES.DISPATCH_HOVER_FOR_REF,
+        ref: 'ref_rebound_filter',
       }),
       undefined,
     );

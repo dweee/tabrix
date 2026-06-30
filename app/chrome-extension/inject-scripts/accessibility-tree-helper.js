@@ -1280,14 +1280,28 @@
       x: Math.round(rect.left + rect.width / 2),
       y: Math.round(rect.top + rect.height / 2),
     };
-    ['mousemove', 'mouseover', 'mouseenter'].forEach((type) => {
+    const baseInit = {
+      bubbles: true,
+      cancelable: true,
+      clientX: center.x,
+      clientY: center.y,
+    };
+    if (typeof PointerEvent === 'function') {
+      ['pointerover', 'pointerenter', 'pointermove'].forEach((type) => {
+        el.dispatchEvent(
+          new PointerEvent(type, {
+            ...baseInit,
+            pointerId: 1,
+            pointerType: 'mouse',
+            isPrimary: true,
+          }),
+        );
+      });
+    }
+    ['mouseover', 'mouseenter', 'mousemove'].forEach((type) => {
       el.dispatchEvent(
         new MouseEvent(type, {
-          bubbles: true,
-          cancelable: true,
-          clientX: center.x,
-          clientY: center.y,
-          view: window,
+          ...baseInit,
         }),
       );
     });

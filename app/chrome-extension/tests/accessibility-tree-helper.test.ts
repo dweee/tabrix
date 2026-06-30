@@ -661,4 +661,68 @@ describe('accessibility-tree auth control map', () => {
       ]),
     );
   });
+
+  it('dispatches pointer hover events so pointer-driven floating panels become visible objects', async () => {
+    class TestPointerEvent extends window.MouseEvent {
+      pointerId: number;
+      pointerType: string;
+      isPrimary: boolean;
+
+      constructor(type: string, init: MouseEventInit & Partial<PointerEventInit> = {}) {
+        const { view: _view, ...mouseInit } = init;
+        super(type, mouseInit);
+        this.pointerId = init.pointerId ?? 1;
+        this.pointerType = init.pointerType ?? 'mouse';
+        this.isPrimary = init.isPrimary ?? true;
+      }
+    }
+    (window as Window & { PointerEvent?: typeof PointerEvent }).PointerEvent =
+      TestPointerEvent as typeof PointerEvent;
+
+    document.body.innerHTML = `
+      <main>
+        <button id="trigger">Filter</button>
+        <div id="floating-panel" role="menu" style="display: none; position: fixed; z-index: 1200;">
+          <button id="pointer-option" role="menuitem">Pointer only option</button>
+        </div>
+      </main>
+    `;
+    const trigger = document.getElementById('trigger') as HTMLElement;
+    const panel = document.getElementById('floating-panel') as HTMLElement;
+    trigger.addEventListener('pointerenter', () => {
+      panel.style.display = 'block';
+    });
+    Array.from(document.querySelectorAll('*')).forEach((element, index) => {
+      makeVisible(element, { left: 20, top: 20 + index * 34, width: 180, height: 28 });
+    });
+    makeVisible(panel, { left: 20, top: 80, width: 220, height: 80 });
+
+    const resolvedRef = await sendRequest({
+      action: 'ensureRefForSelector',
+      selector: '#trigger',
+      allowMultiple: true,
+    });
+    expect(resolvedRef).toMatchObject({ success: true, ref: expect.stringMatching(/^ref_\d+$/) });
+
+    const hoverResult = await sendRequest({ action: 'dispatchHoverForRef', ref: resolvedRef.ref });
+
+    expect(hoverResult).toMatchObject({ success: true });
+    expect(panel.style.display).toBe('block');
+    const after = (
+      window as Window & {
+        __generateAccessibilityTree: (
+          filter: string,
+          options: { maxDepth: number },
+        ) => { pageContent: string; refMap: Array<Record<string, unknown>> };
+      }
+    ).__generateAccessibilityTree('interactive', { maxDepth: 8 });
+    expect(after.pageContent).toContain('Pointer only option');
+    expect(after.refMap).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          selector: '#pointer-option',
+        }),
+      ]),
+    );
+  });
 });

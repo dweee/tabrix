@@ -58,7 +58,10 @@ import {
 } from './read-page-ownership-runtime';
 import type { VisibleRegionRowsResult } from './visible-region-rows';
 import type { ReadPageVisualElementHint } from './read-page-task-protocol';
-import { mergeHighValueObjectActionsIntoCandidateActions } from './read-page-target-recovery';
+import {
+  mergeHighValueObjectActionsIntoCandidateActions,
+  mergeVisibleSearchSurfaceActions,
+} from './read-page-target-recovery';
 import { getBrowserWorldSnapshot } from '../../browser-world-inventory';
 import type { PageRole } from './read-page-understanding';
 
@@ -156,17 +159,18 @@ export async function buildModeOutput(params: {
     }),
     params.pageRole,
   );
+  const generatedCandidateActions = buildCandidateActions(interactiveElements, params.refMap, {
+    visibleRegionRows,
+    frameId: params.frameContext?.frameId,
+    fileInputBindings: params.fileInputBindings,
+    cdpAccessibilityCandidates:
+      params.loadReadiness.cdpSensing?.accessibility?.objectCandidates ?? null,
+    viewport: params.viewport,
+  });
   let candidateActions =
     params.candidateActions.length > 0
-      ? params.candidateActions
-      : buildCandidateActions(interactiveElements, params.refMap, {
-          visibleRegionRows,
-          frameId: params.frameContext?.frameId,
-          fileInputBindings: params.fileInputBindings,
-          cdpAccessibilityCandidates:
-            params.loadReadiness.cdpSensing?.accessibility?.objectCandidates ?? null,
-          viewport: params.viewport,
-        });
+      ? mergeVisibleSearchSurfaceActions(generatedCandidateActions, params.candidateActions)
+      : generatedCandidateActions;
   const artifactRefs = buildArtifactRefs(params.tabId, params.renderMode === 'markdown');
   const pageContext: ReadPagePageContext = {
     filter: params.filter,

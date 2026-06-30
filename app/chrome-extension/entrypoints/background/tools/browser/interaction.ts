@@ -1369,6 +1369,25 @@ class ClickTool extends BaseBrowserToolExecutor {
               finalRef = resolved.ref;
               finalSelector = undefined;
             } else {
+              const hoverText = String(args.candidateAction?.label || '').trim();
+              if (hoverText) {
+                const textResolved = await this.sendMessageToTab(
+                  tab.id,
+                  {
+                    action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
+                    useText: true,
+                    text: hoverText,
+                    allowMultiple: true,
+                  },
+                  finalFrameId,
+                );
+                if (textResolved && textResolved.success && textResolved.ref) {
+                  finalRef = textResolved.ref;
+                  finalSelector = undefined;
+                }
+              }
+            }
+            if (!finalRef) {
               return createStructuredClickHelperErrorResponse({
                 message: `Failed to resolve hover selector: ${resolved?.error || 'unknown error'}`,
                 clickMethod: requestedClickMethod,
@@ -1419,6 +1438,11 @@ class ClickTool extends BaseBrowserToolExecutor {
           });
         }
 
+        const hoverActionId = `hover-${tab.id}-${Date.now()}`;
+        recordPendingActionBinding(tab.id, {
+          actionId: hoverActionId,
+          targetRef: finalRef,
+        });
         markBrowserWorldTabAiOperated(tab.id, 'click_element_hover');
         return {
           content: [
@@ -1426,6 +1450,7 @@ class ClickTool extends BaseBrowserToolExecutor {
               type: 'text',
               text: JSON.stringify({
                 success: true,
+                actionId: hoverActionId,
                 dispatchSucceeded: true,
                 interaction: 'hover',
                 observedOutcome: 'verification_required',
