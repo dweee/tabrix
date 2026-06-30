@@ -1525,6 +1525,57 @@
               }
               return (2 * inter) / (A.length + B.length);
             };
+            const isInteractiveTextTarget = (node) => {
+              try {
+                const tag = String(node.tagName || '').toLowerCase();
+                const role = String(node.getAttribute && node.getAttribute('role')).toLowerCase();
+                if (
+                  ['button', 'a', 'input', 'textarea', 'select', 'summary', 'label'].includes(tag)
+                ) {
+                  return true;
+                }
+                if (
+                  /^(button|link|menuitem|option|tab|checkbox|radio|switch|combobox|textbox|searchbox)$/i.test(
+                    role,
+                  )
+                ) {
+                  return true;
+                }
+                return (
+                  node.hasAttribute &&
+                  (node.hasAttribute('onclick') ||
+                    node.hasAttribute('tabindex') ||
+                    node.hasAttribute('aria-pressed') ||
+                    node.hasAttribute('aria-expanded') ||
+                    node.hasAttribute('aria-selected'))
+                );
+              } catch {
+                return false;
+              }
+            };
+            const accessibleTextForNode = (node) => {
+              const parts = [];
+              try {
+                parts.push(inferLabel(node));
+              } catch {
+                /* best-effort accessibility probe */
+              }
+              try {
+                parts.push(node.getAttribute && node.getAttribute('aria-label'));
+                parts.push(node.getAttribute && node.getAttribute('title'));
+                parts.push(node.getAttribute && node.getAttribute('alt'));
+              } catch {
+                /* best-effort accessibility probe */
+              }
+              try {
+                parts.push(ownVisibleText(node));
+                parts.push(/** @type {HTMLElement} */ (node).innerText);
+                parts.push(node.textContent);
+              } catch {
+                /* best-effort accessibility probe */
+              }
+              return normalize(parts.filter(Boolean).join(' '));
+            };
             let best = { el: null, score: 0 };
             // Deep traversal including shadow roots
             const stack = [document.documentElement];
@@ -1542,15 +1593,29 @@
                   } else {
                     const rect = /** @type {HTMLElement} */ (node).getBoundingClientRect();
                     if (rect.width > 0 && rect.height > 0) {
-                      const txt = normalize(node.textContent || '');
+                      const txt = accessibleTextForNode(node);
                       if (txt) {
-                        if (txt.includes(query)) {
-                          el = /** @type {Element} */ (node);
+                        const exactScore =
+                          txt === query ? 4 : txt.includes(query) || query.includes(txt) ? 2 : 0;
+                        const sc =
+                          exactScore ||
+                          (txt.length <= Math.max(80, query.length * 4) ? dice(txt, query) : 0);
+                        if (sc > 0) {
+                          const interactiveBonus = isInteractiveTextTarget(node) ? 2 : 0;
+                          const containerPenalty = isHugeContainer(node) ? 1.5 : 0;
+                          const lengthPenalty = Math.min(
+                            1,
+                            Math.max(0, txt.length - query.length) / 200,
+                          );
+                          const finalScore =
+                            sc + interactiveBonus - containerPenalty - lengthPenalty;
+                          if (finalScore > best.score)
+                            best = { el: /** @type {Element} */ (node), score: finalScore };
+                        }
+                        if (best.score >= 5.5) {
+                          el = best.el;
                           break;
                         }
-                        const sc = dice(txt, query);
-                        if (sc > best.score)
-                          best = { el: /** @type {Element} */ (node), score: sc };
                       }
                     }
                   }
@@ -1575,7 +1640,7 @@
               }
               if (++visited > 8000) break;
             }
-            if (!el && best.el && best.score >= 0.6) el = best.el;
+            if (!el && best.el && best.score >= 1.5) el = best.el;
           } else if (isXPath) {
             if (!sel) {
               sendResponse({ success: false, error: 'selector is required' });
@@ -1622,7 +1687,13 @@
             el = result.element;
           }
           if (!el) {
-            sendResponse({ success: false, error: `selector not found: ${sel}` });
+            sendResponse({
+              success: false,
+              error:
+                useText && textQuery
+                  ? `text not found: ${textQuery}`
+                  : `selector not found: ${sel}`,
+            });
             return true;
           }
           let refId = null;

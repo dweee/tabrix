@@ -1345,6 +1345,59 @@ class ClickTool extends BaseBrowserToolExecutor {
       }
 
       if (interaction === 'hover') {
+        const candidateHoverRef = String(args.candidateAction?.targetRef || '').trim();
+        const shouldTryCandidateHoverRef =
+          !finalRef &&
+          Boolean(finalSelector) &&
+          /^ref_text_(search_toolbar|filter_panel|control)_/.test(candidateHoverRef);
+        const resolveHoverTargetByVisibleText = async (): Promise<boolean> => {
+          const hoverText = String(args.candidateAction?.label || '').trim();
+          if (!hoverText) return false;
+          const textResolved = await this.sendMessageToTab(
+            tab.id,
+            {
+              action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
+              useText: true,
+              text: hoverText,
+              allowMultiple: true,
+            },
+            finalFrameId,
+          );
+          if (textResolved && textResolved.success && textResolved.ref) {
+            finalRef = textResolved.ref;
+            finalSelector = undefined;
+            return true;
+          }
+          return false;
+        };
+
+        if (shouldTryCandidateHoverRef) {
+          await this.injectContentScript(
+            tab.id,
+            ['inject-scripts/accessibility-tree-helper.js'],
+            false,
+            'ISOLATED',
+            false,
+            typeof finalFrameId === 'number' ? [finalFrameId] : undefined,
+          );
+          try {
+            const liveRef = await this.sendMessageToTab(
+              tab.id,
+              {
+                action: TOOL_MESSAGE_TYPES.RESOLVE_REF,
+                ref: candidateHoverRef,
+              },
+              finalFrameId,
+            );
+            if (liveRef && liveRef.success) {
+              finalRef = candidateHoverRef;
+              finalSelector = undefined;
+            }
+          } catch {
+            // The live ref probe is opportunistic; selector/text recovery below remains authoritative.
+          }
+        }
+
         if (finalSelector && !finalRef) {
           await this.injectContentScript(
             tab.id,
@@ -1369,23 +1422,7 @@ class ClickTool extends BaseBrowserToolExecutor {
               finalRef = resolved.ref;
               finalSelector = undefined;
             } else {
-              const hoverText = String(args.candidateAction?.label || '').trim();
-              if (hoverText) {
-                const textResolved = await this.sendMessageToTab(
-                  tab.id,
-                  {
-                    action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
-                    useText: true,
-                    text: hoverText,
-                    allowMultiple: true,
-                  },
-                  finalFrameId,
-                );
-                if (textResolved && textResolved.success && textResolved.ref) {
-                  finalRef = textResolved.ref;
-                  finalSelector = undefined;
-                }
-              }
+              await resolveHoverTargetByVisibleText();
             }
             if (!finalRef) {
               return createStructuredClickHelperErrorResponse({
@@ -1395,8 +1432,33 @@ class ClickTool extends BaseBrowserToolExecutor {
               });
             }
           } catch (error) {
+            try {
+              if (await resolveHoverTargetByVisibleText()) {
+                // Continue to the ref-based safe hover dispatch below.
+              } else {
+                return createStructuredClickHelperErrorResponse({
+                  message: `Error resolving hover selector: ${
+                    error instanceof Error ? error.message : String(error)
+                  }`,
+                  clickMethod: requestedClickMethod,
+                  targetBinding: buildTargetBinding(),
+                });
+              }
+            } catch (fallbackError) {
+              return createStructuredClickHelperErrorResponse({
+                message: `Error resolving hover selector: ${
+                  error instanceof Error ? error.message : String(error)
+                }; visible text fallback failed: ${
+                  fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
+                }`,
+                clickMethod: requestedClickMethod,
+                targetBinding: buildTargetBinding(),
+              });
+            }
+          }
+          if (!finalRef) {
             return createStructuredClickHelperErrorResponse({
-              message: `Error resolving hover selector: ${error instanceof Error ? error.message : String(error)}`,
+              message: 'Failed to resolve hover selector after visible text fallback',
               clickMethod: requestedClickMethod,
               targetBinding: buildTargetBinding(),
             });

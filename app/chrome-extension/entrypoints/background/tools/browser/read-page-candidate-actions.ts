@@ -361,7 +361,7 @@ function isFilterPanelOptionElement(
 
 function isRecoveredTextActionElement(element: ReadPageInteractiveElement): boolean {
   const role = String(element.role || '').toLowerCase();
-  if (role !== 'text_action') return false;
+  if (role !== 'text_action' && role !== 'button') return false;
   const ref = String(element.ref || '');
   return (
     ref.startsWith('ref_text_search_toolbar_') ||
@@ -451,6 +451,20 @@ function mayContainSensitiveAuthText(value: string): boolean {
   );
 }
 
+function xpathStringLiteral(value: string): string {
+  if (!value.includes("'")) return `'${value}'`;
+  if (!value.includes('"')) return `"${value}"`;
+  return `concat(${value
+    .split("'")
+    .map((part) => `'${part}'`)
+    .join(`, "'", `)})`;
+}
+
+function buildAccessibleNameXPath(name: string): string {
+  const literal = xpathStringLiteral(name);
+  return `//*[self::button or self::a or self::span or self::div or self::label or @role='button' or @role='menuitem' or @role='option' or @role='tab'][@aria-label=${literal} or @title=${literal} or @alt=${literal} or (normalize-space(.)=${literal} and not(.//*[normalize-space(.)=${literal}])) or (contains(normalize-space(.), ${literal}) and not(.//*[contains(normalize-space(.), ${literal})]))]`;
+}
+
 function buildLocatorChain(params: {
   element: ReadPageInteractiveElement;
   selector: string | undefined;
@@ -471,6 +485,9 @@ function buildLocatorChain(params: {
 
   if (name && !shouldRedactName) {
     locatorChain.push({ type: 'aria', value: name });
+    if (params.actionType === 'click' && isRecoveredTextActionElement(params.element)) {
+      locatorChain.push({ type: 'xpath', value: buildAccessibleNameXPath(name) });
+    }
   }
   if (params.selector) {
     locatorChain.push({ type: 'css', value: params.selector });

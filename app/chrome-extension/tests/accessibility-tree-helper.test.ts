@@ -725,4 +725,27 @@ describe('accessibility-tree auth control map', () => {
       ]),
     );
   });
+
+  it('ensures refs for visible text from accessible names without a selector', async () => {
+    document.body.innerHTML = `
+      <main>
+        <button id="filter-trigger" aria-label="筛选"></button>
+      </main>
+    `;
+    Array.from(document.querySelectorAll('*')).forEach((element, index) => {
+      makeVisible(element, { left: 30, top: 30 + index * 34, width: 120, height: 28 });
+    });
+
+    const resolvedRef = await sendRequest({
+      action: 'ensureRefForSelector',
+      useText: true,
+      text: '筛选',
+      allowMultiple: true,
+    });
+
+    expect(resolvedRef).toMatchObject({ success: true, ref: expect.stringMatching(/^ref_\d+$/) });
+    const refMap = (window as Window & { __claudeElementMap?: Record<string, WeakRef<Element>> })
+      .__claudeElementMap;
+    expect(refMap?.[resolvedRef.ref]?.deref()).toBe(document.getElementById('filter-trigger'));
+  });
 });

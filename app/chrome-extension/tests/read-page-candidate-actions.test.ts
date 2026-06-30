@@ -161,6 +161,11 @@ describe('read_page candidate action intents', () => {
         expect.objectContaining({ label: '一周内', intent: 'filter.time_range_select' }),
       ]),
     );
+    expect(actions.find((action) => action.label === '筛选')?.locatorChain).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'xpath', value: expect.stringContaining('筛选') }),
+      ]),
+    );
   });
 
   it('promotes safe CDP AX locators into executable candidate actions', () => {

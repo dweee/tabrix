@@ -257,6 +257,124 @@ describe('candidateAction bridge', () => {
     );
   });
 
+  it('falls back to visible text rebind when safe hover css lookup throws', async () => {
+    vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
+      id: 4110,
+      title: 'App',
+      url: 'https://example.com/app',
+    });
+    vi.spyOn(clickTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    const sendSpy = vi
+      .spyOn(clickTool as any, 'sendMessageToTab')
+      .mockImplementation(async (_tabId, message) => {
+        if (
+          message.action === TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR &&
+          message.useText === true
+        ) {
+          return { success: true, ref: 'ref_rebound_filter' };
+        }
+        if (message.action === TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR) {
+          throw new Error('selector not found: .stale-filter');
+        }
+        if (message.action === TOOL_MESSAGE_TYPES.DISPATCH_HOVER_FOR_REF) {
+          return { success: true, target: { tagName: 'SPAN', text: 'Filters' } };
+        }
+        return { success: false, error: 'unexpected message' };
+      });
+
+    const result = await clickTool.execute({
+      interaction: 'hover',
+      candidateAction: {
+        targetRef: 'ref_text_search_toolbar_2',
+        label: 'Filters',
+        locatorChain: [{ type: 'css', value: '.stale-filter' }],
+      },
+    } as any);
+
+    expect(result.isError).toBe(false);
+    expect(sendSpy).toHaveBeenCalledWith(
+      4110,
+      expect.objectContaining({
+        action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
+        selector: '.stale-filter',
+      }),
+      undefined,
+    );
+    expect(sendSpy).toHaveBeenCalledWith(
+      4110,
+      expect.objectContaining({
+        action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
+        useText: true,
+        text: 'Filters',
+        allowMultiple: true,
+      }),
+      undefined,
+    );
+    expect(sendSpy).toHaveBeenCalledWith(
+      4110,
+      expect.objectContaining({
+        action: TOOL_MESSAGE_TYPES.DISPATCH_HOVER_FOR_REF,
+        ref: 'ref_rebound_filter',
+      }),
+      undefined,
+    );
+  });
+
+  it('uses a live recovered text ref for safe hover before stale css lookup', async () => {
+    vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
+      id: 4111,
+      title: 'App',
+      url: 'https://example.com/app',
+    });
+    vi.spyOn(clickTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    const sendSpy = vi
+      .spyOn(clickTool as any, 'sendMessageToTab')
+      .mockImplementation(async (_tabId, message) => {
+        if (message.action === TOOL_MESSAGE_TYPES.RESOLVE_REF) {
+          return { success: true, center: { x: 24, y: 36 } };
+        }
+        if (message.action === TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR) {
+          throw new Error('selector lookup should not be used when recovered ref is live');
+        }
+        if (message.action === TOOL_MESSAGE_TYPES.DISPATCH_HOVER_FOR_REF) {
+          return { success: true, target: { tagName: 'BUTTON', text: 'Filters' } };
+        }
+        return { success: false, error: 'unexpected message' };
+      });
+
+    const result = await clickTool.execute({
+      interaction: 'hover',
+      candidateAction: {
+        targetRef: 'ref_text_search_toolbar_9',
+        label: 'Filters',
+        locatorChain: [{ type: 'css', value: '.stale-filter' }],
+      },
+    } as any);
+
+    expect(result.isError).toBe(false);
+    expect(sendSpy).toHaveBeenCalledWith(
+      4111,
+      expect.objectContaining({
+        action: TOOL_MESSAGE_TYPES.RESOLVE_REF,
+        ref: 'ref_text_search_toolbar_9',
+      }),
+      undefined,
+    );
+    expect(sendSpy).toHaveBeenCalledWith(
+      4111,
+      expect.objectContaining({
+        action: TOOL_MESSAGE_TYPES.DISPATCH_HOVER_FOR_REF,
+        ref: 'ref_text_search_toolbar_9',
+      }),
+      undefined,
+    );
+    expect(
+      sendSpy.mock.calls.some(
+        ([, message]) => message.action === TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
+      ),
+    ).toBe(false);
+  });
+
   it('routes recovered search toolbar targetRef through candidateAction locator css', async () => {
     vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
       id: 4112,
