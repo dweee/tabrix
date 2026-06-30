@@ -173,6 +173,58 @@ describe('collect result cards DOM scan', () => {
     expect(xpathLocators?.[1]?.value).toContain('normalize-space');
   });
 
+  it('objectizes a visible search input as a fillable search target', () => {
+    setViewport();
+    document.body.innerHTML = `
+      <header data-testid="toolbar" data-rect="0,0,1280,88">
+        <form role="search" data-testid="search-form" data-rect="16,18,420,48">
+          <input
+            type="search"
+            aria-label="Search projects"
+            data-testid="search-input"
+            data-rect="20,24,360,40"
+          />
+        </form>
+      </header>
+      <main role="list" data-testid="list" data-rect="0,100,820,580">
+        <article role="listitem" data-testid="card-alpha" data-rect="20,140,260,180">
+          <a data-testid="link-alpha" data-rect="28,148,240,112" href="https://example.test/note/alpha">AI image workflow</a>
+        </article>
+      </main>
+    `;
+    installRects();
+
+    const scan = scanVisibleResultCardsInPage();
+    const searchAction = scan.candidateActions.find(
+      (action) => action.actionType === 'fill' && action.intent === 'search.enter_query',
+    );
+
+    expect(searchAction).toMatchObject({
+      actionType: 'fill',
+      intent: 'search.enter_query',
+      actionability: true,
+      matchReason: 'visible_search_input',
+    });
+    expect(searchAction?.locatorChain).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'css',
+          value: expect.stringContaining('input[data-testid="search-input"]'),
+        }),
+      ]),
+    );
+    expect(scan.pageRegions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          regionId: 'search_input',
+          regionType: 'search',
+          targetability: true,
+          candidateActionIds: expect.arrayContaining([searchAction?.id]),
+        }),
+      ]),
+    );
+  });
+
   it('does not objectize an out-of-band side panel filter label as search filter trigger', () => {
     setViewport();
     document.body.innerHTML = `
