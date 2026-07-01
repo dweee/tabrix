@@ -123,6 +123,7 @@ export async function buildModeOutput(params: {
   tips: string;
   refMap: any[];
   candidateActions: CandidateActionSeed[];
+  visibleSearchFilterState?: unknown;
   fileInputBindings: ReadPageFileInputBinding[];
   visualElements: ReadPageVisualElementHint[];
   visibleRegionRows: VisibleRegionRowsResult;
@@ -380,6 +381,7 @@ export async function buildModeOutput(params: {
     pageRole: sharedPayload.summary?.pageRole,
     interactiveElements,
     candidateActions,
+    visibleSearchFilterState: params.visibleSearchFilterState,
     visibleRegionRows,
     visibleTextContent: params.visibleTextContent,
     frameContext: params.frameContext,

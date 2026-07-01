@@ -76,6 +76,43 @@ describe('visible search surface action collection', () => {
     ]);
   });
 
+  it('returns visible search filter state from the selected current-page scan', async () => {
+    const filterState = {
+      status: 'observed',
+      appliedLabels: ['最多收藏'],
+      sort: '最多收藏',
+      groups: {
+        sort: {
+          selected: '最多收藏',
+          candidates: ['综合', '最多收藏'],
+          source: 'dom_active_state',
+          confidence: 0.9,
+          ambiguous: false,
+          reason: 'active DOM state observed',
+        },
+      },
+    };
+    const executeScript = vi.fn().mockResolvedValue([
+      {
+        result: {
+          pageInfo: { url: 'https://example.test/search?q=ai' },
+          candidateActions: [action('current_1', '当前结果')],
+          filterState,
+        },
+      },
+    ]);
+
+    const result = await collectVisibleSearchSurfaceActions({
+      tabId: 12,
+      currentUrl: 'https://example.test/search?q=ai',
+      pageRole: 'search_results',
+      executeScript,
+    });
+
+    expect(result.filterState).toBe(filterState);
+    expect(result.actions).toHaveLength(1);
+  });
+
   it('scans multi-region pages so visible homepage search inputs become fill targets', async () => {
     const executeScript = vi.fn().mockResolvedValue([
       {

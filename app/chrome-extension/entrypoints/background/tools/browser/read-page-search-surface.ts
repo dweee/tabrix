@@ -978,6 +978,181 @@ function groupStateFromCandidates(
   };
 }
 
+function readObject(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function readString(value: unknown): string | undefined {
+  const text = normalizeText(value);
+  return text ? text : undefined;
+}
+
+function readStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map(readString).filter((item): item is string => Boolean(item));
+}
+
+function visibleFilterGroupCandidate(params: {
+  label: string;
+  selectedLabel?: string;
+  source?: string;
+  confidence?: number;
+  reason?: string;
+}): SearchSurfaceFilterCandidate {
+  return {
+    label: params.label,
+    selected:
+      Boolean(params.selectedLabel) &&
+      normalizedKey(params.label) === normalizedKey(params.selectedLabel),
+    source: params.source ?? 'visible_search_surface_filter_state',
+    confidence: params.confidence ?? 0.74,
+    reason:
+      params.reason ?? 'filter candidate inferred from visible search-surface DOM/style state scan',
+  };
+}
+
+function mergeVisibleFilterGroupState(params: {
+  base: SearchSurfaceFilterGroupState;
+  visibleGroup: unknown;
+  fallbackSelected?: unknown;
+}): SearchSurfaceFilterGroupState {
+  const group = readObject(params.visibleGroup);
+  const selectedLabel = readString(group?.selected) ?? readString(params.fallbackSelected);
+  const visibleLabels = uniqueStrings([
+    ...readStringArray(group?.candidates),
+    ...(selectedLabel ? [selectedLabel] : []),
+  ]);
+  if (!selectedLabel && visibleLabels.length === 0) return params.base;
+
+  const selectedKey = normalizedKey(selectedLabel);
+  const baseCandidates = params.base.candidates.map((candidate) => ({
+    ...candidate,
+    selected: selectedKey ? normalizedKey(candidate.label) === selectedKey : candidate.selected,
+  }));
+  const existingLabels = new Set(baseCandidates.map((candidate) => normalizedKey(candidate.label)));
+  const confidence =
+    typeof group?.confidence === 'number' && Number.isFinite(group.confidence)
+      ? group.confidence
+      : undefined;
+  const source = readString(group?.source) ?? 'visible_search_surface_filter_state';
+  const reason = readString(group?.reason);
+  const visibleCandidates = visibleLabels
+    .filter((label) => !existingLabels.has(normalizedKey(label)))
+    .map((label) =>
+      visibleFilterGroupCandidate({
+        label,
+        selectedLabel,
+        source,
+        confidence,
+        reason,
+      }),
+    );
+  const merged = groupStateFromCandidates([...baseCandidates, ...visibleCandidates]);
+  return {
+    ...merged,
+    reason: selectedLabel
+      ? 'selected filter merged from visible search-surface DOM/style state scan'
+      : merged.reason,
+  };
+}
+
+function mergeVisibleSearchFilterState(
+  base: SearchSurfaceFilterState,
+  visibleFilterState: unknown,
+): SearchSurfaceFilterState {
+  const state = readObject(visibleFilterState);
+  if (!state) return base;
+  const groups = readObject(state.groups);
+  const contentType = mergeVisibleFilterGroupState({
+    base: base.contentType,
+    visibleGroup: groups?.contentType,
+    fallbackSelected: state.contentType,
+  });
+  const sort = mergeVisibleFilterGroupState({
+    base: base.sort,
+    visibleGroup: groups?.sort,
+    fallbackSelected: state.sort,
+  });
+  const timeRange = mergeVisibleFilterGroupState({
+    base: base.timeRange,
+    visibleGroup: groups?.timeRange,
+    fallbackSelected: state.timeRange,
+  });
+  const filterGroupsById = new Map<string, SearchSurfaceGenericFilterGroupState>();
+  const applyGroup = (groupId: string, group: SearchSurfaceFilterGroupState): void => {
+    filterGroupsById.set(groupId, {
+      groupId,
+      groupLabel: groupId,
+      ...group,
+    });
+  };
+  for (const group of base.filterGroups) {
+    filterGroupsById.set(group.groupId, group);
+  }
+  applyGroup('content_type', contentType);
+  applyGroup('sort', sort);
+  applyGroup('time_range', timeRange);
+
+  for (const rawGroup of Array.isArray(state.filterGroups) ? state.filterGroups : []) {
+    const group = readObject(rawGroup);
+    const groupId = genericFilterGroupId(readString(group?.groupId) ?? 'other');
+    const current = filterGroupsById.get(groupId) ?? {
+      groupId,
+      ...(readString(group?.groupLabel) ? { groupLabel: readString(group?.groupLabel) } : {}),
+      ...groupStateFromCandidates([]),
+    };
+    const merged = mergeVisibleFilterGroupState({
+      base: current,
+      visibleGroup: group,
+    });
+    filterGroupsById.set(groupId, {
+      groupId,
+      ...(readString(group?.groupLabel) ? { groupLabel: readString(group?.groupLabel) } : {}),
+      ...merged,
+    });
+  }
+
+  const missingGroups = [
+    contentType.selected ? null : 'contentType',
+    sort.selected ? null : 'sort',
+    timeRange.selected ? null : 'timeRange',
+  ].filter((item): item is 'contentType' | 'sort' | 'timeRange' => Boolean(item));
+  const appliedLabels = uniqueStrings([
+    ...readStringArray(state.appliedLabels),
+    contentType.selected,
+    sort.selected,
+    timeRange.selected,
+  ]);
+  const ambiguous = contentType.ambiguous || sort.ambiguous || timeRange.ambiguous;
+  return {
+    status: ambiguous
+      ? 'ambiguous'
+      : missingGroups.length === 0
+        ? 'observed'
+        : appliedLabels.length > 0
+          ? 'partial'
+          : base.status,
+    filterGroups: [...filterGroupsById.values()].sort((left, right) =>
+      left.groupId.localeCompare(right.groupId),
+    ),
+    contentType,
+    sort,
+    timeRange,
+    selected: {
+      ...(contentType.selected ? { contentType: contentType.selected } : {}),
+      ...(sort.selected ? { sort: sort.selected } : {}),
+      ...(timeRange.selected ? { timeRange: timeRange.selected } : {}),
+    },
+    appliedLabels,
+    ambiguous,
+    missingGroups,
+    claimBoundary:
+      'filterState merges structured controls with visible DOM/style state from the current read_page snapshot. It does not prove server-side ranking correctness.',
+  };
+}
+
 function genericFilterGroupId(value: unknown): string {
   const key = normalizedKey(value);
   if (key) return key.replace(/[^a-z0-9_\-\u4e00-\u9fff]+/gi, '_').replace(/^_+|_+$/g, '');
@@ -1179,6 +1354,7 @@ export function buildSearchSurface(params: {
   pageRole?: string | null;
   interactiveElements: ReadPageInteractiveElement[];
   candidateActions: ReadPageCandidateAction[];
+  visibleSearchFilterState?: unknown;
   visibleRegionRows?: VisibleRegionRowsResult;
   visibleTextContent?: string | null;
   frameContext?: ReadPageFrameContext | null;
@@ -1362,7 +1538,10 @@ export function buildSearchSurface(params: {
     params.candidateActions,
     params.interactiveElements,
   );
-  const filterState = buildGroupedFilterState({ categoryTabs, controls, filterPanel });
+  const filterState = mergeVisibleSearchFilterState(
+    buildGroupedFilterState({ categoryTabs, controls, filterPanel }),
+    params.visibleSearchFilterState,
+  );
   const categoryState = categoryStateForControls(categoryTabs);
   const sortMenuAction = findToolbarControlAction(params.candidateActions, 'filter.open');
   const sortMenuObserved =

@@ -10,11 +10,13 @@ import {
 
 export interface VisibleSearchSurfaceActionsResult {
   actions: CandidateActionSeed[];
+  filterState?: unknown;
   sensingDiagnostic?: ReadPageSensingDiagnostic;
 }
 
 type VisibleSearchSurfaceScan = {
   candidateActions: unknown[];
+  filterState?: unknown;
   cards?: unknown[];
   pageInfo?: { url?: string };
 };
@@ -99,7 +101,10 @@ export async function collectVisibleSearchSurfaceActions(params: {
       .filter(
         (action: CandidateActionSeed | null): action is CandidateActionSeed => action !== null,
       );
-    return { actions };
+    return {
+      actions,
+      ...(scan.filterState ? { filterState: scan.filterState } : {}),
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return {

@@ -903,6 +903,9 @@ class ReadPageTool extends BaseBrowserToolExecutor {
           ? `${basePayload.fallbackSource}+visible_search_surface_actions`
           : 'visible_search_surface_actions';
       }
+      if (visibleSearchSurfaceActions.filterState) {
+        basePayload.visibleSearchFilterState = visibleSearchSurfaceActions.filterState;
+      }
       await this.supplementAuthFormInteractiveControls(tabId, basePayload, requestedFrameId);
       basePayload.visualElements = await collectQrVisualElementHints({
         pageContent: String(basePayload.pageContent || ''),
@@ -964,6 +967,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
           tips: basePayload.tips,
           refMap: basePayload.refMap,
           candidateActions: basePayload.candidateActions,
+          visibleSearchFilterState: basePayload.visibleSearchFilterState,
           fileInputBindings: basePayload.fileInputBindings,
           visualElements: basePayload.visualElements,
           visibleRegionRows: basePayload.visibleRegionRows,
@@ -1053,6 +1057,9 @@ class ReadPageTool extends BaseBrowserToolExecutor {
               ? `${basePayload.fallbackSource}+visible_search_surface_actions`
               : 'visible_search_surface_actions';
           }
+          if (visibleSearchSurfaceActions.filterState) {
+            basePayload.visibleSearchFilterState = visibleSearchSurfaceActions.filterState;
+          }
           basePayload.visualElements = await collectQrVisualElementHints({
             pageContent: String(basePayload.pageContent || ''),
             visibleTextContent: basePayload.visibleTextContent,
@@ -1110,6 +1117,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
             tips: basePayload.tips,
             refMap: basePayload.refMap,
             candidateActions: basePayload.candidateActions,
+            visibleSearchFilterState: basePayload.visibleSearchFilterState,
             fileInputBindings: basePayload.fileInputBindings,
             visualElements: basePayload.visualElements,
             visibleRegionRows: basePayload.visibleRegionRows,

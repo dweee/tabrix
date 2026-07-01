@@ -1027,6 +1027,7 @@ describe('buildSearchSurface', () => {
         ]),
       },
     });
+    expect(surface?.filterState?.appliedLabels).not.toContain('综合');
   });
 
   it('promotes ordinary DOM filter-panel options into targetable grouped filter state', () => {
@@ -1139,6 +1140,109 @@ describe('buildSearchSurface', () => {
       timeRange: {
         candidates: expect.arrayContaining([
           expect.objectContaining({ label: '一周内', targetRef: 'ref_panel_week' }),
+        ]),
+      },
+    });
+  });
+
+  it('merges visible DOM/style filter state when structured controls only prove defaults', () => {
+    const surface = buildSearchSurface({
+      assistantGuidance: guidance,
+      interactiveElements: [
+        interactive({
+          ref: 'ref_filter',
+          role: 'button',
+          name: '已筛选',
+          rect: { x: 1500, y: 96, width: 72, height: 36 },
+        }),
+        interactive({
+          ref: 'ref_default_sort',
+          role: 'button',
+          name: '综合',
+          checked: true,
+          rect: { x: 1260, y: 248, width: 72, height: 40 },
+        }),
+      ],
+      candidateActions: [
+        candidate({ id: 'ca_filter', targetRef: 'ref_filter', intent: 'filter.open' }),
+        candidate({
+          id: 'ca_default_sort',
+          targetRef: 'ref_default_sort',
+          intent: 'filter.option_select',
+        }),
+      ],
+      visibleSearchFilterState: {
+        status: 'observed',
+        appliedLabels: ['图文', '最多收藏', '一周内'],
+        contentType: '图文',
+        sort: '最多收藏',
+        timeRange: '一周内',
+        groups: {
+          contentType: {
+            selected: '图文',
+            candidates: ['不限', '视频', '图文'],
+            source: 'visual_style_state',
+            confidence: 0.78,
+            ambiguous: false,
+            reason: 'selected option inferred from visible style',
+          },
+          sort: {
+            selected: '最多收藏',
+            candidates: ['综合', '最新', '最多收藏'],
+            source: 'dom_active_state',
+            confidence: 0.9,
+            ambiguous: false,
+            reason: 'selected option inferred from active DOM state',
+          },
+          timeRange: {
+            selected: '一周内',
+            candidates: ['不限', '一天内', '一周内'],
+            source: 'visual_style_state',
+            confidence: 0.78,
+            ambiguous: false,
+            reason: 'selected option inferred from visible style',
+          },
+        },
+        filterGroups: [
+          {
+            groupId: 'sort',
+            groupLabel: 'sort',
+            selected: '最多收藏',
+            candidates: ['综合', '最新', '最多收藏'],
+            source: 'dom_active_state',
+            confidence: 0.9,
+            ambiguous: false,
+            reason: 'selected option inferred from active DOM state',
+          },
+        ],
+      },
+      visibleTextContent: [
+        '全部 已筛选',
+        '排序依据 综合 最新 最多收藏',
+        '笔记类型 不限 视频 图文',
+        '发布时间 不限 一天内 一周内',
+      ].join('\n'),
+    });
+
+    expect(surface?.filterState).toMatchObject({
+      status: 'observed',
+      selected: {
+        contentType: '图文',
+        sort: '最多收藏',
+        timeRange: '一周内',
+      },
+      missingGroups: [],
+      ambiguous: false,
+      appliedLabels: expect.arrayContaining(['图文', '最多收藏', '一周内']),
+      sort: {
+        selected: '最多收藏',
+        candidates: expect.arrayContaining([
+          expect.objectContaining({ label: '综合', selected: false }),
+          expect.objectContaining({
+            label: '最多收藏',
+            selected: true,
+            source: 'dom_active_state',
+          }),
         ]),
       },
     });
