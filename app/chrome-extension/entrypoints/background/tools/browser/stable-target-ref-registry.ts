@@ -346,7 +346,11 @@ export async function hydrateStableTargetRefRegistryFromStorage(
   }
 }
 
+export async function flushStableTargetRefRegistryPersistence(): Promise<void> {
+  await persistenceQueue;
+}
+
 /** Test-only export. Waits for fire-and-forget persistence writes. */
 export async function __flushStableTargetRefRegistryPersistenceForTests(): Promise<void> {
-  await persistenceQueue;
+  await flushStableTargetRefRegistryPersistence();
 }

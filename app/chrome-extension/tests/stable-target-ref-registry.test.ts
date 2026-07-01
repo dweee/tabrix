@@ -5,6 +5,7 @@ import {
   __resetStableTargetRefRegistryForTests,
   getStableTargetRefRegistrySnapshot,
   hydrateStableTargetRefRegistryFromStorage,
+  flushStableTargetRefRegistryPersistence,
   lookupCandidateActionTargetLocatorEntry,
   lookupStableTargetRef,
   recordCandidateActionTargetLocatorsSnapshot,
@@ -13,7 +14,10 @@ import {
 } from '@/entrypoints/background/tools/browser/stable-target-ref-registry';
 import { recordReadPageTargetPublication } from '@/entrypoints/background/tools/browser/read-page-object-publication';
 
-function makeStorageArea(store: Record<string, unknown>) {
+function makeStorageArea(
+  store: Record<string, unknown>,
+  hooks: { onSet?: () => Promise<void> | void } = {},
+) {
   return {
     get: vi.fn(async (keys: string | string[]) => {
       const result: Record<string, unknown> = {};
@@ -25,6 +29,7 @@ function makeStorageArea(store: Record<string, unknown>) {
       return result;
     }),
     set: vi.fn(async (items: Record<string, unknown>) => {
+      await hooks.onSet?.();
       Object.assign(store, items);
     }),
     remove: vi.fn(async (keys: string | string[]) => {
@@ -266,6 +271,42 @@ describe('B-011 stable-targetRef registry', () => {
         selector: '//*[@role="button" and normalize-space(.)="Most saved"]',
         selectorType: 'xpath',
       });
+    } finally {
+      (chrome.storage as any).session = originalSession;
+    }
+  });
+
+  it('flushes queued storage persistence before read_page output returns', async () => {
+    const originalSession = (chrome.storage as any).session;
+    const store: Record<string, unknown> = {};
+    let releaseSet: (() => void) | null = null;
+    let setCompleted = false;
+    (chrome.storage as any).session = makeStorageArea(store, {
+      onSet: () =>
+        new Promise<void>((resolve) => {
+          releaseSet = () => {
+            setCompleted = true;
+            resolve();
+          };
+        }),
+    });
+    try {
+      recordCandidateActionTargetLocatorsSnapshot(9, [
+        { targetRef: 'ref_filter_sort_c4ba7440', selector: '[data-sort="saved"]' },
+      ]);
+
+      const flushed = flushStableTargetRefRegistryPersistence();
+      for (let i = 0; i < 10 && !releaseSet; i += 1) {
+        await Promise.resolve();
+      }
+      expect(typeof releaseSet).toBe('function');
+      expect(setCompleted).toBe(false);
+
+      releaseSet?.();
+      await flushed;
+
+      expect(setCompleted).toBe(true);
+      expect(store).toHaveProperty('tabrix.stableTargetRefRegistry.v1');
     } finally {
       (chrome.storage as any).session = originalSession;
     }

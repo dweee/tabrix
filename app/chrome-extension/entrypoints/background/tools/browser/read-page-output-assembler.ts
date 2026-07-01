@@ -23,6 +23,7 @@ import { buildCandidateActions, type CandidateActionSeed } from './read-page-can
 import { buildAndRememberReadPageObjectSensingOutput } from './read-page-object-sensing-output';
 import { buildBrowserPageObjectPublication } from './read-page-browser-page-object-publication';
 import { recordReadPageTargetPublication } from './read-page-object-publication';
+import { flushStableTargetRefRegistryPersistence } from './stable-target-ref-registry';
 import { buildSearchSurface } from './read-page-search-surface';
 import { buildArtifactRefs } from './read-page-artifact-refs';
 import { buildPageOperationMap } from './read-page-operation-map';
@@ -245,6 +246,7 @@ export async function buildModeOutput(params: {
     interactiveElements,
     frameId: params.frameContext?.frameId,
   });
+  await flushStableTargetRefRegistryPersistence();
 
   const publishFormReadiness = buildPublishFormReadiness({
     pageRole: regionAlignedUnderstanding.pageRole,
