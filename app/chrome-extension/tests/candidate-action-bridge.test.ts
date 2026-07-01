@@ -194,24 +194,29 @@ describe('candidateAction bridge', () => {
     );
   });
 
-  it('falls back to visible text rebind when safe hover css locator is stale', async () => {
+  it('rebounds recovered text hover targets before trying stale css locators', async () => {
     vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
       id: 4109,
       title: 'App',
       url: 'https://example.com/app',
     });
     vi.spyOn(clickTool as any, 'injectContentScript').mockResolvedValue(undefined);
-    const sendSpy = vi
-      .spyOn(clickTool as any, 'sendMessageToTab')
+    const transportSpy = vi
+      .spyOn(chrome.tabs, 'sendMessage')
       .mockImplementation(async (_tabId, message) => {
         if (
           message.action === TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR &&
           message.useText === true
         ) {
-          return { success: true, ref: 'ref_rebound_filter' };
+          return { success: true, ref: 'ref_rebound_filter', center: { x: 10, y: 20 } };
         }
+        return { success: false, error: 'unexpected selector locator message' };
+      });
+    const sendSpy = vi
+      .spyOn(clickTool as any, 'sendMessageToTab')
+      .mockImplementation(async (_tabId, message) => {
         if (message.action === TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR) {
-          return { success: false, error: 'selector not found: .stale-filter' };
+          throw new Error('stale selector should not be tried after text rebind succeeds');
         }
         if (message.action === TOOL_MESSAGE_TYPES.DISPATCH_HOVER_FOR_REF) {
           return { success: true, target: { tagName: 'SPAN', text: 'Filters' } };
@@ -229,23 +234,15 @@ describe('candidateAction bridge', () => {
     } as any);
 
     expect(result.isError).toBe(false);
-    expect(sendSpy).toHaveBeenCalledWith(
-      4109,
-      expect.objectContaining({
-        action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
-        selector: '.stale-filter',
-      }),
-      undefined,
-    );
-    expect(sendSpy).toHaveBeenCalledWith(
+    expect(transportSpy).toHaveBeenCalledWith(
       4109,
       expect.objectContaining({
         action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
         useText: true,
         text: 'Filters',
+        tagName: '',
         allowMultiple: true,
       }),
-      undefined,
     );
     expect(sendSpy).toHaveBeenCalledWith(
       4109,
@@ -255,26 +252,38 @@ describe('candidateAction bridge', () => {
       }),
       undefined,
     );
+    expect(
+      sendSpy.mock.calls.some(
+        ([, message]) =>
+          message.action === TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR &&
+          message.selector === '.stale-filter',
+      ),
+    ).toBe(false);
   });
 
-  it('falls back to visible text rebind when safe hover css lookup throws', async () => {
+  it('uses selector chain when recovered text hover rebind fails', async () => {
     vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
       id: 4110,
       title: 'App',
       url: 'https://example.com/app',
     });
     vi.spyOn(clickTool as any, 'injectContentScript').mockResolvedValue(undefined);
-    const sendSpy = vi
-      .spyOn(clickTool as any, 'sendMessageToTab')
+    const transportSpy = vi
+      .spyOn(chrome.tabs, 'sendMessage')
       .mockImplementation(async (_tabId, message) => {
         if (
           message.action === TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR &&
           message.useText === true
         ) {
-          return { success: true, ref: 'ref_rebound_filter' };
+          return { success: false, error: 'text not found: Filters' };
         }
+        return { success: false, error: 'unexpected selector locator message' };
+      });
+    const sendSpy = vi
+      .spyOn(clickTool as any, 'sendMessageToTab')
+      .mockImplementation(async (_tabId, message) => {
         if (message.action === TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR) {
-          throw new Error('selector not found: .stale-filter');
+          return { success: true, ref: 'ref_rebound_filter_by_css' };
         }
         if (message.action === TOOL_MESSAGE_TYPES.DISPATCH_HOVER_FOR_REF) {
           return { success: true, target: { tagName: 'SPAN', text: 'Filters' } };
@@ -292,20 +301,22 @@ describe('candidateAction bridge', () => {
     } as any);
 
     expect(result.isError).toBe(false);
-    expect(sendSpy).toHaveBeenCalledWith(
-      4110,
-      expect.objectContaining({
-        action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
-        selector: '.stale-filter',
-      }),
-      undefined,
-    );
-    expect(sendSpy).toHaveBeenCalledWith(
+    expect(transportSpy).toHaveBeenCalledWith(
       4110,
       expect.objectContaining({
         action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
         useText: true,
         text: 'Filters',
+        tagName: '',
+        allowMultiple: true,
+      }),
+    );
+    expect(sendSpy).toHaveBeenCalledWith(
+      4110,
+      expect.objectContaining({
+        action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
+        selector: '.stale-filter',
+        isXPath: false,
         allowMultiple: true,
       }),
       undefined,
@@ -314,10 +325,89 @@ describe('candidateAction bridge', () => {
       4110,
       expect.objectContaining({
         action: TOOL_MESSAGE_TYPES.DISPATCH_HOVER_FOR_REF,
-        ref: 'ref_rebound_filter',
+        ref: 'ref_rebound_filter_by_css',
       }),
       undefined,
     );
+  });
+
+  it('falls back to generated leaf text xpath when safe hover css locator is stale', async () => {
+    vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
+      id: 4113,
+      title: 'App',
+      url: 'https://example.com/app',
+    });
+    vi.spyOn(clickTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    const sendSpy = vi
+      .spyOn(clickTool as any, 'sendMessageToTab')
+      .mockImplementation(async (_tabId, message) => {
+        if (
+          message.action === TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR &&
+          message.selector === '.stale-filter'
+        ) {
+          return { success: false, error: 'selector not found: .stale-filter' };
+        }
+        if (
+          message.action === TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR &&
+          message.isXPath === true
+        ) {
+          expect(message.selector).toBe("//*[not(*) and normalize-space(.)='Filters']");
+          return { success: true, ref: 'ref_rebound_filter_by_xpath' };
+        }
+        if (
+          message.action === TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR &&
+          message.useText === true
+        ) {
+          throw new Error('text fallback should not be needed after xpath succeeds');
+        }
+        if (message.action === TOOL_MESSAGE_TYPES.DISPATCH_HOVER_FOR_REF) {
+          return { success: true, target: { tagName: 'SPAN', text: 'Filters' } };
+        }
+        return { success: false, error: 'unexpected message' };
+      });
+
+    const result = await clickTool.execute({
+      interaction: 'hover',
+      selector: '.stale-filter',
+      candidateAction: {
+        label: 'Filters',
+        locatorChain: [{ type: 'css', value: '.stale-filter' }],
+      },
+    } as any);
+
+    expect(result.isError).toBe(false);
+    expect(sendSpy).toHaveBeenCalledWith(
+      4113,
+      expect.objectContaining({
+        action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
+        selector: '.stale-filter',
+        isXPath: false,
+      }),
+      undefined,
+    );
+    expect(sendSpy).toHaveBeenCalledWith(
+      4113,
+      expect.objectContaining({
+        action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
+        selector: "//*[not(*) and normalize-space(.)='Filters']",
+        isXPath: true,
+      }),
+      undefined,
+    );
+    expect(sendSpy).toHaveBeenCalledWith(
+      4113,
+      expect.objectContaining({
+        action: TOOL_MESSAGE_TYPES.DISPATCH_HOVER_FOR_REF,
+        ref: 'ref_rebound_filter_by_xpath',
+      }),
+      undefined,
+    );
+    expect(
+      sendSpy.mock.calls.some(
+        ([, message]) =>
+          message.action === TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR && message.useText === true,
+      ),
+    ).toBe(false);
   });
 
   it('uses a live recovered text ref for safe hover before stale css lookup', async () => {

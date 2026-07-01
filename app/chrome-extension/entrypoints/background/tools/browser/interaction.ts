@@ -14,6 +14,7 @@ import { TIMEOUTS, ERROR_MESSAGES } from '@/common/constants';
 import { handleDownloadTool, markNextDownloadAsInteractive } from './download';
 import { prearmDialogHandling } from './dialog-prearm';
 import {
+  type CandidateActionSelectorType,
   type CandidateActionInput,
   type ResolvedCandidateActionTarget,
   resolveCandidateActionTarget,
@@ -37,6 +38,7 @@ import {
   type PostActionReadbackEvidence,
 } from './post-action-readback';
 import { recordPendingActionBinding } from './read-page';
+import { createChromeSelectorLocator } from '@/shared/selector';
 
 /**
  * Explicit lane label on every click response. The Tabrix extension-first
@@ -157,6 +159,48 @@ function firstCandidateCssLocator(
     if (value) return value;
   }
   return undefined;
+}
+
+function candidateSelectorLocators(
+  candidateAction: CandidateActionInput | undefined,
+): Array<{ selector: string; selectorType: CandidateActionSelectorType }> {
+  const locatorChain = candidateAction?.locatorChain;
+  if (!Array.isArray(locatorChain)) return [];
+  const locators: Array<{ selector: string; selectorType: CandidateActionSelectorType }> = [];
+  const seen = new Set<string>();
+  for (const locator of locatorChain) {
+    if (locator?.type !== 'css' && locator?.type !== 'xpath') continue;
+    const selector = typeof locator.value === 'string' ? locator.value.trim() : '';
+    if (!selector) continue;
+    const key = `${locator.type}:${selector}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    locators.push({ selector, selectorType: locator.type });
+  }
+  return locators;
+}
+
+function xpathStringLiteral(value: string): string {
+  if (!value.includes("'")) return `'${value}'`;
+  if (!value.includes('"')) return `"${value}"`;
+  return `concat(${value
+    .split("'")
+    .map((part) => `'${part}'`)
+    .join(`, "'", `)})`;
+}
+
+function candidateVisibleTextLocators(
+  candidateAction: CandidateActionInput | undefined,
+): Array<{ selector: string; selectorType: CandidateActionSelectorType }> {
+  const label = String(candidateAction?.label || '').trim();
+  if (!label) return [];
+  const literal = xpathStringLiteral(label);
+  return [
+    {
+      selector: `//*[not(*) and normalize-space(.)=${literal}]`,
+      selectorType: 'xpath',
+    },
+  ];
 }
 
 function shouldRetryFillWithCandidateCss(params: {
@@ -1353,19 +1397,34 @@ class ClickTool extends BaseBrowserToolExecutor {
         const resolveHoverTargetByVisibleText = async (): Promise<boolean> => {
           const hoverText = String(args.candidateAction?.label || '').trim();
           if (!hoverText) return false;
-          const textResolved = await this.sendMessageToTab(
+          const locator = createChromeSelectorLocator();
+          const textResolved = await locator.locate(
             tab.id,
             {
-              action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
-              useText: true,
-              text: hoverText,
-              allowMultiple: true,
+              candidates: [
+                {
+                  type: 'text',
+                  value: hoverText,
+                  match: 'exact',
+                  source: 'generated',
+                  strategy: 'hover_visible_text_rebind',
+                  weight: 100,
+                  stability: { score: 0.78, signals: { usesText: true } },
+                },
+              ],
             },
-            finalFrameId,
+            { frameId: finalFrameId, allowMultiple: true },
           );
-          if (textResolved && textResolved.success && textResolved.ref) {
+          if (textResolved?.ref) {
             finalRef = textResolved.ref;
             finalSelector = undefined;
+            resolvedTarget = {
+              ref: textResolved.ref,
+              ...(typeof textResolved.frameId === 'number'
+                ? { frameId: textResolved.frameId }
+                : {}),
+              source: 'candidate_locator_ref',
+            };
             return true;
           }
           return false;
@@ -1398,6 +1457,14 @@ class ClickTool extends BaseBrowserToolExecutor {
           }
         }
 
+        if (!finalRef && candidateHoverRef.startsWith('ref_text_')) {
+          try {
+            await resolveHoverTargetByVisibleText();
+          } catch {
+            // Selector recovery below will produce the structured diagnostic if text rebind fails.
+          }
+        }
+
         if (finalSelector && !finalRef) {
           await this.injectContentScript(
             tab.id,
@@ -1407,13 +1474,31 @@ class ClickTool extends BaseBrowserToolExecutor {
             false,
             typeof finalFrameId === 'number' ? [finalFrameId] : undefined,
           );
-          try {
+          const selectorAttempts = [
+            { selector: finalSelector, selectorType: finalSelectorType },
+            ...candidateVisibleTextLocators(args.candidateAction),
+            ...candidateSelectorLocators(args.candidateAction),
+          ].filter((entry, index, entries) => {
+            if (!entry.selector) return false;
+            return (
+              entries.findIndex(
+                (candidate) =>
+                  candidate.selector === entry.selector &&
+                  candidate.selectorType === entry.selectorType,
+              ) === index
+            );
+          });
+          const selectorErrors: string[] = [];
+          const resolveHoverTargetBySelector = async (entry: {
+            selector: string;
+            selectorType: CandidateActionSelectorType;
+          }): Promise<boolean> => {
             const resolved = await this.sendMessageToTab(
               tab.id,
               {
                 action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
-                selector: finalSelector,
-                isXPath: false,
+                selector: entry.selector,
+                isXPath: entry.selectorType === 'xpath',
                 allowMultiple: true,
               },
               finalFrameId,
@@ -1421,44 +1506,52 @@ class ClickTool extends BaseBrowserToolExecutor {
             if (resolved && resolved.success && resolved.ref) {
               finalRef = resolved.ref;
               finalSelector = undefined;
-            } else {
-              await resolveHoverTargetByVisibleText();
+              resolvedTarget = {
+                selector: entry.selector,
+                selectorType: entry.selectorType,
+                ...(typeof finalFrameId === 'number' ? { frameId: finalFrameId } : {}),
+                source:
+                  entry.selectorType === 'xpath'
+                    ? 'candidate_locator_xpath'
+                    : 'candidate_locator_css',
+              };
+              return true;
             }
-            if (!finalRef) {
-              return createStructuredClickHelperErrorResponse({
-                message: `Failed to resolve hover selector: ${resolved?.error || 'unknown error'}`,
-                clickMethod: requestedClickMethod,
-                targetBinding: buildTargetBinding(),
-              });
-            }
-          } catch (error) {
+            selectorErrors.push(
+              `${entry.selectorType}:${resolved?.error || 'unknown error'}`.slice(0, 240),
+            );
+            return false;
+          };
+
+          for (const attempt of selectorAttempts) {
             try {
-              if (await resolveHoverTargetByVisibleText()) {
-                // Continue to the ref-based safe hover dispatch below.
-              } else {
-                return createStructuredClickHelperErrorResponse({
-                  message: `Error resolving hover selector: ${
-                    error instanceof Error ? error.message : String(error)
-                  }`,
-                  clickMethod: requestedClickMethod,
-                  targetBinding: buildTargetBinding(),
-                });
-              }
-            } catch (fallbackError) {
-              return createStructuredClickHelperErrorResponse({
-                message: `Error resolving hover selector: ${
+              if (await resolveHoverTargetBySelector(attempt)) break;
+            } catch (error) {
+              selectorErrors.push(
+                `${attempt.selectorType}:${
                   error instanceof Error ? error.message : String(error)
-                }; visible text fallback failed: ${
-                  fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
-                }`,
-                clickMethod: requestedClickMethod,
-                targetBinding: buildTargetBinding(),
-              });
+                }`.slice(0, 240),
+              );
             }
           }
+
+          if (!finalRef) {
+            try {
+              await resolveHoverTargetByVisibleText();
+            } catch (fallbackError) {
+              selectorErrors.push(
+                `text:${
+                  fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
+                }`.slice(0, 240),
+              );
+            }
+          }
+
           if (!finalRef) {
             return createStructuredClickHelperErrorResponse({
-              message: 'Failed to resolve hover selector after visible text fallback',
+              message: `Failed to resolve hover selector chain: ${
+                selectorErrors.join('; ') || 'unknown error'
+              }`,
               clickMethod: requestedClickMethod,
               targetBinding: buildTargetBinding(),
             });
