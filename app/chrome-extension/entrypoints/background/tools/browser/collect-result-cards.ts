@@ -1100,20 +1100,68 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
       .slice(0, maxVisibleFilterActions);
   };
 
+  const searchTextEntryIdentityPattern = /\b(search|query|find|ask)\b|搜索|查找|提问|问/i;
+  const nonSearchTextEntryIdentityPattern =
+    /\b(password|passcode|otp|captcha|verify|verification|login|sign[ -]?in|auth|authorize|credential|phone|email|mail)\b|密码|验证码|校验|验证|登录|登陆|授权|手机号|邮箱/i;
+  const textEntryIdentityText = (element: Element): string => {
+    const values: string[] = [];
+    let current: Element | null = element;
+    let depth = 0;
+    while (current && current !== document.body && depth <= 3) {
+      values.push(
+        current.getAttribute('id') || '',
+        current.getAttribute('name') || '',
+        current.getAttribute('class') || '',
+        current.getAttribute('role') || '',
+        current.getAttribute('aria-label') || '',
+        current.getAttribute('placeholder') || '',
+        current.getAttribute('title') || '',
+        current.getAttribute('type') || '',
+      );
+      current = current.parentElement;
+      depth += 1;
+    }
+    return values
+      .map((value) => normalize(value))
+      .filter(Boolean)
+      .join(' ');
+  };
+  const isSearchTextEntryElement = (element: Element): boolean => {
+    const tag = element.tagName.toLowerCase();
+    const role = normalize(element.getAttribute('role')).toLowerCase();
+    const type = normalize(element.getAttribute('type')).toLowerCase();
+    const isTextEntry =
+      tag === 'textarea' ||
+      tag === 'input' ||
+      element.getAttribute('contenteditable') === 'true' ||
+      role === 'textbox' ||
+      role === 'searchbox' ||
+      role === 'combobox';
+    if (!isTextEntry) return false;
+    if (
+      tag === 'input' &&
+      /^(hidden|password|checkbox|radio|submit|button|file|image|range|color)$/i.test(type)
+    ) {
+      return false;
+    }
+    if (role === 'searchbox' || type === 'search') return true;
+    const identityText = textEntryIdentityText(element);
+    if (nonSearchTextEntryIdentityPattern.test(identityText)) return false;
+    return searchTextEntryIdentityPattern.test(identityText);
+  };
+
   const searchInputCandidate = (): PageCandidateAction | null => {
     const input = Array.from(
-      document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
-        [
-          'input[type="search"]',
-          'input[placeholder*="搜索"]',
-          'input[placeholder*="search" i]',
-          'textarea[placeholder*="搜索"]',
-          'textarea[placeholder*="search" i]',
-          '[contenteditable="true"][role="textbox"]',
-          '[contenteditable="true"][aria-label*="搜索"]',
-        ].join(','),
+      document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLElement>(
+        'input, textarea, [contenteditable="true"], [role="textbox"], [role="searchbox"], [role="combobox"]',
       ),
-    ).find((element) => elementIsVisible(element) && visibleRect(element));
+    ).find(
+      (element) =>
+        element instanceof Element &&
+        isSearchTextEntryElement(element) &&
+        elementIsVisible(element) &&
+        visibleRect(element),
+    );
     if (!input) return null;
     const label = normalize(
       input.getAttribute('aria-label') ||

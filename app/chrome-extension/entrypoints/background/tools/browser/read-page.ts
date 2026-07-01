@@ -886,6 +886,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
         currentUrl,
         assistantGuidance,
         pageRole: basePayload.pageRole,
+        forceScan: basePayload.visibleRegionRows?.visibleRegionRowsUsed === true,
       });
       if (visibleSearchSurfaceActions.sensingDiagnostic) {
         basePayload.sensingDiagnostics = appendObjectSensingDiagnostic(
@@ -1035,6 +1036,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
             currentUrl,
             assistantGuidance,
             pageRole: basePayload.pageRole,
+            forceScan: basePayload.visibleRegionRows?.visibleRegionRowsUsed === true,
           });
           if (visibleSearchSurfaceActions.sensingDiagnostic) {
             basePayload.sensingDiagnostics = appendObjectSensingDiagnostic(

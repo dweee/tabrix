@@ -118,6 +118,49 @@ describe('visible search surface action collection', () => {
     ]);
   });
 
+  it('can be forced when visible regions prove the page has a business surface before role reconciliation', async () => {
+    const executeScript = vi.fn().mockResolvedValue([
+      {
+        result: {
+          pageInfo: { url: 'https://example.test/explore' },
+          candidateActions: [
+            {
+              id: 'ca_fill_ref_search_input',
+              actionType: 'fill',
+              targetRef: 'ref_search_input',
+              label: 'Learning',
+              intent: 'search.enter_query',
+              matchReason: 'visible_search_input',
+              locatorChain: [
+                { type: 'ref', value: 'ref_search_input' },
+                { type: 'css', value: 'textarea#search-input' },
+              ],
+              confidence: 0.9,
+            },
+          ],
+        },
+      },
+    ]);
+
+    const result = await collectVisibleSearchSurfaceActions({
+      tabId: 12,
+      currentUrl: 'https://example.test/explore',
+      pageRole: 'generic_page',
+      forceScan: true,
+      executeScript,
+    });
+
+    expect(executeScript).toHaveBeenCalled();
+    expect(result.actions).toEqual([
+      expect.objectContaining({
+        id: 'ca_fill_ref_search_input',
+        actionType: 'fill',
+        targetRef: 'ref_search_input',
+        intent: 'search.enter_query',
+      }),
+    ]);
+  });
+
   it('returns a sensing diagnostic when the scan fails', async () => {
     const result = await collectVisibleSearchSurfaceActions({
       tabId: 12,

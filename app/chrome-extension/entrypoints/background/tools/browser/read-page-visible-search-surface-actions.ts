@@ -78,9 +78,13 @@ export async function collectVisibleSearchSurfaceActions(params: {
   currentUrl: string;
   assistantGuidance?: ReadPageAssistantGuidance;
   pageRole?: string;
+  forceScan?: boolean;
   executeScript?: VisibleSearchSurfaceScriptExecutor;
 }): Promise<VisibleSearchSurfaceActionsResult> {
-  if (!shouldRecoverSearchToolbarTargets(params.assistantGuidance, params.pageRole)) {
+  if (
+    !params.forceScan &&
+    !shouldRecoverSearchToolbarTargets(params.assistantGuidance, params.pageRole)
+  ) {
     return { actions: [] };
   }
   try {

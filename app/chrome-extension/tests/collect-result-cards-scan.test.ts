@@ -225,6 +225,50 @@ describe('collect result cards DOM scan', () => {
     );
   });
 
+  it('objectizes a visible textarea search surface even when the placeholder is only a hint', () => {
+    setViewport();
+    document.body.innerHTML = `
+      <header data-testid="toolbar" data-rect="0,0,1280,88">
+        <section data-testid="search-shell" class="global-search-shell" data-rect="16,18,420,48">
+          <textarea
+            id="search-input"
+            name="assistantSearchTextarea"
+            class="textarea"
+            placeholder="Learning"
+            data-testid="search-textarea"
+            data-rect="20,24,360,40"
+          ></textarea>
+        </section>
+      </header>
+      <main role="list" data-testid="list" data-rect="0,100,820,580">
+        <article role="listitem" data-testid="card-alpha" data-rect="20,140,260,180">
+          <a data-testid="link-alpha" data-rect="28,148,240,112" href="https://example.test/note/alpha">AI image workflow</a>
+        </article>
+      </main>
+    `;
+    installRects();
+
+    const scan = scanVisibleResultCardsInPage();
+    const searchAction = scan.candidateActions.find(
+      (action) => action.actionType === 'fill' && action.intent === 'search.enter_query',
+    );
+
+    expect(searchAction).toMatchObject({
+      actionType: 'fill',
+      intent: 'search.enter_query',
+      actionability: true,
+      matchReason: 'visible_search_input',
+    });
+    expect(searchAction?.locatorChain).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'css',
+          value: 'textarea#search-input',
+        }),
+      ]),
+    );
+  });
+
   it('does not objectize an out-of-band side panel filter label as search filter trigger', () => {
     setViewport();
     document.body.innerHTML = `
