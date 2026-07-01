@@ -1326,25 +1326,41 @@
       clientX: center.x,
       clientY: center.y,
     };
+    const targets = hoverEventTargets(el);
     if (typeof PointerEvent === 'function') {
-      ['pointerover', 'pointerenter', 'pointermove'].forEach((type) => {
-        el.dispatchEvent(
-          new PointerEvent(type, {
+      targets.forEach((target) => {
+        ['pointerover', 'pointerenter', 'pointermove'].forEach((type) => {
+          target.dispatchEvent(
+            new PointerEvent(type, {
+              ...baseInit,
+              pointerId: 1,
+              pointerType: 'mouse',
+              isPrimary: true,
+            }),
+          );
+        });
+      });
+    }
+    targets.forEach((target) => {
+      ['mouseover', 'mouseenter', 'mousemove'].forEach((type) => {
+        target.dispatchEvent(
+          new MouseEvent(type, {
             ...baseInit,
-            pointerId: 1,
-            pointerType: 'mouse',
-            isPrimary: true,
           }),
         );
       });
-    }
-    ['mouseover', 'mouseenter', 'mousemove'].forEach((type) => {
-      el.dispatchEvent(
-        new MouseEvent(type, {
-          ...baseInit,
-        }),
-      );
     });
+  }
+
+  function hoverEventTargets(el) {
+    const targets = [];
+    let current = el;
+    while (current instanceof Element && targets.length < 8) {
+      targets.push(current);
+      if (current === document.body || current === document.documentElement) break;
+      current = current.parentElement;
+    }
+    return targets;
   }
 
   function summarizeElement(el) {
