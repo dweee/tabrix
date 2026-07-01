@@ -494,6 +494,7 @@ function actionForRef(
 function isFilterPanelAction(action: ReadPageCandidateAction | undefined, label?: string): boolean {
   if (!action) return false;
   if (!action.intent) return true;
+  if (/^search\.apply_filter\./.test(action.intent)) return true;
   if (
     action.intent === 'search.category_select' &&
     label !== undefined &&
@@ -503,6 +504,28 @@ function isFilterPanelAction(action: ReadPageCandidateAction | undefined, label?
     return true;
   }
   return /^filter\./.test(action.intent);
+}
+
+function candidateActionLabel(action: ReadPageCandidateAction): string | undefined {
+  const directLabel = safeLabel((action as { label?: unknown }).label);
+  if (directLabel) return directLabel;
+  const ariaLabel = action.locatorChain.find((item) => item.type === 'aria')?.value;
+  return safeLabel(ariaLabel);
+}
+
+function isVisibleFilterPanelCandidateAction(
+  action: ReadPageCandidateAction,
+  label?: string,
+): boolean {
+  if (!Array.isArray(action.locatorChain) || action.locatorChain.length === 0) return false;
+  if (!isFilterPanelAction(action, label)) return false;
+  const reason = normalizeText(action.matchReason).toLowerCase();
+  return (
+    reason.includes('visible_filter_option') ||
+    reason.includes('dom_active_state') ||
+    TEXT_FILTER_PANEL_REF_PATTERN.test(action.targetRef) ||
+    /^ref_filter_/.test(action.targetRef)
+  );
 }
 
 function actionForFilterPanelRef(
@@ -547,9 +570,10 @@ function actionForFilterPanelLabel(
     const element = interactiveElements.find((item) => item.ref === action.targetRef);
     const isPanelCandidate = element
       ? isFilterPanelOptionElement(element, interactiveElements)
-      : TEXT_FILTER_PANEL_REF_PATTERN.test(action.targetRef);
+      : isVisibleFilterPanelCandidateAction(action, label);
     if (!isPanelCandidate) return false;
     if (normalizedKey(element?.name) === key) return true;
+    if (normalizedKey(candidateActionLabel(action)) === key) return true;
     const locatorLabel = action.locatorChain.find((item) => item.type === 'aria')?.value;
     if (normalizedKey(locatorLabel) === key) return true;
     return action.locatorChain.some((item) => normalizedKey(item.value) === key);
@@ -819,6 +843,16 @@ function outOfBandFilterPanelOptionElements(
   });
 }
 
+function filterPanelLabelsFromCandidateActions(
+  candidateActions: readonly ReadPageCandidateAction[],
+): string[] {
+  return candidateActions
+    .filter((action) => isVisibleFilterPanelCandidateAction(action, candidateActionLabel(action)))
+    .map((action) => candidateActionLabel(action))
+    .filter((label): label is string => Boolean(label))
+    .filter((label) => isFilterPanelOptionLabel(label) || FILTER_PANEL_ACTION_PATTERN.test(label));
+}
+
 function filterPanelFromVisibleText(
   visibleTextContent: string | null | undefined,
   candidateActions: readonly ReadPageCandidateAction[],
@@ -829,6 +863,7 @@ function filterPanelFromVisibleText(
     ...extractShortLabels(visibleTextContent, FILTER_PANEL_OPTION_PATTERN, 16),
     ...extractShortLabels(visibleTextContent, CONTENT_TYPE_FILTER_OPTION_PATTERN, 8),
     ...extractShortLabels(visibleTextContent, TIME_RANGE_FILTER_OPTION_PATTERN, 8),
+    ...filterPanelLabelsFromCandidateActions(candidateActions),
     ...outOfBandFilterOptions.map((element) => normalizeText(element.name)),
   ]);
   const actionLabels = extractShortLabels(visibleTextContent, FILTER_PANEL_ACTION_PATTERN, 8);

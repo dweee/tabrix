@@ -1145,6 +1145,87 @@ describe('buildSearchSurface', () => {
     });
   });
 
+  it('merges locator-backed visible filter candidate actions into the filter panel summary', () => {
+    const surface = buildSearchSurface({
+      assistantGuidance: guidance,
+      interactiveElements: [
+        interactive({ ref: 'ref_filter_trigger', role: 'button', name: 'Filters' }),
+      ],
+      candidateActions: [
+        candidate({
+          id: 'ca_open_filters',
+          targetRef: 'ref_filter_trigger',
+          intent: 'filter.open',
+          matchReason: 'visible_filter_trigger',
+        }),
+        candidate({
+          id: 'ca_visible_sort_saved',
+          targetRef: 'ref_filter_sort_saved',
+          intent: 'search.apply_filter.sort',
+          label: '最多收藏',
+          matchReason: 'visible_filter_option',
+          locatorChain: [
+            { type: 'ref', value: 'ref_filter_sort_saved' },
+            { type: 'aria', value: '最多收藏' },
+            { type: 'css', value: '.floating-panel [data-filter="saved"]' },
+          ],
+        }),
+        candidate({
+          id: 'ca_visible_content_image_text',
+          targetRef: 'ref_filter_content_image_text',
+          intent: 'search.apply_filter.content_type',
+          label: '图文',
+          matchReason: 'visible_filter_option',
+          locatorChain: [
+            { type: 'ref', value: 'ref_filter_content_image_text' },
+            { type: 'aria', value: '图文' },
+            { type: 'css', value: '.floating-panel [data-filter="image-text"]' },
+          ],
+        }),
+        candidate({
+          id: 'ca_visible_time_week',
+          targetRef: 'ref_filter_time_week',
+          intent: 'search.apply_filter.time_range',
+          label: '一周内',
+          matchReason: 'visible_filter_option',
+          locatorChain: [
+            { type: 'ref', value: 'ref_filter_time_week' },
+            { type: 'aria', value: '一周内' },
+            { type: 'css', value: '.floating-panel [data-filter="week"]' },
+          ],
+        }),
+      ],
+      visibleTextContent: 'Filters 综合',
+    });
+
+    expect(surface?.filterPanel).toMatchObject({
+      status: 'open_candidate',
+      optionLabels: expect.arrayContaining(['最多收藏', '图文', '一周内']),
+    });
+    expect(surface?.filterPanel?.targetableOptions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: '最多收藏',
+          targetRef: 'ref_filter_sort_saved',
+          candidateActionId: 'ca_visible_sort_saved',
+          filterGroup: 'sort',
+        }),
+        expect.objectContaining({
+          label: '图文',
+          targetRef: 'ref_filter_content_image_text',
+          candidateActionId: 'ca_visible_content_image_text',
+          filterGroup: 'content_type',
+        }),
+        expect.objectContaining({
+          label: '一周内',
+          targetRef: 'ref_filter_time_week',
+          candidateActionId: 'ca_visible_time_week',
+          filterGroup: 'time_range',
+        }),
+      ]),
+    );
+  });
+
   it('merges visible DOM/style filter state when structured controls only prove defaults', () => {
     const surface = buildSearchSurface({
       assistantGuidance: guidance,
