@@ -839,13 +839,21 @@ function contentCollectionRegions(regions: readonly ReadPageRegion[]): ReadPageR
 }
 
 function isContentCollectionRegion(region: ReadPageRegion): boolean {
-  if (region.regionType !== 'content') return false;
+  const regionType = String(region.regionType || '').toLowerCase();
+  const looksLikeCollectionRegion =
+    regionType === 'content' ||
+    regionType === 'content_collection' ||
+    regionType === 'result_list' ||
+    regionType === 'list' ||
+    regionType === 'feed';
+  if (!looksLikeCollectionRegion) return false;
+
   const targetableRecords = targetableResultObjects(region);
   if (targetableRecords.length >= 2) return true;
 
   const state = region.state.toLowerCase();
   return (
-    /(?:result|list|collection|results)_/.test(`${state}_`) &&
+    /(?:result|list|collection|results|feed)_/.test(`${regionType}_${state}_`) &&
     (region.candidateActionIds.length >= 2 || targetableRecords.length >= 1)
   );
 }
@@ -858,7 +866,13 @@ function targetableResultObjects(region: ReadPageRegion): ReadPageRegion['object
   return region.objects.filter((object) => {
     const objectType = String(object.objectType || '').toLowerCase();
     const looksLikeResultObject =
-      objectType === 'record' || objectType === 'entry' || objectType === 'content_collection';
+      objectType === 'record' ||
+      objectType === 'entry' ||
+      objectType === 'content_collection' ||
+      objectType === 'result_card' ||
+      objectType === 'content_card' ||
+      objectType === 'card' ||
+      objectType === 'list_item';
     if (!looksLikeResultObject) return false;
     return object.targetability === 'target_ref' || Boolean(object.targetRef);
   });

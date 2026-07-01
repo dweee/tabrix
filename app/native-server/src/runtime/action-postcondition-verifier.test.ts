@@ -76,7 +76,7 @@ function region(
 
 function resultRow(
   suffix: string,
-  objectType: 'record' | 'entry' = 'record',
+  objectType: 'record' | 'entry' | 'result_card' = 'record',
   label = `Alpha ${suffix} insight`,
 ) {
   return {
@@ -93,6 +93,16 @@ function resultRow(
 
 function resultCollection(...rows: ReturnType<typeof resultRow>[]): ReadPageRegion[] {
   return [region('content', 'result_collection_candidate', { objects: rows })];
+}
+
+function visibleResultListCollection(...rows: ReturnType<typeof resultRow>[]): ReadPageRegion[] {
+  return [
+    region('result_list', 'content_available_candidate', {
+      objects: rows,
+      candidateActionIds: rows.map((row) => `ca_${row.objectId}`),
+      targetability: 'target_ref',
+    }),
+  ];
 }
 
 function otpRequestObject(state: string): ReadPageRegion['objects'][number] {
@@ -597,6 +607,25 @@ describe('action-postcondition-verifier — R4A region-state postconditions', ()
 
     expect(result.verdict).toBe('passed');
     expect(result.reason).toBe('result_collection_appeared_after_action');
+  });
+
+  it('passes search_results_updated when a visible result_list with targetable cards appears', () => {
+    const result = verifyRegionStatePostcondition({
+      kind: 'search_results_updated',
+      actionId: 'act-search',
+      beforeRegions: [region('form', 'search_ready_candidate')],
+      afterRegions: visibleResultListCollection(
+        resultRow('1', 'result_card'),
+        resultRow('2', 'result_card'),
+      ),
+      now: () => PRODUCED_AT,
+    });
+
+    expect(result.verdict).toBe('passed');
+    expect(result.reason).toBe('result_collection_appeared_after_action');
+    expect(result.afterSummary).toContain(
+      'result_list:content_available_candidate:target_ref:actions:2',
+    );
   });
 
   it('passes search_results_updated when the existing collection changes target refs', () => {
