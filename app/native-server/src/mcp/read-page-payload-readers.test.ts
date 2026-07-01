@@ -1,6 +1,10 @@
 import type { BrowserPageThingProjection } from '@tabrix/shared';
 
-import { readPayloadSelectedDataSource, readSelectedDataSource } from './read-page-payload-readers';
+import {
+  readPagePostconditionRegions,
+  readPayloadSelectedDataSource,
+  readSelectedDataSource,
+} from './read-page-payload-readers';
 
 function projection(chosenDataSource: BrowserPageThingProjection['chosenDataSource']) {
   return {
@@ -48,5 +52,41 @@ describe('read-page payload readers', () => {
         projection('markdown'),
       ),
     ).toBe('markdown');
+  });
+
+  it('projects visible search filter state into postcondition regions', () => {
+    const regions = readPagePostconditionRegions(
+      {
+        searchSurface: {
+          filterState: {
+            appliedLabels: ['图文', '最新', '一周内'],
+            contentType: { selected: '图文', selectedCandidateId: 'ca_filter_content_type' },
+            sort: { selected: '最新', selectedCandidateId: 'ca_filter_sort_latest' },
+            timeRange: { selected: '一周内', selectedCandidateId: 'ca_filter_time_week' },
+          },
+        },
+      },
+      [],
+    );
+
+    expect(regions).toEqual([
+      expect.objectContaining({
+        regionId: 'search_filter_state_postcondition',
+        regionType: 'filter_panel',
+        state: 'active_filter_state_observed',
+        candidateActionIds: [
+          'ca_filter_content_type',
+          'ca_filter_sort_latest',
+          'ca_filter_time_week',
+        ],
+        objects: expect.arrayContaining([
+          expect.objectContaining({
+            label: 'sort:最新',
+            objectType: 'control',
+            state: 'selected',
+          }),
+        ]),
+      }),
+    ]);
   });
 });

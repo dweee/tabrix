@@ -17,6 +17,7 @@ export type NonInterferenceVerdictReason =
   | 'user_confirmed'
   | 'auth_resume_completion_action'
   | 'form_input_continuation_action'
+  | 'search_filter_refinement_action'
   | 'corrective_search_continuation_action'
   | 'auth_collaboration_continuation_action'
   | 'collaboration_requested'
@@ -190,6 +191,26 @@ export function evaluateNonInterferencePreflight(input: {
         input,
         mode,
         'corrective_search_continuation_action',
+        targetTabId,
+        targetTabIds,
+        runOwnedTabIds,
+      );
+    }
+    if (
+      shouldAllowSearchFilterRefinementAction({
+        toolName: input.toolName,
+        args: input.args,
+        taskContext: input.taskContext,
+        targetTabId,
+        readiness: taskResumeReadiness,
+        userConfirmed: hasUserConfirmation(input.args),
+        strictMode: mode === 'strict',
+      })
+    ) {
+      return allow(
+        input,
+        mode,
+        'search_filter_refinement_action',
         targetTabId,
         targetTabIds,
         runOwnedTabIds,
@@ -587,6 +608,31 @@ function shouldAllowCorrectiveSearchContinuationAction(input: {
     (input.readiness.tabId === null || input.readiness.tabId === targetTabId);
   if (!targetTabMatches) return false;
   if (targetTabId !== null && input.taskContext?.isRunOwnedTab(targetTabId) === true) return true;
+  if (input.strictMode) return false;
+  return input.userConfirmed || hasExplicitLegacyTabTarget(input.args);
+}
+
+function shouldAllowSearchFilterRefinementAction(input: {
+  toolName: string;
+  args: unknown;
+  taskContext: TaskSessionContext | null;
+  targetTabId: number | null;
+  readiness: TaskResumeReadinessSnapshot;
+  userConfirmed: boolean;
+  strictMode: boolean;
+}): boolean {
+  if (input.toolName !== TOOL_NAMES.BROWSER.CLICK) return false;
+  if (input.readiness.status !== 'postcondition_unknown_not_proven') return false;
+  if (input.readiness.nextStep !== 'verify_postcondition') return false;
+  if (!input.readiness.evidenceKinds.includes('region_state_postcondition')) return false;
+  if (!readCandidateActionIntent(input.args)?.startsWith('search.apply_filter.')) return false;
+
+  const targetTabId = input.targetTabId;
+  const targetTabMatches =
+    targetTabId !== null &&
+    (input.readiness.tabId === null || input.readiness.tabId === targetTabId);
+  if (!targetTabMatches) return false;
+  if (input.taskContext?.isRunOwnedTab(targetTabId) === true) return true;
   if (input.strictMode) return false;
   return input.userConfirmed || hasExplicitLegacyTabTarget(input.args);
 }

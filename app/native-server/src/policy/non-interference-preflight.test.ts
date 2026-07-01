@@ -449,6 +449,103 @@ describe('evaluateNonInterferencePreflight', () => {
     expect(verdict.message).toBe(verdict.audit.taskResumeReadiness?.handoffSummary.message);
   });
 
+  it('allows run-owned search filter refinement when fresh readback still needs delta verification', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.noteRunOwnedTab(42);
+    ctx.noteRegionStatePostconditionsForCloseout({
+      tabId: 42,
+      regionStatePostconditions: [
+        {
+          actionKind: 'click',
+          result: {
+            actionId: 'ca_filter_sort_latest',
+            kind: 'search_results_updated',
+            verdict: 'unknown',
+            reason: 'result_collection_not_comparable',
+            beforeSummary: ['search_filters:open:sort=most_saved'],
+            afterSummary: ['search_filters:open:sort=latest'],
+            producedAtMs: 1234,
+            claimBoundary: 'deterministic region-state fixture only',
+          },
+        },
+      ],
+    });
+
+    expect(ctx.buildTaskResumeReadiness({ tabId: 42 })).toMatchObject({
+      status: 'postcondition_unknown_not_proven',
+      canResumeOriginalTask: false,
+      nextStep: 'verify_postcondition',
+    });
+
+    const verdict = evaluateNonInterferencePreflight({
+      toolName: TOOL_NAMES.BROWSER.CLICK,
+      args: {
+        tabId: 42,
+        ref: 'ref_filter_sort_latest',
+        candidateAction: {
+          id: 'ca_filter_sort_latest',
+          actionType: 'click',
+          targetRef: 'ref_filter_sort_latest',
+          intent: 'search.apply_filter.sort',
+        },
+      },
+      taskContext: ctx,
+    });
+
+    expect(verdict.allowed).toBe(true);
+    expect(verdict.audit).toMatchObject({
+      verdict: 'allow',
+      reason: 'search_filter_refinement_action',
+      targetTabId: 42,
+      runOwnedTabIds: [42],
+    });
+  });
+
+  it('allows default-mode explicit-tab search filter refinement after fresh readback still needs delta verification', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.noteRegionStatePostconditionsForCloseout({
+      tabId: 42,
+      regionStatePostconditions: [
+        {
+          actionKind: 'click',
+          result: {
+            actionId: 'ca_filter_sort_latest',
+            kind: 'search_results_updated',
+            verdict: 'unknown',
+            reason: 'dom_region_rows_readback_required_for_resume',
+            beforeSummary: ['filter_panel:active_filter_state_observed:before'],
+            afterSummary: ['filter_panel:active_filter_state_observed:after'],
+            producedAtMs: 1234,
+            claimBoundary: 'deterministic region-state fixture only',
+          },
+        },
+      ],
+    });
+
+    const verdict = evaluateNonInterferencePreflight({
+      toolName: TOOL_NAMES.BROWSER.CLICK,
+      args: {
+        tabId: 42,
+        ref: 'ref_filter_sort_latest',
+        candidateAction: {
+          id: 'ca_filter_sort_latest',
+          actionType: 'click',
+          targetRef: 'ref_filter_sort_latest',
+          intent: 'search.apply_filter.sort',
+        },
+      },
+      taskContext: ctx,
+    });
+
+    expect(verdict.allowed).toBe(true);
+    expect(verdict.audit).toMatchObject({
+      verdict: 'allow',
+      reason: 'search_filter_refinement_action',
+      targetTabId: 42,
+      runOwnedTabIds: [],
+    });
+  });
+
   it('allows same-tab form continuation after entering a query without claiming business success', () => {
     const ctx = new TaskSessionContext({ readBudget: 6 });
     ctx.noteRunOwnedTab(42);

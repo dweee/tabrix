@@ -177,6 +177,7 @@ export interface RegionStatePostconditionInput {
   actionId: string;
   beforeRegions: readonly ReadPageRegion[];
   afterRegions: readonly ReadPageRegion[];
+  candidateActionIntent?: ReadPageCandidateActionIntent | string | null;
   targetRefs?: readonly string[] | null;
   now?: () => number;
 }
@@ -275,6 +276,7 @@ export function verifyRegionStatePostcondition(
     input.kind,
     input.beforeRegions,
     input.afterRegions,
+    input.candidateActionIntent,
     input.targetRefs,
   );
 
@@ -317,6 +319,7 @@ function verdictForRegionState(
   kind: RegionStatePostconditionKind,
   beforeRegions: readonly ReadPageRegion[],
   afterRegions: readonly ReadPageRegion[],
+  candidateActionIntent?: ReadPageCandidateActionIntent | string | null,
   targetRefs?: readonly string[] | null,
 ): {
   verdict: PostconditionVerdict;
@@ -333,7 +336,7 @@ function verdictForRegionState(
     case 'menu_closed':
       return verdictForMenuClosed(beforeRegions, afterRegions);
     case 'search_results_updated':
-      return verdictForSearchResultsUpdated(beforeRegions, afterRegions);
+      return verdictForSearchResultsUpdated(beforeRegions, afterRegions, candidateActionIntent);
     case 'detail_opened':
       return verdictForDetailOpened(beforeRegions, afterRegions, targetRefs);
     case 'login_completed':
@@ -389,7 +392,21 @@ function verdictForMenuClosed(
 function verdictForSearchResultsUpdated(
   beforeRegions: readonly ReadPageRegion[],
   afterRegions: readonly ReadPageRegion[],
+  candidateActionIntent?: ReadPageCandidateActionIntent | string | null,
 ): { verdict: PostconditionVerdict; reason: string } {
+  if (isSearchApplyFilterIntent(candidateActionIntent)) {
+    const beforeFilterSignature = filterStateSignature(beforeRegions);
+    const afterFilterSignature = filterStateSignature(afterRegions);
+    if (afterFilterSignature && beforeFilterSignature !== afterFilterSignature) {
+      return {
+        verdict: 'passed',
+        reason: beforeFilterSignature
+          ? 'active_filter_state_changed_after_action'
+          : 'active_filter_state_appeared_after_action',
+      };
+    }
+  }
+
   const beforeCollections = contentCollectionRegions(beforeRegions);
   const afterCollections = contentCollectionRegions(afterRegions);
   if (afterCollections.length === 0) {
@@ -413,6 +430,12 @@ function verdictForSearchResultsUpdated(
   }
 
   return { verdict: 'failed', reason: 'result_collection_unchanged_after_action' };
+}
+
+function isSearchApplyFilterIntent(
+  intent: ReadPageCandidateActionIntent | string | null | undefined,
+): boolean {
+  return typeof intent === 'string' && intent.startsWith('search.apply_filter.');
 }
 
 function verdictForDetailOpened(
@@ -964,6 +987,36 @@ function collectionSignature(regions: readonly ReadPageRegion[]): string {
     })
     .sort()
     .join('|');
+}
+
+function filterStateSignature(regions: readonly ReadPageRegion[]): string | null {
+  const filterRegions = regions.filter(
+    (region) =>
+      region.regionType === 'filter_panel' &&
+      (region.state === 'active_filter_state_observed' ||
+        region.state === 'open_candidate' ||
+        region.state === 'expanded_candidate'),
+  );
+  if (filterRegions.length === 0) return null;
+  const signature = filterRegions
+    .flatMap((region) => [
+      `${region.regionId}:${region.state}`,
+      ...region.candidateActionIds.map((id) => `action:${id}`),
+      ...region.objects.map((object) => {
+        const objectState = (object as { state?: unknown }).state;
+        return [
+          object.objectId,
+          object.label,
+          object.objectType ?? '',
+          typeof objectState === 'string' ? objectState : '',
+          object.targetRef ?? '',
+        ].join(':');
+      }),
+    ])
+    .filter(Boolean)
+    .sort()
+    .join('|');
+  return signature.length > 0 ? signature : null;
 }
 
 function regionsByType(

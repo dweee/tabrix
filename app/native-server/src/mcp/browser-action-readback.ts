@@ -425,6 +425,7 @@ export function buildRegionStatePostconditionForPendingInteraction(
     actionId,
     beforeRegions: pendingInteraction.beforePageRegions,
     afterRegions,
+    candidateActionIntent: pendingInteraction.candidateActionIntent,
     targetRefs: pendingInteraction.targetRefs,
   });
 }

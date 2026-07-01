@@ -10,6 +10,7 @@ import {
   readObject,
   readPositiveInteger,
   readString,
+  readStringArray,
 } from './register-tool-value-readers';
 
 export function isBrowserPageThingProjectionLike(
@@ -100,7 +101,11 @@ export function readPagePostconditionRegions(
   regions: ReadPageRegion[],
 ): ReadPageRegion[] {
   const authFormRegion = buildAuthFormPostconditionRegion(payload.authCollaboration);
-  return authFormRegion ? [...regions, authFormRegion] : regions;
+  const searchFilterRegion = buildSearchFilterPostconditionRegion(payload.searchSurface);
+  return [authFormRegion, searchFilterRegion].reduce<ReadPageRegion[]>(
+    (next, region) => (region ? [...next, region] : next),
+    regions,
+  );
 }
 
 export function readPageRegions(value: unknown): ReadPageRegion[] {
@@ -163,6 +168,83 @@ function buildAuthFormPostconditionRegion(value: unknown): ReadPageRegion | null
     claimBoundary:
       'native postcondition auth-form projection is privacy-safe state evidence only; it does not include phone, OTP, password, cookie, Authorization, or QR payload',
   };
+}
+
+function buildSearchFilterPostconditionRegion(value: unknown): ReadPageRegion | null {
+  const searchSurface = readObject(value);
+  const filterState = readObject(searchSurface?.filterState);
+  if (!filterState) return null;
+
+  const objects: ReadPageRegion['objects'] = [];
+  const candidateActionIds: string[] = [];
+  const appliedLabels = readStringArray(filterState.appliedLabels)
+    .map(safeVisibleLabel)
+    .filter((label): label is string => label !== null);
+  for (const label of appliedLabels.slice(0, 12)) {
+    objects.push({
+      objectId: `search_filter_applied_${stableLabelKey(label)}`,
+      label,
+      objectType: 'status_item',
+      actionTypes: [],
+      targetability: 'not_clickable',
+      confidence: 0.78,
+      reason: 'search_surface_filter_state_postcondition_projection',
+      state: 'selected',
+    } as ReadPageRegion['objects'][number]);
+  }
+
+  for (const groupKey of ['contentType', 'sort', 'timeRange'] as const) {
+    const group = readObject(filterState[groupKey]);
+    const selected = safeVisibleLabel(readString(group?.selected));
+    if (!selected) continue;
+    const candidateActionId = readString(group?.selectedCandidateId);
+    if (candidateActionId) candidateActionIds.push(candidateActionId);
+    objects.push({
+      objectId: `search_filter_${groupKey}_${stableLabelKey(selected)}`,
+      label: `${groupKey}:${selected}`,
+      objectType: 'control',
+      actionTypes: candidateActionId ? ['click'] : [],
+      targetability: candidateActionId ? 'target_ref' : 'not_clickable',
+      confidence: 0.82,
+      reason: 'search_surface_filter_state_postcondition_projection',
+      state: 'selected',
+    } as ReadPageRegion['objects'][number]);
+  }
+
+  if (objects.length === 0) return null;
+  return {
+    regionId: 'search_filter_state_postcondition',
+    regionType: 'filter_panel',
+    state: 'active_filter_state_observed',
+    confidence: 0.78,
+    label: 'search filter state postcondition evidence',
+    objects,
+    candidateActionIds: [...new Set(candidateActionIds)].slice(0, 12),
+    targetability: candidateActionIds.length > 0 ? 'target_ref' : 'not_clickable',
+    claimBoundary:
+      'native postcondition search-filter projection is visible filter-state evidence only; it does not include cookies, Authorization, secrets, or raw network bodies',
+  };
+}
+
+function safeVisibleLabel(value: string | null): string | null {
+  if (!value) return null;
+  const normalized = value.replace(/\s+/g, ' ').trim();
+  if (!normalized) return null;
+  return normalized.slice(0, 80);
+}
+
+function stableLabelKey(value: string): string {
+  const ascii = value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 40);
+  if (ascii) return ascii;
+  let hash = 0;
+  for (const char of value) {
+    hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  }
+  return hash.toString(16);
 }
 
 export function readPageOperationMap(value: unknown): ReadPageOperationMap | null {

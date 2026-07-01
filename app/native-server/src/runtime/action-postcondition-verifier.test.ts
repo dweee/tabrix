@@ -615,6 +615,87 @@ describe('action-postcondition-verifier — R4A region-state postconditions', ()
     expect(result.reason).toBe('result_collection_changed_after_action');
   });
 
+  it('passes search filter postconditions when active filter state changes without result-list regions', () => {
+    const before = [
+      region('filter_panel', 'active_filter_state_observed', {
+        objects: [
+          {
+            objectId: 'search_filter_sort_most_saved',
+            label: 'sort:最多收藏',
+            objectType: 'control',
+            actionTypes: ['click'],
+            targetability: 'target_ref',
+            confidence: 0.82,
+            reason: 'deterministic filter state fixture',
+            state: 'selected',
+          } as ReadPageRegion['objects'][number],
+        ],
+        candidateActionIds: ['ca_filter_sort_most_saved'],
+      }),
+    ];
+    const after = [
+      region('filter_panel', 'active_filter_state_observed', {
+        objects: [
+          {
+            objectId: 'search_filter_sort_latest',
+            label: 'sort:最新',
+            objectType: 'control',
+            actionTypes: ['click'],
+            targetability: 'target_ref',
+            confidence: 0.82,
+            reason: 'deterministic filter state fixture',
+            state: 'selected',
+          } as ReadPageRegion['objects'][number],
+        ],
+        candidateActionIds: ['ca_filter_sort_latest'],
+      }),
+    ];
+
+    const result = verifyRegionStatePostcondition({
+      kind: 'search_results_updated',
+      actionId: 'act-filter',
+      candidateActionIntent: 'search.apply_filter.sort',
+      beforeRegions: before,
+      afterRegions: after,
+      now: () => PRODUCED_AT,
+    });
+
+    expect(result.verdict).toBe('passed');
+    expect(result.reason).toBe('active_filter_state_changed_after_action');
+  });
+
+  it('does not use active filter state as search-submit proof without result-list regions', () => {
+    const after = [
+      region('filter_panel', 'active_filter_state_observed', {
+        objects: [
+          {
+            objectId: 'search_filter_sort_latest',
+            label: 'sort:最新',
+            objectType: 'control',
+            actionTypes: ['click'],
+            targetability: 'target_ref',
+            confidence: 0.82,
+            reason: 'deterministic filter state fixture',
+            state: 'selected',
+          } as ReadPageRegion['objects'][number],
+        ],
+        candidateActionIds: ['ca_filter_sort_latest'],
+      }),
+    ];
+
+    const result = verifyRegionStatePostcondition({
+      kind: 'search_results_updated',
+      actionId: 'act-search',
+      candidateActionIntent: 'search.submit',
+      beforeRegions: [],
+      afterRegions: after,
+      now: () => PRODUCED_AT,
+    });
+
+    expect(result.verdict).toBe('failed');
+    expect(result.reason).toBe('result_collection_not_visible_after');
+  });
+
   it('keeps search_results_updated unknown when changed collection lacks structured result rows', () => {
     const result = verifyRegionStatePostcondition({
       kind: 'search_results_updated',
