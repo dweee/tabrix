@@ -20,6 +20,7 @@ import {
   resolveCandidateActionTarget,
 } from './candidate-action';
 import {
+  hydrateStableTargetRefRegistryFromStorage,
   lookupCandidateActionTargetLocatorEntry,
   lookupStableTargetRefEntry,
 } from './stable-target-ref-registry';
@@ -1305,6 +1306,8 @@ class ClickTool extends BaseBrowserToolExecutor {
       // `postClickState.beforeUrl` without chasing tab.url after navigation.
       const beforeUrl = typeof tab.url === 'string' ? tab.url : null;
 
+      await hydrateStableTargetRefRegistryFromStorage(tab.id);
+
       let resolvedTarget = resolveCandidateActionTarget({
         explicitRef: args.ref,
         explicitSelector: selector,
@@ -2248,6 +2251,8 @@ class FillTool extends BaseBrowserToolExecutor {
       if (!schemeGuard.allowed) {
         return createUnsupportedTabResponse('fill', tab, schemeGuard);
       }
+
+      await hydrateStableTargetRefRegistryFromStorage(tabId);
 
       const resolvedTarget = resolveCandidateActionTarget({
         explicitRef: ref,

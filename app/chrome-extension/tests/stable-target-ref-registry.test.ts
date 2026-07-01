@@ -1,8 +1,10 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReadPageCandidateAction, ReadPageInteractiveElement } from '@tabrix/shared';
 import {
+  __flushStableTargetRefRegistryPersistenceForTests,
   __resetStableTargetRefRegistryForTests,
   getStableTargetRefRegistrySnapshot,
+  hydrateStableTargetRefRegistryFromStorage,
   lookupCandidateActionTargetLocatorEntry,
   lookupStableTargetRef,
   recordCandidateActionTargetLocatorsSnapshot,
@@ -10,6 +12,28 @@ import {
   clearStableTargetRefTab,
 } from '@/entrypoints/background/tools/browser/stable-target-ref-registry';
 import { recordReadPageTargetPublication } from '@/entrypoints/background/tools/browser/read-page-object-publication';
+
+function makeStorageArea(store: Record<string, unknown>) {
+  return {
+    get: vi.fn(async (keys: string | string[]) => {
+      const result: Record<string, unknown> = {};
+      for (const key of Array.isArray(keys) ? keys : [keys]) {
+        if (Object.prototype.hasOwnProperty.call(store, key)) {
+          result[key] = store[key];
+        }
+      }
+      return result;
+    }),
+    set: vi.fn(async (items: Record<string, unknown>) => {
+      Object.assign(store, items);
+    }),
+    remove: vi.fn(async (keys: string | string[]) => {
+      for (const key of Array.isArray(keys) ? keys : [keys]) {
+        delete store[key];
+      }
+    }),
+  };
+}
 
 describe('B-011 stable-targetRef registry', () => {
   beforeEach(() => {
@@ -204,5 +228,46 @@ describe('B-011 stable-targetRef registry', () => {
     ]);
     clearStableTargetRefTab(9);
     expect(lookupCandidateActionTargetLocatorEntry(9, 'ref_fallback_1')).toBeUndefined();
+  });
+
+  it('hydrates read_page candidate action locators from chrome storage session', async () => {
+    const originalSession = (chrome.storage as any).session;
+    const store: Record<string, unknown> = {};
+    (chrome.storage as any).session = makeStorageArea(store);
+    try {
+      recordReadPageTargetPublication({
+        tabId: 9,
+        candidateActions: [
+          {
+            id: 'ca_filter_sort',
+            actionType: 'click',
+            targetRef: 'ref_filter_sort_c4ba7440',
+            label: 'Most saved',
+            intent: 'search.apply_filter.sort',
+            confidence: 0.92,
+            matchReason: 'filter option visible in current panel',
+            locatorChain: [
+              { type: 'ref', value: 'ref_filter_sort_c4ba7440' },
+              { type: 'xpath', value: '//*[@role="button" and normalize-space(.)="Most saved"]' },
+            ],
+          } satisfies ReadPageCandidateAction,
+        ],
+      });
+      await __flushStableTargetRefRegistryPersistenceForTests();
+
+      __resetStableTargetRefRegistryForTests();
+      expect(
+        lookupCandidateActionTargetLocatorEntry(9, 'ref_filter_sort_c4ba7440'),
+      ).toBeUndefined();
+
+      await hydrateStableTargetRefRegistryFromStorage(9);
+
+      expect(lookupCandidateActionTargetLocatorEntry(9, 'ref_filter_sort_c4ba7440')).toMatchObject({
+        selector: '//*[@role="button" and normalize-space(.)="Most saved"]',
+        selectorType: 'xpath',
+      });
+    } finally {
+      (chrome.storage as any).session = originalSession;
+    }
   });
 });

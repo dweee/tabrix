@@ -42,6 +42,19 @@ export interface StableTargetRefRegistrySnapshot {
   candidateLocatorCounts: Record<number, number>;
 }
 
+interface PersistedTabSnapshot {
+  stableEntries?: StableTargetRefEntry[];
+  candidateLocators?: CandidateActionTargetLocatorEntry[];
+  updatedAt: number;
+}
+
+interface PersistedRegistrySnapshot {
+  version: 1;
+  tabs: Record<string, PersistedTabSnapshot>;
+}
+
+const PERSISTED_REGISTRY_STORAGE_KEY = 'tabrix.stableTargetRefRegistry.v1';
+
 /**
  * Pure interface so the click bridge can depend on a thin contract instead
  * of importing the singleton directly. Makes unit-testing the bridge trivial.
@@ -164,6 +177,23 @@ class StableTargetRefRegistry implements StableTargetRefLookup {
     this.candidateLocatorsByTab.delete(tabId);
   }
 
+  tabSnapshot(tabId: number | undefined | null): {
+    stableEntries: StableTargetRefEntry[];
+    candidateLocators: CandidateActionTargetLocatorEntry[];
+  } {
+    if (typeof tabId !== 'number' || !Number.isFinite(tabId)) {
+      return { stableEntries: [], candidateLocators: [] };
+    }
+    return {
+      stableEntries: Array.from(this.byTab.get(tabId)?.values() ?? []).map((entry) => ({
+        ...entry,
+      })),
+      candidateLocators: Array.from(this.candidateLocatorsByTab.get(tabId)?.values() ?? []).map(
+        (entry) => ({ ...entry }),
+      ),
+    };
+  }
+
   /** For diagnostics + unit tests; not part of the production hot path. */
   snapshot(): StableTargetRefRegistrySnapshot {
     const tabIds: number[] = [];
@@ -189,12 +219,73 @@ class StableTargetRefRegistry implements StableTargetRefLookup {
 }
 
 const singleton = new StableTargetRefRegistry();
+let persistenceQueue: Promise<void> = Promise.resolve();
+
+function getRegistryStorageArea(): Pick<
+  chrome.storage.StorageArea,
+  'get' | 'set' | 'remove'
+> | null {
+  const storage = globalThis.chrome?.storage;
+  const area = storage?.session;
+  if (!area || typeof area.get !== 'function' || typeof area.set !== 'function') return null;
+  return area;
+}
+
+function asPersistedRegistrySnapshot(value: unknown): PersistedRegistrySnapshot {
+  if (!value || typeof value !== 'object') {
+    return { version: 1, tabs: {} };
+  }
+  const object = value as Partial<PersistedRegistrySnapshot>;
+  if (object.version !== 1 || !object.tabs || typeof object.tabs !== 'object') {
+    return { version: 1, tabs: {} };
+  }
+  return { version: 1, tabs: object.tabs };
+}
+
+async function readPersistedRegistrySnapshot(): Promise<PersistedRegistrySnapshot> {
+  const area = getRegistryStorageArea();
+  if (!area) return { version: 1, tabs: {} };
+  const stored = await area.get(PERSISTED_REGISTRY_STORAGE_KEY);
+  return asPersistedRegistrySnapshot(
+    stored && typeof stored === 'object'
+      ? (stored as Record<string, unknown>)[PERSISTED_REGISTRY_STORAGE_KEY]
+      : undefined,
+  );
+}
+
+async function persistTabSnapshot(tabId: number | undefined | null): Promise<void> {
+  if (typeof tabId !== 'number' || !Number.isFinite(tabId)) return;
+  const area = getRegistryStorageArea();
+  if (!area) return;
+  const persisted = await readPersistedRegistrySnapshot();
+  const tabKey = String(tabId);
+  const snapshot = singleton.tabSnapshot(tabId);
+  if (snapshot.stableEntries.length === 0 && snapshot.candidateLocators.length === 0) {
+    delete persisted.tabs[tabKey];
+  } else {
+    persisted.tabs[tabKey] = {
+      stableEntries: snapshot.stableEntries,
+      candidateLocators: snapshot.candidateLocators,
+      updatedAt: Date.now(),
+    };
+  }
+  if (Object.keys(persisted.tabs).length === 0) {
+    await area.remove(PERSISTED_REGISTRY_STORAGE_KEY);
+    return;
+  }
+  await area.set({ [PERSISTED_REGISTRY_STORAGE_KEY]: persisted });
+}
+
+function schedulePersistTabSnapshot(tabId: number | undefined | null): void {
+  persistenceQueue = persistenceQueue.then(() => persistTabSnapshot(tabId)).catch(() => undefined);
+}
 
 export function recordStableTargetRefSnapshot(
   tabId: number | undefined | null,
   entries: readonly StableTargetRefEntry[],
 ): void {
   singleton.record(tabId, entries);
+  schedulePersistTabSnapshot(tabId);
 }
 
 export function recordCandidateActionTargetLocatorsSnapshot(
@@ -202,6 +293,7 @@ export function recordCandidateActionTargetLocatorsSnapshot(
   entries: readonly CandidateActionTargetLocatorEntry[],
 ): void {
   singleton.recordCandidateLocators(tabId, entries);
+  schedulePersistTabSnapshot(tabId);
 }
 
 export function lookupStableTargetRef(
@@ -227,6 +319,7 @@ export function lookupCandidateActionTargetLocatorEntry(
 
 export function clearStableTargetRefTab(tabId: number | undefined | null): void {
   singleton.clearTab(tabId);
+  schedulePersistTabSnapshot(tabId);
 }
 
 export function getStableTargetRefRegistrySnapshot(): StableTargetRefRegistrySnapshot {
@@ -236,4 +329,24 @@ export function getStableTargetRefRegistrySnapshot(): StableTargetRefRegistrySna
 /** Test-only export. Not part of the public surface. */
 export function __resetStableTargetRefRegistryForTests(): void {
   singleton.__resetForTests();
+}
+
+export async function hydrateStableTargetRefRegistryFromStorage(
+  tabId: number | undefined | null,
+): Promise<void> {
+  if (typeof tabId !== 'number' || !Number.isFinite(tabId)) return;
+  const persisted = await readPersistedRegistrySnapshot();
+  const snapshot = persisted.tabs[String(tabId)];
+  if (!snapshot) return;
+  if (Array.isArray(snapshot.stableEntries)) {
+    singleton.record(tabId, snapshot.stableEntries);
+  }
+  if (Array.isArray(snapshot.candidateLocators)) {
+    singleton.recordCandidateLocators(tabId, snapshot.candidateLocators);
+  }
+}
+
+/** Test-only export. Waits for fire-and-forget persistence writes. */
+export async function __flushStableTargetRefRegistryPersistenceForTests(): Promise<void> {
+  await persistenceQueue;
 }
