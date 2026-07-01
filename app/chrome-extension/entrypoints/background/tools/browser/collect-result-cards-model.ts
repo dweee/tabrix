@@ -49,6 +49,10 @@ export interface CollectedResultCard {
   secondaryText?: string;
   metaText?: string;
   interactionText?: string;
+  author?: string;
+  time?: string;
+  interaction?: string;
+  likes?: string;
   imageCount: number;
   sourceScrollY: number;
   firstSeenGlobalTop: number;
@@ -83,6 +87,7 @@ export interface CollectedResultCardAiSummary {
   author?: string;
   time?: string;
   interaction?: string;
+  likes?: string;
   targetRef?: string;
   candidateActionId?: string;
   targetabilityStatus: 'stable_click_target' | 'url_fallback' | 'not_targetable';
@@ -145,13 +150,15 @@ export function summarizeCollectedResultCardsForAi(
 ): CollectedResultCardAiSummary[] {
   return cards.map((card, index) => {
     const stableTarget = stableResultCardTarget(card);
+    const semanticCard = withCollectedResultCardSemanticAliases(card);
     return {
       rank: index + 1,
-      title: card.title,
-      ...(card.url ? { url: card.url } : {}),
-      ...(card.primaryText ? { author: card.primaryText } : {}),
-      ...(card.metaText ? { time: card.metaText } : {}),
-      ...(card.interactionText ? { interaction: card.interactionText } : {}),
+      title: semanticCard.title,
+      ...(semanticCard.url ? { url: semanticCard.url } : {}),
+      ...(semanticCard.author ? { author: semanticCard.author } : {}),
+      ...(semanticCard.time ? { time: semanticCard.time } : {}),
+      ...(semanticCard.interaction ? { interaction: semanticCard.interaction } : {}),
+      ...(semanticCard.likes ? { likes: semanticCard.likes } : {}),
       ...(stableTarget
         ? {
             targetRef: stableTarget.targetRef,
@@ -164,6 +171,22 @@ export function summarizeCollectedResultCardsForAi(
       confidence: card.confidence,
     };
   });
+}
+
+export function withCollectedResultCardSemanticAliases(
+  card: CollectedResultCard,
+): CollectedResultCard {
+  const author = card.author || card.primaryText;
+  const time = card.time || card.metaText;
+  const interaction = card.interaction || card.interactionText;
+  const likes = card.likes || interaction;
+  return {
+    ...card,
+    ...(author ? { author } : {}),
+    ...(time ? { time } : {}),
+    ...(interaction ? { interaction } : {}),
+    ...(likes ? { likes } : {}),
+  };
 }
 
 function hasExecutableClickTarget(card: CollectedResultCard | undefined): boolean {

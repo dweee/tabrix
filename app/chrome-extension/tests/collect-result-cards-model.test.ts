@@ -312,6 +312,7 @@ describe('summarizeCollectedResultCardsForAi', () => {
         author: 'Author A',
         time: '1 day ago',
         interaction: '129',
+        likes: '129',
         targetRef: 'ref_result_card_1',
         candidateActionId: 'ca_click_ref_result_card_1',
         targetabilityStatus: 'stable_click_target',

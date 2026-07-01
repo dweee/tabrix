@@ -13,6 +13,7 @@ import {
   stableResultCardTarget,
   summarizeCollectedResultCardsForAi,
   summarizeCollectedResultCardTargetability,
+  withCollectedResultCardSemanticAliases,
 } from './collect-result-cards-model';
 import { cdpSessionManager } from '@/utils/cdp-session-manager';
 
@@ -2341,7 +2342,7 @@ class CollectResultCardsTool extends BaseBrowserToolExecutor {
         targetabilitySummary,
         complete,
         status: complete ? 'complete_enough' : 'partial',
-        cards,
+        cards: cards.map((card) => withCollectedResultCardSemanticAliases(card)),
         collection,
         recommendedNextAction,
         claimBoundary,
