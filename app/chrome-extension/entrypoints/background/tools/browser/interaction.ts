@@ -161,6 +161,43 @@ function firstCandidateCssLocator(
   return undefined;
 }
 
+function inferSearchFilterCandidateActionFromTargetRef(
+  targetRef: string | undefined,
+): CandidateActionInput | undefined {
+  const ref = typeof targetRef === 'string' ? targetRef.trim() : '';
+  if (!ref) return undefined;
+  if (/^ref_filter_sort_/i.test(ref)) {
+    return { targetRef: ref, intent: 'search.apply_filter.sort' };
+  }
+  if (/^ref_filter_content_type_/i.test(ref)) {
+    return { targetRef: ref, intent: 'search.apply_filter.content_type' };
+  }
+  if (/^ref_filter_time_range_/i.test(ref)) {
+    return { targetRef: ref, intent: 'search.apply_filter.time_range' };
+  }
+  return undefined;
+}
+
+function buildEffectiveCandidateAction(params: {
+  candidateAction?: CandidateActionInput;
+  explicitRef?: string;
+  finalRef?: string;
+}): CandidateActionInput | undefined {
+  const inferred = inferSearchFilterCandidateActionFromTargetRef(
+    params.candidateAction?.targetRef ?? params.explicitRef ?? params.finalRef,
+  );
+  if (!params.candidateAction) return inferred;
+  if (!inferred || typeof params.candidateAction.intent === 'string') {
+    return params.candidateAction;
+  }
+  return {
+    ...inferred,
+    ...params.candidateAction,
+    targetRef: params.candidateAction.targetRef ?? inferred.targetRef,
+    intent: inferred.intent,
+  };
+}
+
 function candidateSelectorLocators(
   candidateAction: CandidateActionInput | undefined,
 ): Array<{ selector: string; selectorType: CandidateActionSelectorType }> {
@@ -1294,10 +1331,15 @@ class ClickTool extends BaseBrowserToolExecutor {
       let finalSelector = resolvedTarget.selector;
       let finalSelectorType = resolvedTarget.selectorType || selectorType;
       const finalFrameId = typeof frameId === 'number' ? frameId : resolvedTarget.frameId;
+      const effectiveCandidateAction = buildEffectiveCandidateAction({
+        candidateAction: args.candidateAction,
+        explicitRef: args.ref,
+        finalRef,
+      });
       const buildTargetBinding = () =>
         buildActionTargetBindingEvidence({
           explicitFrameId: frameId,
-          candidateAction: args.candidateAction,
+          candidateAction: effectiveCandidateAction,
           resolvedTarget,
           finalRef,
           finalSelector,
@@ -1308,7 +1350,7 @@ class ClickTool extends BaseBrowserToolExecutor {
         observedOutcome?: ClickObservedOutcome | 'verification_required' | null,
       ) =>
         buildActionBusinessVerificationPlan({
-          candidateAction: args.candidateAction,
+          candidateAction: effectiveCandidateAction,
           dispatchSucceeded,
           actionKind: interaction === 'hover' ? 'hover' : 'click',
           observedOutcome,
@@ -1618,7 +1660,7 @@ class ClickTool extends BaseBrowserToolExecutor {
                 targetBinding: buildTargetBinding(),
                 businessVerification: buildBusinessVerification(true, 'verification_required'),
                 postActionReadback: buildPostActionReadbackEvidence({
-                  candidateAction: args.candidateAction,
+                  candidateAction: effectiveCandidateAction,
                   dispatchSucceeded: true,
                   actionKind: 'hover',
                   observedOutcome: 'verification_required',
@@ -1726,7 +1768,9 @@ class ClickTool extends BaseBrowserToolExecutor {
       // prevents a slow `_blank` click from being downgraded to
       // `no_observed_change` just because the background observer stopped first.
       const candidateIntent =
-        typeof args.candidateAction?.intent === 'string' ? args.candidateAction.intent : undefined;
+        typeof effectiveCandidateAction?.intent === 'string'
+          ? effectiveCandidateAction.intent
+          : undefined;
       const dispatchTiming = buildClickHelperDispatchTimingPolicy({
         waitForNavigation,
         timeout,
@@ -1775,7 +1819,7 @@ class ClickTool extends BaseBrowserToolExecutor {
         const reason = isResponseTimeout ? 'click_helper_response_timeout' : 'click_dispatch_error';
         const businessVerification = buildBusinessVerification(false, 'no_observed_change');
         const postActionReadback = buildPostActionReadbackEvidence({
-          candidateAction: args.candidateAction,
+          candidateAction: effectiveCandidateAction,
           dispatchSucceeded: false,
           actionKind: 'click',
           observedOutcome: 'no_observed_change',
@@ -1786,7 +1830,7 @@ class ClickTool extends BaseBrowserToolExecutor {
           actionKind: 'click',
           tabId: tab.id,
           targetBinding,
-          candidateAction: args.candidateAction,
+          candidateAction: effectiveCandidateAction,
           finalRef,
           finalSelector,
           coordinates,
@@ -1903,7 +1947,7 @@ class ClickTool extends BaseBrowserToolExecutor {
             ? structuredError.reason.trim()
             : String(result.error);
         const postActionReadback = buildPostActionReadbackEvidence({
-          candidateAction: args.candidateAction,
+          candidateAction: effectiveCandidateAction,
           dispatchSucceeded: false,
           actionKind: 'click',
           observedOutcome: 'no_observed_change',
@@ -1914,7 +1958,7 @@ class ClickTool extends BaseBrowserToolExecutor {
           actionKind: 'click',
           tabId: tab.id,
           targetBinding,
-          candidateAction: args.candidateAction,
+          candidateAction: effectiveCandidateAction,
           finalRef,
           finalSelector,
           coordinates,
@@ -1997,7 +2041,7 @@ class ClickTool extends BaseBrowserToolExecutor {
       if (merged.dispatchSucceeded) {
         recordPendingActionBinding(tab.id, {
           actionId: clickActionId,
-          targetRef: finalRef ?? args.candidateAction?.targetRef ?? null,
+          targetRef: finalRef ?? effectiveCandidateAction?.targetRef ?? null,
         });
       }
       const businessVerification = buildBusinessVerification(
@@ -2005,7 +2049,7 @@ class ClickTool extends BaseBrowserToolExecutor {
         merged.observedOutcome,
       );
       const postActionReadback = buildPostActionReadbackEvidence({
-        candidateAction: args.candidateAction,
+        candidateAction: effectiveCandidateAction,
         dispatchSucceeded: merged.dispatchSucceeded,
         actionKind: 'click',
         observedOutcome: merged.observedOutcome,
@@ -2018,7 +2062,7 @@ class ClickTool extends BaseBrowserToolExecutor {
         actionKind: 'click',
         tabId: tab.id,
         targetBinding,
-        candidateAction: args.candidateAction,
+        candidateAction: effectiveCandidateAction,
         finalRef,
         finalSelector,
         coordinates,
@@ -2031,7 +2075,7 @@ class ClickTool extends BaseBrowserToolExecutor {
         actionId: clickActionId,
         actionKind: 'click',
         tabId: tab.id,
-        targetRef: finalRef ?? args.candidateAction?.targetRef ?? null,
+        targetRef: finalRef ?? effectiveCandidateAction?.targetRef ?? null,
         observedOutcome: merged.observedOutcome,
         clickDiff,
         verification: merged.verification,

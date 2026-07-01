@@ -1809,6 +1809,62 @@ describe('candidateAction bridge', () => {
     );
   });
 
+  it('infers search filter business verification from a bare filter targetRef', async () => {
+    recordCandidateActionTargetLocatorsSnapshot(4214, [
+      {
+        targetRef: 'ref_filter_sort_a1b2c3d4',
+        selector: '.filters [data-sort="collections"]',
+      },
+    ]);
+    vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
+      id: 4214,
+      title: 'Search',
+      url: 'https://example.com/search?q=neutral',
+    });
+    vi.spyOn(clickTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    const sendSpy = vi.spyOn(clickTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      dispatchSucceeded: true,
+      signals: { domChanged: true },
+    });
+
+    const result = await clickTool.execute({
+      ref: 'ref_filter_sort_a1b2c3d4',
+      allowDownloadClick: true,
+    });
+
+    expect(result.isError).toBe(false);
+    const payload = JSON.parse(String((result.content?.[0] as any)?.text || '{}'));
+    expect(payload.businessVerification).toMatchObject({
+      status: 'fresh_read_required',
+      candidateActionIntent: 'search.apply_filter.sort',
+      expectedEvidence: 'search_results_or_url_query_changed',
+      requiredNextAction: 'chrome_read_page_force_refresh_same_tab',
+      businessSuccessProven: false,
+    });
+    expect(payload.postActionReadback).toMatchObject({
+      candidateActionIntent: 'search.apply_filter.sort',
+      expectedEvidence: 'search_results_or_url_query_changed',
+      freshReadRequired: true,
+    });
+    expect(payload.actionEvidenceResult.targetBinding).toMatchObject({
+      requestedTargetRef: 'ref_filter_sort_a1b2c3d4',
+      resolvedTargetRef: 'ref_filter_sort_a1b2c3d4',
+    });
+    expect(payload.targetBinding).toMatchObject({
+      resolutionSource: 'candidate_snapshot_locator_css',
+      dispatchTarget: 'selector',
+    });
+    const clickMessage = sendSpy.mock.calls.find(
+      ([, message]) => (message as any)?.action === TOOL_MESSAGE_TYPES.CLICK_ELEMENT,
+    )?.[1] as any;
+    expect(clickMessage).toMatchObject({
+      selector: '.filters [data-sort="collections"]',
+      intent: 'search.apply_filter.sort',
+    });
+    expect(clickMessage.ref).toBeUndefined();
+  });
+
   it('uses a safe css locator for synthetic text-menu refs when available', async () => {
     vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
       id: 4208,
