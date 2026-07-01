@@ -257,6 +257,28 @@ describe('V25-04 click-resolution L0 contract', () => {
     expect(resolved.selectorType).toBe('xpath');
   });
 
+  it('resolves a copied visible search-input targetRef through its candidate css locator', () => {
+    const resolved = resolveCandidateActionTarget({
+      explicitRef: 'ref_search_input_5c8bafff',
+      candidateAction: {
+        targetRef: 'ref_search_input_5c8bafff',
+        locatorChain: [
+          { type: 'ref', value: 'ref_search_input_5c8bafff' },
+          { type: 'aria', value: 'Search' },
+          { type: 'css', value: 'textarea[aria-label="Search"]' },
+        ],
+      },
+      tabId: FIXTURE_TAB.id,
+      lookupCandidateActionTargetLocator: () => undefined,
+    });
+
+    expect(resolved).toMatchObject({
+      selector: 'textarea[aria-label="Search"]',
+      selectorType: 'css',
+      source: 'candidate_locator_css',
+    });
+  });
+
   it('resolves a bare synthetic filter ref from the latest snapshot xpath locator', () => {
     recordCandidateActionTargetLocatorsSnapshot(FIXTURE_TAB.id, [
       {

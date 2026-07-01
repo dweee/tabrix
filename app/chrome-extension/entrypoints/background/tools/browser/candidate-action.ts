@@ -119,6 +119,10 @@ function isSyntheticSearchToolbarRef(value: string): boolean {
   return value.startsWith('ref_text_search_toolbar_');
 }
 
+function isSyntheticSearchInputRef(value: string): boolean {
+  return value.startsWith('ref_search_input_');
+}
+
 function isSyntheticFilterPanelRef(value: string): boolean {
   return value.startsWith('ref_text_filter_panel_');
 }
@@ -139,6 +143,7 @@ function isLocatorBackedSyntheticRef(value: string): boolean {
   return (
     isSyntheticTextMenuRef(value) ||
     isSyntheticSearchToolbarRef(value) ||
+    isSyntheticSearchInputRef(value) ||
     isSyntheticFilterPanelRef(value) ||
     isSyntheticFilterControlRef(value) ||
     isSyntheticDynamicSurfaceRef(value) ||
@@ -335,6 +340,7 @@ export function resolveCandidateActionTarget(
 
     if (
       isSyntheticSearchToolbarRef(candidateTargetRef) ||
+      isSyntheticSearchInputRef(candidateTargetRef) ||
       isSyntheticFilterPanelRef(candidateTargetRef) ||
       isSyntheticFilterControlRef(candidateTargetRef) ||
       isSyntheticDynamicSurfaceRef(candidateTargetRef)
@@ -382,6 +388,7 @@ export function resolveCandidateActionTarget(
   if (
     locatorRef &&
     (isSyntheticSearchToolbarRef(locatorRef) ||
+      isSyntheticSearchInputRef(locatorRef) ||
       isSyntheticFilterPanelRef(locatorRef) ||
       isSyntheticFilterControlRef(locatorRef) ||
       isSyntheticDynamicSurfaceRef(locatorRef))

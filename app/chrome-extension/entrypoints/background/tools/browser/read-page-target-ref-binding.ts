@@ -21,6 +21,7 @@ export async function bindSyntheticRefsToSelectors(
     .filter(
       (entry) =>
         (entry.ref.startsWith('ref_text_search_toolbar_') ||
+          entry.ref.startsWith('ref_search_input_') ||
           entry.ref.startsWith('ref_text_filter_panel_') ||
           entry.ref.startsWith('ref_text_control_')) &&
         entry.selector,
