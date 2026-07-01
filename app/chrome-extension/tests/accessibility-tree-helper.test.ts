@@ -459,6 +459,61 @@ describe('accessibility-tree auth control map', () => {
     );
   });
 
+  it('recovers floating panel option rows when labels are nested and z-index is auto', () => {
+    document.body.innerHTML = `
+      <main>
+        <button id="open-filter">Filter</button>
+        <div id="panel" style="position: fixed;">
+          <div id="option-alpha" class="surface-row" style="cursor: pointer;">
+            <span><span>Most saved</span></span>
+          </div>
+          <div id="option-beta" class="surface-row" style="cursor: pointer;">
+            <span><span>Past week</span></span>
+          </div>
+        </div>
+      </main>
+    `;
+    Array.from(document.querySelectorAll('*')).forEach((element, index) => {
+      makeVisible(element, { left: 20, top: 20 + index * 34, width: 140, height: 26 });
+    });
+    makeVisible(document.getElementById('panel') as HTMLDivElement, {
+      left: 40,
+      top: 90,
+      width: 260,
+      height: 180,
+    });
+
+    const result = (
+      window as Window & {
+        __generateAccessibilityTree: (
+          filter: string,
+          options: { maxDepth: number },
+        ) => { pageContent: string; refMap: Array<Record<string, unknown>> };
+      }
+    ).__generateAccessibilityTree('interactive', { maxDepth: 8 });
+
+    expect(result.pageContent).toMatch(
+      /- button "Most saved" \[ref=ref_dynamic_surface_\d+\].*matchSource="dynamic_surface_visible_text".*actionability="actionable"/,
+    );
+    expect(result.pageContent).toMatch(
+      /- button "Past week" \[ref=ref_dynamic_surface_\d+\].*matchSource="dynamic_surface_visible_text".*actionability="actionable"/,
+    );
+    expect(result.refMap).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          selector: '#option-alpha',
+          matchSource: 'dynamic_surface_visible_text',
+          actionability: 'actionable',
+        }),
+        expect.objectContaining({
+          selector: '#option-beta',
+          matchSource: 'dynamic_surface_visible_text',
+          actionability: 'actionable',
+        }),
+      ]),
+    );
+  });
+
   it('records diagnostics when dynamic surface selector probes fail', () => {
     document.body.innerHTML = `
       <main>

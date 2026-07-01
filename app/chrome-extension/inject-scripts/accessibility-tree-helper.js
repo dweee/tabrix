@@ -316,12 +316,11 @@
       const zIndex = Number.parseInt(String(cs.zIndex || ''), 10);
       const viewportArea = Math.max(1, window.innerWidth * window.innerHeight);
       const area = Math.max(1, rect.width * rect.height);
-      return (
-        (position === 'absolute' || position === 'fixed') &&
-        Number.isFinite(zIndex) &&
-        zIndex >= 10 &&
-        area <= viewportArea * 0.2
-      );
+      const isFloatingPosition =
+        position === 'absolute' || position === 'fixed' || position === 'sticky';
+      if (!isFloatingPosition || area > viewportArea * 0.2) return false;
+      if (Number.isFinite(zIndex) && zIndex >= 10) return true;
+      return hasDynamicSurfaceDescendantEvidence(el);
     } catch (error) {
       recordDiagnostic('accessibility_tree.dynamic_surface_root.geometry', error);
       return false;
@@ -375,6 +374,43 @@
     return false;
   }
 
+  function hasDynamicSurfaceDescendantEvidence(root) {
+    try {
+      const descendants = Array.from(root.querySelectorAll('*')).slice(0, 80);
+      return descendants.some((el) => {
+        if (!isVisible(el)) return false;
+        if (hasDynamicSurfaceActionEvidence(el)) return true;
+        const text = compactDynamicSurfaceText(el);
+        if (!text) return false;
+        const parent = el.parentElement;
+        return !!parent && parent !== root && hasDynamicSurfaceActionEvidence(parent);
+      });
+    } catch (error) {
+      recordDiagnostic('accessibility_tree.dynamic_surface_descendant_evidence', error);
+      return false;
+    }
+  }
+
+  function compactDynamicSurfaceText(el) {
+    const direct =
+      ownVisibleText(el) || el.getAttribute('aria-label') || el.getAttribute('title') || '';
+    if (direct) return direct.replace(/\s+/g, ' ').trim();
+    try {
+      const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
+      if (!text || text.length > 48) return '';
+      const visibleChildLabels = Array.from(el.querySelectorAll('*'))
+        .map((child) => (isVisible(child) ? ownVisibleText(child) : ''))
+        .map((value) => value.replace(/\s+/g, ' ').trim())
+        .filter(Boolean);
+      const uniqueChildLabels = Array.from(new Set(visibleChildLabels));
+      if (uniqueChildLabels.length > 2) return '';
+      return text;
+    } catch (error) {
+      recordDiagnostic('accessibility_tree.dynamic_surface_compact_text', error);
+      return '';
+    }
+  }
+
   function hasNativeInteractiveAncestorBeforeRoot(el, root) {
     let current = el;
     while (current && current !== root) {
@@ -410,7 +446,7 @@
     if (el.getAttribute('aria-hidden') === 'true') return false;
     if (hasNativeInteractiveAncestorBeforeRoot(el, root)) return false;
     if (!hasDynamicSurfaceActionEvidence(el)) return false;
-    const text = ownVisibleText(el);
+    const text = compactDynamicSurfaceText(el);
     if (!text || text.length > 48) return false;
     try {
       const rect = /** @type {HTMLElement} */ (el).getBoundingClientRect();
@@ -418,7 +454,11 @@
       const viewportArea = Math.max(1, window.innerWidth * window.innerHeight);
       if (rect.width * rect.height > viewportArea * 0.08) return false;
       const children = Array.from(el.children || []);
-      if (children.some((child) => isVisible(child) && ownVisibleText(child))) return false;
+      const childLabels = children
+        .map((child) => (isVisible(child) ? ownVisibleText(child) : ''))
+        .map((value) => value.replace(/\s+/g, ' ').trim())
+        .filter(Boolean);
+      if (childLabels.length > 1) return false;
     } catch (error) {
       recordDiagnostic('accessibility_tree.dynamic_surface_leaf.geometry', error);
       return false;
@@ -438,7 +478,7 @@
       for (const el of candidates) {
         if (added >= DYNAMIC_SURFACE_TARGET_LIMIT || refMap.length >= REF_MAP_LIMIT) return;
         const selector = generateSelector(el);
-        const text = ownVisibleText(el).replace(/\s+/g, ' ').trim();
+        const text = compactDynamicSurfaceText(el).replace(/\s+/g, ' ').trim();
         const key = `${text.toLowerCase()}|${selector}`;
         if (!text || seenTextAndSelector.has(key)) continue;
         seenTextAndSelector.add(key);
