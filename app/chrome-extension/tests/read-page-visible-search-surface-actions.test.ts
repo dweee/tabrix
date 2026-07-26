@@ -198,6 +198,60 @@ describe('visible search surface action collection', () => {
     ]);
   });
 
+  it('preserves snapshot execution and scoped floating-surface provenance', async () => {
+    const executeScript = vi.fn().mockResolvedValue([
+      {
+        result: {
+          pageInfo: { url: 'https://example.test/search?q=ai' },
+          candidateActions: [
+            {
+              id: 'ca_filter_delivery_any',
+              actionType: 'click',
+              targetRef: 'ref_floating_option_delivery_any',
+              executionTargetKind: 'snapshot_locator',
+              label: '不限',
+              intent: 'search.apply_filter.unknown',
+              matchReason: 'visible_filter_option',
+              actionability: true,
+              locatorChain: [
+                { type: 'ref', value: 'ref_floating_option_delivery_any' },
+                { type: 'css', value: '[data-panel="delivery"] [data-choice="any"]' },
+              ],
+              provenance: {
+                surfaceType: 'floating_surface',
+                panelRef: 'ref_floating_surface_filters',
+                groupId: 'delivery',
+                optionRef: 'ref_floating_option_delivery_any',
+                classificationEvidence: ['fixed_position', 'grouped_choices'],
+              },
+            },
+          ],
+        },
+      },
+    ]);
+
+    const result = await collectVisibleSearchSurfaceActions({
+      tabId: 12,
+      currentUrl: 'https://example.test/search?q=ai',
+      pageRole: 'search_results',
+      executeScript,
+    });
+
+    expect(result.actions).toEqual([
+      expect.objectContaining({
+        targetRef: 'ref_floating_option_delivery_any',
+        executionTargetKind: 'snapshot_locator',
+        provenance: {
+          surfaceType: 'floating_surface',
+          panelRef: 'ref_floating_surface_filters',
+          groupId: 'delivery',
+          optionRef: 'ref_floating_option_delivery_any',
+          classificationEvidence: ['fixed_position', 'grouped_choices'],
+        },
+      }),
+    ]);
+  });
+
   it('returns a sensing diagnostic when the scan fails', async () => {
     const result = await collectVisibleSearchSurfaceActions({
       tabId: 12,

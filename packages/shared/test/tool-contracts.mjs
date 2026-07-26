@@ -29,7 +29,11 @@ const riskTierNames = Object.keys(TOOL_RISK_TIERS);
 const prohibitedTopLevelInputSchemaKeywords = ['oneOf', 'anyOf', 'allOf', 'enum', 'not'];
 
 assert.ok(schemaNames.length > 0, 'TOOL_SCHEMAS must expose at least one tool schema');
-assert.equal(schemaNameSet.size, schemaNames.length, 'TOOL_SCHEMAS must not contain duplicate names');
+assert.equal(
+  schemaNameSet.size,
+  schemaNames.length,
+  'TOOL_SCHEMAS must not contain duplicate names',
+);
 
 for (const name of schemaNames) {
   assert.ok(allToolNames.has(name), `schema tool "${name}" must be declared in TOOL_NAMES`);
@@ -67,12 +71,34 @@ const taskSessionTools = [
 
 for (const name of taskSessionTools) {
   const properties = TOOL_SCHEMAS.find((schema) => schema.name === name)?.inputSchema?.properties;
-  assert.ok(properties?.taskSessionId, `${name} must expose taskSessionId for task-owned browser sessions`);
-  assert.ok(properties?.runtimePolicy, `${name} must expose runtimePolicy for task-owned browser sessions`);
+  assert.ok(
+    properties?.taskSessionId,
+    `${name} must expose taskSessionId for task-owned browser sessions`,
+  );
+  assert.ok(
+    properties?.runtimePolicy,
+    `${name} must expose runtimePolicy for task-owned browser sessions`,
+  );
   assert.deepEqual(
     properties.runtimePolicy.properties?.desiredExecutionMode?.enum,
     ['run_owned', 'background', 'current_tab_readonly', 'collaboration'],
     `${name} runtimePolicy.desiredExecutionMode must expose supported execution modes`,
+  );
+}
+
+const candidateActionTools = [
+  TOOL_NAMES.BROWSER.CLICK,
+  TOOL_NAMES.BROWSER.FILL,
+  TOOL_NAMES.BROWSER.COMPUTER,
+];
+
+for (const name of candidateActionTools) {
+  const candidateActionProperties = TOOL_SCHEMAS.find((schema) => schema.name === name)?.inputSchema
+    ?.properties?.candidateAction?.properties;
+  assert.deepEqual(
+    candidateActionProperties?.executionTargetKind?.enum,
+    ['page_ref', 'snapshot_locator', 'stable_ref'],
+    `${name} candidateAction.executionTargetKind must preserve executable target semantics`,
   );
 }
 

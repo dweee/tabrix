@@ -230,11 +230,43 @@ export function normalizeVisibleSearchSurfaceAction(action: any): CandidateActio
   const label = typeof action?.label === 'string' ? action.label.trim() : undefined;
   const hasCssLocator = locatorChain.some((locator) => locator.type === 'css');
   if (!hasCssLocator && !intent?.startsWith('search.')) return null;
+  const executionTargetKind =
+    typeof action?.executionTargetKind === 'string' && action.executionTargetKind.trim()
+      ? action.executionTargetKind.trim()
+      : undefined;
+  const provenanceSource =
+    action?.provenance && typeof action.provenance === 'object' ? action.provenance : null;
+  const surfaceType =
+    typeof provenanceSource?.surfaceType === 'string' ? provenanceSource.surfaceType.trim() : '';
+  const provenance = surfaceType
+    ? {
+        surfaceType,
+        ...(typeof provenanceSource?.panelRef === 'string' && provenanceSource.panelRef.trim()
+          ? { panelRef: provenanceSource.panelRef.trim() }
+          : {}),
+        ...(typeof provenanceSource?.groupId === 'string' && provenanceSource.groupId.trim()
+          ? { groupId: provenanceSource.groupId.trim() }
+          : {}),
+        ...(typeof provenanceSource?.optionRef === 'string' && provenanceSource.optionRef.trim()
+          ? { optionRef: provenanceSource.optionRef.trim() }
+          : {}),
+        ...(Array.isArray(provenanceSource?.classificationEvidence)
+          ? {
+              classificationEvidence: provenanceSource.classificationEvidence
+                .filter((item: unknown): item is string => typeof item === 'string')
+                .map((item: string) => item.trim())
+                .filter(Boolean)
+                .slice(0, 12),
+            }
+          : {}),
+      }
+    : undefined;
 
   return {
     id,
     actionType: typeof action?.actionType === 'string' ? action.actionType : 'click',
     targetRef,
+    ...(executionTargetKind ? { executionTargetKind } : {}),
     ...(label ? { label } : {}),
     confidence:
       typeof action?.confidence === 'number' && Number.isFinite(action.confidence)
@@ -251,6 +283,7 @@ export function normalizeVisibleSearchSurfaceAction(action: any): CandidateActio
       ? { actionabilityReason: action.actionabilityReason }
       : {}),
     locatorChain,
+    ...(provenance ? { provenance } : {}),
     ...(intent ? { intent } : {}),
   };
 }

@@ -137,6 +137,7 @@ interface FloatingFilterOptionObject {
   kind: AppliedSearchFilter['kind'];
   groupId: string;
   groupLabel: string;
+  groupEvidence: 'structural_heading' | 'semantic_fallback';
   optionRef: string;
   selected: boolean;
 }
@@ -728,11 +729,23 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
         return true;
       });
 
+    const isStaleAbsoluteActiveShadow = (element: Element, label: string): boolean => {
+      const style = window.getComputedStyle(element);
+      if (style.position !== 'absolute' || element.getAttribute('tabindex') !== '-1') return false;
+      return Array.from(element.parentElement?.children ?? []).some((peer) => {
+        if (!(peer instanceof Element) || peer === element || !elementIsRendered(peer))
+          return false;
+        if (window.getComputedStyle(peer).position === 'absolute') return false;
+        return labelForFilterStateCandidate(peer) === label;
+      });
+    };
+
     for (const element of renderedFilterCandidates(activeSelectors)) {
       if (!(element instanceof Element)) continue;
       if (!filterContextForElement(element)) continue;
       const label = labelForFilterStateCandidate(element);
       if (!label || label.length > 24) continue;
+      if (isStaleAbsoluteActiveShadow(element, label)) continue;
       const kind = classifyFilterLabel(label);
       if (kind === 'unknown') continue;
       addFilter(label, kind, 'dom_active_state', 0.9);
@@ -1101,24 +1114,46 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
     }
   };
 
+  const countPointerControlsForRanking = (container: Element): number => {
+    const maxVisitedNodes = 600;
+    const maxPointerControls = 24;
+    let visitedNodes = 0;
+    let pointerControls = window.getComputedStyle(container).cursor === 'pointer' ? 1 : 0;
+    const walker = document.createTreeWalker(container, NodeFilter.SHOW_ELEMENT);
+    while (visitedNodes < maxVisitedNodes && pointerControls < maxPointerControls) {
+      const node = walker.nextNode();
+      if (!node) break;
+      visitedNodes += 1;
+      if (
+        node instanceof Element &&
+        elementIsVisible(node) &&
+        window.getComputedStyle(node).cursor === 'pointer'
+      ) {
+        pointerControls += 1;
+      }
+    }
+    return pointerControls;
+  };
+
   const floatingSurfaceContainers = (): Element[] => {
+    const semanticSurfaceSelector = [
+      '[role="dialog"]',
+      '[role="menu"]',
+      '[role="listbox"]',
+      '[role="radiogroup"]',
+      '[popover]',
+      '[class*="filter" i]',
+      '[class*="sort" i]',
+      '[class*="dropdown" i]',
+      '[class*="popover" i]',
+      '[class*="popup" i]',
+      '[class*="menu" i]',
+      '[class*="panel" i]',
+      '[class*="drawer" i]',
+    ].join(',');
     const candidates = Array.from(
       document.querySelectorAll(
-        [
-          '[role="dialog"]',
-          '[role="menu"]',
-          '[role="listbox"]',
-          '[role="radiogroup"]',
-          '[popover]',
-          '[class*="filter" i]',
-          '[class*="sort" i]',
-          '[class*="dropdown" i]',
-          '[class*="popover" i]',
-          '[class*="popup" i]',
-          '[class*="menu" i]',
-          '[class*="panel" i]',
-          '[class*="drawer" i]',
-        ].join(','),
+        [semanticSurfaceSelector, 'body > div', 'body > section', 'body > aside'].join(','),
       ),
     )
       .filter((element): element is Element => element instanceof Element)
@@ -1126,18 +1161,55 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
         if (!elementIsVisible(element)) return false;
         const rect = element.getBoundingClientRect();
         if (rect.width < 120 || rect.height < 80) return false;
-        return !(rect.width > window.innerWidth * 0.9 || rect.height > window.innerHeight * 0.95);
+        if (rect.width > window.innerWidth * 0.9 || rect.height > window.innerHeight * 0.95) {
+          return false;
+        }
+        const position = window.getComputedStyle(element).position;
+        return (
+          element.matches(semanticSurfaceSelector) ||
+          position === 'fixed' ||
+          position === 'absolute'
+        );
       });
     const candidateSet = new Set(candidates);
     return candidates
       .filter((element) => {
+        const position = window.getComputedStyle(element).position;
         let ancestor = element.parentElement;
         while (ancestor && ancestor !== document.body) {
-          if (candidateSet.has(ancestor)) return false;
+          if (candidateSet.has(ancestor)) {
+            const ancestorPosition = window.getComputedStyle(ancestor).position;
+            if (
+              ancestorPosition === 'fixed' ||
+              ancestorPosition === 'absolute' ||
+              (position !== 'fixed' && position !== 'absolute')
+            ) {
+              return false;
+            }
+          }
           ancestor = ancestor.parentElement;
         }
         return true;
       })
+      .map((element, index) => {
+        const role = normalize(element.getAttribute('role')).toLowerCase();
+        const position = window.getComputedStyle(element).position;
+        const zIndex = Number.parseInt(window.getComputedStyle(element).zIndex || '0', 10);
+        const interactiveCount = element.querySelectorAll(
+          'button, a, input, select, textarea, [role], [tabindex], [aria-haspopup]',
+        ).length;
+        const pointerControlCount = countPointerControlsForRanking(element);
+        const priority =
+          (element.matches(semanticSurfaceSelector) ? 400 : 0) +
+          (['dialog', 'menu', 'listbox', 'radiogroup'].includes(role) ? 240 : 0) +
+          (position === 'fixed' || position === 'absolute' ? 160 : 0) +
+          Math.min(120, interactiveCount * 10) +
+          Math.min(160, pointerControlCount * 8) +
+          Math.min(80, Number.isFinite(zIndex) ? Math.max(0, zIndex) / 100 : 0);
+        return { element, index, priority };
+      })
+      .sort((left, right) => right.priority - left.priority || left.index - right.index)
+      .map(({ element }) => element)
       .slice(0, 20);
   };
 
@@ -1150,6 +1222,8 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
           'h2',
           'h3',
           'h4',
+          'h5',
+          'h6',
           'button',
           'a',
           '[role="button"]',
@@ -1217,7 +1291,34 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
       });
   };
 
-  const selectedStateForOption = (element: Element): boolean => {
+  const visualSelectionScoreForOption = (element: Element): number => {
+    const colorParts = (value: string): number[] => {
+      const match = value.match(/rgba?\(([^)]+)\)/i);
+      if (!match) return [];
+      return match[1]
+        .split(',')
+        .slice(0, 4)
+        .map((part) => Number.parseFloat(part.trim()));
+    };
+    const hasChromaticColor = (value: string): boolean => {
+      const parts = colorParts(value);
+      if (parts.length < 3) return false;
+      const alpha = parts.length >= 4 ? parts[3] : 1;
+      if (alpha <= 0.05) return false;
+      const [red, green, blue] = parts;
+      return Math.max(red, green, blue) - Math.min(red, green, blue) > 18;
+    };
+    const style = window.getComputedStyle(element);
+    const fontWeight = Number.parseInt(style.fontWeight || '400', 10);
+    return (
+      (fontWeight >= 600 ? 1 : 0) +
+      (hasChromaticColor(style.color) ? 1 : 0) +
+      (hasChromaticColor(style.backgroundColor) ? 1 : 0) +
+      (hasChromaticColor(style.borderColor) ? 1 : 0)
+    );
+  };
+
+  const structuralSelectedStateForOption = (element: Element): boolean => {
     const ariaCurrent = normalize(element.getAttribute('aria-current')).toLowerCase();
     return (
       element.getAttribute('aria-selected') === 'true' ||
@@ -1230,11 +1331,65 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
     );
   };
 
+  const overlapRatio = (left: DOMRect, right: DOMRect): number => {
+    const overlapWidth = Math.max(
+      0,
+      Math.min(left.right, right.right) - Math.max(left.left, right.left),
+    );
+    const overlapHeight = Math.max(
+      0,
+      Math.min(left.bottom, right.bottom) - Math.max(left.top, right.top),
+    );
+    const smallestArea = Math.min(left.width * left.height, right.width * right.height);
+    return smallestArea > 0 ? (overlapWidth * overlapHeight) / smallestArea : 0;
+  };
+
+  const logicalControlRepresentativeScore = (element: Element, label: string): number => {
+    const rect = element.getBoundingClientRect();
+    const hitScore = centerHitScore(element);
+    const overlappingPeers = Array.from(element.parentElement?.children ?? []).filter((peer) => {
+      if (!(peer instanceof Element) || peer === element || !elementIsVisible(peer)) return false;
+      const peerLabel = normalize(ownVisibleText(peer) || peer.textContent || '');
+      return peerLabel === label && overlapRatio(rect, peer.getBoundingClientRect()) >= 0.8;
+    });
+    if (overlappingPeers.length === 0) return hitScore;
+
+    const bestPeerHitScore = Math.max(...overlappingPeers.map(centerHitScore));
+    if (hitScore < bestPeerHitScore) return hitScore - 2000;
+    const style = window.getComputedStyle(element);
+    return (
+      hitScore +
+      (style.position === 'absolute' ? 0 : 40) +
+      (element.getAttribute('tabindex') === '-1' ? 0 : 20)
+    );
+  };
+
   const filterGroupLabelForKind = (kind: AppliedSearchFilter['kind']): string | null => {
     if (kind === 'content_type') return 'content_type';
     if (kind === 'sort') return 'sort';
     if (kind === 'time_range') return 'time_range';
     return null;
+  };
+
+  const filterKindForScopedGroup = (
+    groupLabel: string,
+    optionLabel: string,
+    fallback: AppliedSearchFilter['kind'],
+  ): AppliedSearchFilter['kind'] => {
+    const normalizedGroup = normalize(groupLabel).toLowerCase();
+    if (/(content|media|note).*(type|format)|内容类型|笔记类型|媒体类型/.test(normalizedGroup)) {
+      return 'content_type';
+    }
+    if (/(sort|order|rank)|排序/.test(normalizedGroup)) return 'sort';
+    if (
+      /(publish|posted|created|time|date).*(range|window)?|发布.*时间|时间范围/.test(
+        normalizedGroup,
+      )
+    ) {
+      return 'time_range';
+    }
+    if (/^(不限|全部|all|any)$/i.test(normalize(optionLabel))) return 'unknown';
+    return fallback;
   };
 
   const optionsForFloatingSurface = (
@@ -1244,6 +1399,46 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
     const records = panelLabelRecords(container);
     const options: FloatingFilterOptionObject[] = [];
     let currentGroupLabel: string | null = null;
+    let currentGroupEvidence: FloatingFilterOptionObject['groupEvidence'] = 'semantic_fallback';
+    const shortVisibleDescendantLabels = (
+      element: Element,
+      includePanelActions = false,
+    ): string[] => {
+      const labels = Array.from(
+        element.querySelectorAll('button, [role], [tabindex], li, span, div'),
+      )
+        .filter((child): child is Element => child instanceof Element)
+        .filter(elementIsVisible)
+        .map((child) =>
+          normalize(
+            ownVisibleText(child) ||
+              child.getAttribute('aria-label') ||
+              child.getAttribute('title') ||
+              child.textContent ||
+              '',
+          ),
+        )
+        .filter((label) => label.length > 0 && label.length <= 24)
+        .filter(
+          (label) =>
+            !filterTriggerPattern.test(label) &&
+            (includePanelActions || !filterPanelActionPattern.test(label)),
+        );
+      return [...new Set(labels)];
+    };
+    const isStructuralHeading = (record: FloatingPanelLabelRecord): boolean => {
+      const tag = record.element.tagName.toLowerCase();
+      if (/^h[1-6]$/.test(tag) || record.element.getAttribute('role') === 'heading') return true;
+      if (!ownVisibleText(record.element)) return false;
+      const sibling = record.element.nextElementSibling;
+      if (!sibling || !elementIsVisible(sibling)) return false;
+      return shortVisibleDescendantLabels(sibling).length >= 2;
+    };
+    const isCompositeChoiceContainer = (record: FloatingPanelLabelRecord): boolean => {
+      if (!record.control) return false;
+      const descendantLabels = shortVisibleDescendantLabels(record.element, true);
+      return descendantLabels.length >= 2 && !descendantLabels.includes(record.label);
+    };
     for (let index = 0; index < records.length; index += 1) {
       const record = records[index];
       if (!record) continue;
@@ -1255,17 +1450,20 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
             !filterTriggerPattern.test(next.label) &&
             !filterPanelActionPattern.test(next.label),
         ).length;
+      const structuralHeading = isStructuralHeading(record);
       const isHeading =
-        !record.control &&
+        (structuralHeading || !record.control) &&
         record.kind === 'unknown' &&
         !filterTriggerPattern.test(record.label) &&
         !filterPanelActionPattern.test(record.label) &&
-        nextOptionCount >= 2;
+        (structuralHeading || nextOptionCount >= 2);
       if (isHeading) {
         currentGroupLabel = record.label;
+        currentGroupEvidence = 'structural_heading';
         continue;
       }
       if (!record.control) continue;
+      if (isCompositeChoiceContainer(record)) continue;
       if (filterTriggerPattern.test(record.label) || filterPanelActionPattern.test(record.label)) {
         continue;
       }
@@ -1273,18 +1471,57 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
       if (!groupLabel) continue;
       const groupId = genericGroupIdForLabel(groupLabel);
       const label = canonicalFilterLabel(record.label);
+      const kind = filterKindForScopedGroup(groupLabel, label, record.kind);
       options.push({
         element: record.element,
         control: record.control,
         label,
-        kind: record.kind,
+        kind,
         groupId,
         groupLabel,
+        groupEvidence: currentGroupLabel ? currentGroupEvidence : 'semantic_fallback',
         optionRef: stablePageTargetRef('floating_option', `${panelRef}|${groupId}|${label}`),
-        selected: selectedStateForOption(record.control),
+        selected: false,
       });
     }
-    return options;
+    const representativeByLogicalOption = new Map<
+      string,
+      { option: FloatingFilterOptionObject; score: number }
+    >();
+    for (const option of options) {
+      const key = `${option.groupId}|${option.label}`;
+      const score = logicalControlRepresentativeScore(option.control, option.label);
+      const previous = representativeByLogicalOption.get(key);
+      if (!previous || score > previous.score) {
+        representativeByLogicalOption.set(key, { option, score });
+      }
+    }
+    const representatives = [...representativeByLogicalOption.values()].map(({ option }) => option);
+    const representativesByGroup = new Map<string, FloatingFilterOptionObject[]>();
+    for (const option of representatives) {
+      const group = representativesByGroup.get(option.groupId) ?? [];
+      group.push(option);
+      representativesByGroup.set(option.groupId, group);
+    }
+    for (const group of representativesByGroup.values()) {
+      const structurallySelected = group.filter((option) =>
+        structuralSelectedStateForOption(option.control),
+      );
+      if (structurallySelected.length > 0) {
+        for (const option of structurallySelected) option.selected = true;
+        continue;
+      }
+      if (group.length < 2) continue;
+      const ranked = group
+        .map((option) => ({ option, score: visualSelectionScoreForOption(option.control) }))
+        .sort((left, right) => right.score - left.score);
+      const winner = ranked[0];
+      const runnerUp = ranked[1];
+      if (winner && winner.score >= 2 && winner.score > (runnerUp?.score ?? 0)) {
+        winner.option.selected = true;
+      }
+    }
+    return representatives;
   };
 
   const collectFloatingSurfaces = (): FloatingSurfaceObject[] => {
@@ -1312,12 +1549,33 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
       const recognizedKinds = new Set(
         options.map((option) => option.kind).filter((kind) => kind !== 'unknown'),
       );
+      const structuredGroupCount = new Set(
+        options
+          .filter((option) => option.groupEvidence === 'structural_heading')
+          .map((option) => option.groupId),
+      ).size;
+      const semanticGroupCount = new Set(
+        options
+          .filter((option) =>
+            /(filter|sort|order|rank|type|format|time|date|range|scope|distance|location|source|delivery|筛选|排序|类型|时间|范围|距离|位置|来源|配送)/i.test(
+              option.groupLabel,
+            ),
+          )
+          .map((option) => option.groupId),
+      ).size;
       const classificationEvidence: string[] = [];
+      const position = window.getComputedStyle(container).position;
+      if (position === 'fixed' || position === 'absolute') {
+        classificationEvidence.push(`${position}_position`);
+      }
+      let hasFilterEvidence = false;
       if (explicitFilterContainerPattern.test(elementSemanticText(container))) {
         classificationEvidence.push('search_filter_semantics');
+        hasFilterEvidence = true;
       }
       if (filterRelatedTriggers.length > 0) {
         classificationEvidence.push('trigger_ownership', 'aria_relation');
+        hasFilterEvidence = true;
         if (
           filterRelatedTriggers.some(
             (trigger) =>
@@ -1328,11 +1586,19 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
           classificationEvidence.push('open_state_dom_evidence');
         }
       }
-      if (hasVisibleSearchSurface && options.length >= 2 && recognizedKinds.size >= 1) {
+      const scopedGroupCount = new Set(options.map((option) => option.groupId)).size;
+      if (
+        hasVisibleSearchSurface &&
+        options.length >= 4 &&
+        scopedGroupCount >= 2 &&
+        structuredGroupCount >= 2 &&
+        semanticGroupCount >= 2 &&
+        recognizedKinds.size >= 1
+      ) {
         classificationEvidence.push('search_surface_grouped_choices');
+        hasFilterEvidence = true;
       }
-      const classification =
-        classificationEvidence.length > 0 && options.length > 0 ? 'filter_panel' : 'generic';
+      const classification = hasFilterEvidence && options.length > 0 ? 'filter_panel' : 'generic';
       surfaces.push({
         classification,
         element: container,
@@ -1467,6 +1733,7 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
           (directText === option.label ? 700 : 0) +
           (accessibleText === option.label ? 300 : 0) +
           hitScore +
+          logicalControlRepresentativeScore(control, option.label) +
           Math.min(120, (rect.width * rect.height) / 100);
         addAction(action, score);
       }

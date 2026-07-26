@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { ReadPageCompactSnapshot, ReadPageLoadReadiness } from '@tabrix/shared';
 
-import { buildAndRememberReadPageObjectSensingOutput } from '../entrypoints/background/tools/browser/read-page-object-sensing-output';
+import {
+  bindSearchResultDeltaToPostActionEvidence,
+  buildAndRememberReadPageObjectSensingOutput,
+} from '../entrypoints/background/tools/browser/read-page-object-sensing-output';
 import {
   recordPendingActionBinding,
   resetObjectLifecycleCacheForTests,
@@ -143,6 +146,52 @@ describe('read_page object sensing output', () => {
       tabId: 44,
       targetObjectId: 'card_1',
       observedChangeKind: 'list_refreshed',
+    });
+  });
+
+  it('binds a changed result set to a scoped floating filter action', () => {
+    const resultDelta = {
+      status: 'changed',
+      attribution: 'observation_only',
+      actionId: null,
+      beforeResultCount: 3,
+      afterResultCount: 4,
+      retainedCount: 2,
+      addedCount: 2,
+      removedCount: 1,
+      reorderedCount: 1,
+      overlapRate: 0.5,
+      changedEnough: true,
+      sampleAddedResultKeys: ['added-1'],
+      sampleRemovedResultKeys: ['removed-1'],
+      observation: {
+        documentEpoch: 'epoch:1',
+        sequence: 2,
+        previousSequence: 1,
+        observedAt: '2026-07-26T00:00:02.000Z',
+        previousObservedAt: '2026-07-26T00:00:00.000Z',
+        snapshotTtlMs: 30_000,
+      },
+      reason: 'result list changed',
+      claimBoundary: 'observation only',
+    } as any;
+
+    expect(
+      bindSearchResultDeltaToPostActionEvidence(
+        resultDelta,
+        { actionId: 'filter-action', watchId: 'watch:filter-action' } as any,
+        {
+          actionId: 'filter-action',
+          targetObjectId: 'filter-option',
+          targetRef: 'ref_floating_option_sort',
+          actionIntent: 'search.apply_filter.sort',
+          recordedAtMs: Date.parse('2026-07-26T00:00:01.000Z'),
+        },
+      ),
+    ).toMatchObject({
+      attribution: 'action_bound',
+      actionId: 'filter-action',
+      postActionWatchId: 'watch:filter-action',
     });
   });
 });

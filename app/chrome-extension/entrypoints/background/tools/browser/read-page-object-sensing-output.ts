@@ -40,6 +40,10 @@ export function bindSearchResultDeltaToPostActionEvidence(
     'filter.option_select',
     'filter.time_range_select',
   ]);
+  const isResultChangingIntent = (intent: string | null | undefined): boolean =>
+    Boolean(
+      intent && (resultChangingIntents.has(intent) || intent.startsWith('search.apply_filter.')),
+    );
   const observation = resultDelta.observation;
   const observedAtMs = observation ? Date.parse(observation.observedAt) : Number.NaN;
   const previousObservedAtMs =
@@ -61,10 +65,7 @@ export function bindSearchResultDeltaToPostActionEvidence(
     resultDelta.changedEnough === true &&
     Boolean(authoritativeActionId) &&
     authoritativeActionId === pendingActionBinding?.actionId &&
-    Boolean(
-      pendingActionBinding?.actionIntent &&
-      resultChangingIntents.has(pendingActionBinding.actionIntent),
-    ) &&
+    isResultChangingIntent(pendingActionBinding?.actionIntent) &&
     bindingMatchesObservationWindow;
   if (!bindingIsAuthoritative) {
     return {

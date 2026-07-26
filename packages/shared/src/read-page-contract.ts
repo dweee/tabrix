@@ -727,6 +727,18 @@ export interface ReadPageCandidateAction {
    * durable selector and must re-read after using it for an action.
    */
   snapshotRect?: ReadPageElementRect;
+  /**
+   * Optional privacy-safe ownership evidence for snapshot-local browser
+   * objects. Consumers must scope same-label controls by this identity instead
+   * of resolving them with page-wide text matching.
+   */
+  provenance?: {
+    surfaceType: string;
+    panelRef?: string;
+    groupId?: string;
+    optionRef?: string;
+    classificationEvidence?: string[];
+  };
   locatorChain: ReadPageCandidateActionLocator[];
   /**
    * Optional AI-facing action intent. It lets the executor choose the right

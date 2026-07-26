@@ -257,6 +257,29 @@ describe('V25-04 click-resolution L0 contract', () => {
     expect(resolved.selectorType).toBe('xpath');
   });
 
+  it('executes a locator-backed floating option through its fresh xpath', () => {
+    const resolved = resolveCandidateActionTarget({
+      candidateAction: {
+        targetRef: 'ref_floating_option_4434fd2f',
+        executionTargetKind: 'snapshot_locator',
+        locatorChain: [
+          { type: 'ref', value: 'ref_floating_option_4434fd2f' },
+          { type: 'xpath', value: '//*[@data-filter-option="most-saved"]' },
+          { type: 'css', value: '[data-filter-option="most-saved"]' },
+        ],
+      },
+      tabId: FIXTURE_TAB.id,
+      lookupCandidateActionTargetLocator: () => undefined,
+    });
+
+    expect(resolved).toMatchObject({
+      selector: '//*[@data-filter-option="most-saved"]',
+      selectorType: 'xpath',
+      source: 'candidate_locator_xpath',
+    });
+    expect(resolved.ref).toBeUndefined();
+  });
+
   it('resolves a copied visible search-input targetRef through its candidate css locator', () => {
     const resolved = resolveCandidateActionTarget({
       explicitRef: 'ref_search_input_5c8bafff',

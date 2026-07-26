@@ -286,9 +286,230 @@ describe('collect result cards DOM scan', () => {
     );
   });
 
+  it.each(['fixed', 'absolute'] as const)(
+    'objectizes delegated choices from a neutral %s portal without duplicating visual layers',
+    (position) => {
+      setViewport();
+      document.body.innerHTML = `
+      <input
+        type="search"
+        aria-label="Search catalog"
+        data-testid="search-input"
+        data-rect="20,20,360,40"
+      />
+      ${Array.from(
+        { length: 24 },
+        (_, index) => `
+          <div
+            data-testid="decorative-layer-${index}"
+            data-rect="${20 + index},80,140,90"
+            style="position: absolute"
+          >decorative layer ${index}</div>
+        `,
+      ).join('')}
+      <button data-testid="background-any" data-rect="20,80,96,40">不限</button>
+      <section
+        data-testid="portal-surface"
+        data-rect="820,80,420,360"
+        style="position: ${position}"
+      >
+        ${Array.from(
+          { length: 140 },
+          (_, index) => `<span aria-hidden="true" data-testid="portal-wrapper-${index}"></span>`,
+        ).join('')}
+        <div data-testid="delivery-group" data-rect="852,112,120,24" style="cursor: pointer">
+          配送范围
+        </div>
+        <div data-testid="delivery-choices" data-rect="852,144,312,40" style="cursor: pointer">
+          <div
+            class="choice active"
+            data-testid="delivery-any-shadow"
+            data-rect="852,144,96,40"
+            style="position: absolute; cursor: pointer"
+          ><span>不限</span></div>
+          <div
+            class="choice"
+            data-testid="delivery-any"
+            data-rect="852,144,96,40"
+            style="cursor: pointer"
+          ><span>不限</span></div>
+          <div
+            class="choice"
+            data-testid="delivery-local-shadow"
+            data-rect="960,144,96,40"
+            style="position: absolute; cursor: pointer"
+          ><span>同城</span></div>
+          <div
+            class="choice"
+            data-testid="delivery-local"
+            data-rect="960,144,96,40"
+            style="cursor: pointer; color: rgb(255, 36, 66); background-color: rgb(255, 240, 243); font-weight: 600"
+          ><span>同城</span></div>
+        </div>
+        <div data-testid="source-group" data-rect="852,208,120,24" style="cursor: pointer">
+          内容来源
+        </div>
+        <div data-testid="source-choices" data-rect="852,240,312,40" style="cursor: pointer">
+          <div
+            class="choice"
+            data-testid="source-any-shadow"
+            data-rect="852,240,96,40"
+            style="position: absolute; cursor: pointer"
+          ><span>不限</span></div>
+          <div
+            class="choice"
+            data-testid="source-any"
+            data-rect="852,240,96,40"
+            style="cursor: pointer"
+          ><span>不限</span></div>
+          <div
+            class="choice active"
+            data-testid="source-official-shadow"
+            data-rect="960,240,96,40"
+            style="position: absolute; cursor: pointer"
+          ><span>官方</span></div>
+          <div
+            class="choice active"
+            data-testid="source-official"
+            data-rect="960,240,96,40"
+            style="cursor: pointer"
+          ><span>官方</span></div>
+        </div>
+        <div data-testid="type-group" data-rect="852,304,120,24" style="cursor: pointer">
+          内容类型
+        </div>
+        <div data-testid="type-choices" data-rect="852,336,312,40" style="cursor: pointer">
+          <div
+            class="choice"
+            data-testid="type-any"
+            data-rect="852,336,96,40"
+            style="cursor: pointer; color: rgb(255, 36, 66); background-color: rgb(255, 240, 243); font-weight: 600"
+          ><span>不限</span></div>
+          <div
+            class="choice"
+            data-testid="type-video"
+            data-rect="960,336,96,40"
+            style="cursor: pointer"
+          ><span>视频</span></div>
+        </div>
+        <div data-testid="operations" data-rect="852,392,312,40" style="cursor: pointer">
+          <div data-testid="reset" data-rect="852,392,140,40" style="cursor: pointer">重置</div>
+          <div data-testid="collapse" data-rect="1004,392,140,40" style="cursor: pointer">收起</div>
+          <div data-testid="clear" data-rect="852,440,80,40" style="cursor: pointer">Clear</div>
+          <div data-testid="apply" data-rect="944,440,80,40" style="cursor: pointer">Apply</div>
+          <div data-testid="confirm" data-rect="1036,440,80,40" style="cursor: pointer">Confirm</div>
+        </div>
+      </section>
+    `;
+      installRects();
+
+      const scan = scanVisibleResultCardsInPage();
+      const panelActions = scan.candidateActions.filter(
+        (action) => action.matchReason === 'visible_filter_option',
+      );
+
+      expect(scan.floatingSurfaces).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            surfaceType: 'floating_surface',
+            classification: 'filter_panel',
+            panelRef: expect.stringMatching(/^ref_floating_surface_[0-9a-f]{8}$/),
+            classificationEvidence: expect.arrayContaining([`${position}_position`]),
+          }),
+        ]),
+      );
+      expect(scan.filterState.filterGroups).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            groupId: '配送范围',
+            candidates: ['不限', '同城'],
+            selected: '同城',
+          }),
+          expect.objectContaining({
+            groupId: '内容来源',
+            candidates: ['不限', '官方'],
+            selected: '官方',
+          }),
+          expect.objectContaining({
+            groupId: '内容类型',
+            candidates: ['不限', '视频'],
+            selected: '不限',
+          }),
+        ]),
+      );
+      expect(panelActions).toHaveLength(6);
+      expect(panelActions.filter((action) => action.label === '不限')).toHaveLength(3);
+      expect(new Set(panelActions.map((action) => action.targetRef)).size).toBe(6);
+      expect(
+        panelActions
+          .filter(
+            (action) =>
+              action.provenance?.groupId === '配送范围' ||
+              action.provenance?.groupId === '内容来源',
+          )
+          .every((action) => action.intent === 'search.apply_filter.unknown'),
+      ).toBe(true);
+      expect(
+        panelActions
+          .filter((action) => action.provenance?.groupId === '内容类型')
+          .every((action) => action.intent === 'search.apply_filter.content_type'),
+      ).toBe(true);
+      expect(
+        panelActions.some((action) => /重置|收起|clear|apply|confirm/i.test(action.label)),
+      ).toBe(false);
+      expect(
+        panelActions.every(
+          (action) =>
+            action.executionTargetKind === 'snapshot_locator' &&
+            action.provenance?.surfaceType === 'floating_surface',
+        ),
+      ).toBe(true);
+      expect(
+        panelActions.some((action) =>
+          action.locatorChain.some((locator) => locator.value.includes('background-any')),
+        ),
+      ).toBe(false);
+      expect(
+        panelActions.some((action) =>
+          action.locatorChain.some((locator) => locator.value.includes('-shadow')),
+        ),
+      ).toBe(false);
+    },
+  );
+
+  it('does not mark every option selected when a group shares bold brand styling', () => {
+    setViewport();
+    document.body.innerHTML = `
+      <input type="search" aria-label="Search catalog" data-testid="search-input" data-rect="20,20,360,40" />
+      <section data-testid="portal-surface" data-rect="820,80,420,320" style="position: fixed">
+        <h5 data-testid="time-heading" data-rect="852,112,120,24">时间范围</h5>
+        <div data-testid="time-choices" data-rect="852,144,312,40" style="cursor: pointer">
+          <button data-testid="time-any" data-rect="852,144,96,40" style="color: rgb(32, 96, 180); font-weight: 600">不限</button>
+          <button data-testid="time-week" data-rect="960,144,96,40" style="color: rgb(32, 96, 180); font-weight: 600">一周内</button>
+        </div>
+        <h6 data-testid="type-heading" data-rect="852,208,120,24">内容类型</h6>
+        <div data-testid="type-choices" data-rect="852,240,312,40" style="cursor: pointer">
+          <button data-testid="type-all" data-rect="852,240,96,40" style="color: rgb(32, 96, 180); font-weight: 600">全部</button>
+          <button data-testid="type-video" data-rect="960,240,96,40" style="color: rgb(32, 96, 180); font-weight: 600">视频</button>
+        </div>
+      </section>
+    `;
+    installRects();
+
+    const groups = scanVisibleResultCardsInPage().filterState.filterGroups;
+
+    expect(groups).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ groupId: '时间范围', selected: null, ambiguous: false }),
+        expect.objectContaining({ groupId: '内容类型', selected: null, ambiguous: false }),
+      ]),
+    );
+  });
+
   it('keeps unrelated help and account dialogs as generic floating surfaces', () => {
     setViewport();
     document.body.innerHTML = `
+      <input type="search" aria-label="Search catalog" data-testid="search-input" data-rect="20,20,360,40" />
       <section role="dialog" aria-label="Help center" data-testid="help-dialog" data-rect="820,80,420,260">
         <button class="active" data-testid="help-latest" data-rect="852,120,120,40">最新</button>
         <button data-testid="help-video" data-rect="984,120,120,40">视频</button>
@@ -795,6 +1016,8 @@ describe('collect result cards DOM scan', () => {
     document.body.innerHTML = `
       <aside role="dialog" data-testid="filter-panel" data-rect="840,80,460,520">
         <button data-testid="sort-default" data-rect="880,120,116,44" style="background: rgb(248, 248, 248); color: rgb(128, 128, 128); font-weight: 400;">综合</button>
+        <div class="active" tabindex="-1" data-testid="sort-latest-shadow" data-rect="880,172,116,44" style="position: absolute;">最新</div>
+        <button data-testid="sort-latest" data-rect="880,172,116,44" style="background: rgb(248, 248, 248); color: rgb(128, 128, 128); font-weight: 400;">最新</button>
         <button data-testid="sort-most-saved" data-rect="1010,120,116,44" style="background: rgb(255, 238, 242); color: rgb(255, 36, 66); font-weight: 700;">最多收藏</button>
         <button data-testid="type-video" data-rect="880,190,116,44" style="background: rgb(248, 248, 248); color: rgb(128, 128, 128); font-weight: 400;">视频</button>
         <button data-testid="type-image-text" data-rect="1010,190,116,44" style="background: rgb(255, 238, 242); color: rgb(255, 36, 66); font-weight: 700;">图文</button>
@@ -819,9 +1042,9 @@ describe('collect result cards DOM scan', () => {
     });
     expect(scan.filterState.filterGroups).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ groupId: 'content_type', source: 'visual_style_state' }),
-        expect.objectContaining({ groupId: 'sort', source: 'visual_style_state' }),
-        expect.objectContaining({ groupId: 'time_range', source: 'visual_style_state' }),
+        expect.objectContaining({ groupId: 'content_type', source: 'mixed' }),
+        expect.objectContaining({ groupId: 'sort', source: 'mixed' }),
+        expect.objectContaining({ groupId: 'time_range', source: 'mixed' }),
       ]),
     );
   });

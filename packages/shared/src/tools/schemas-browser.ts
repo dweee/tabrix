@@ -383,6 +383,12 @@ export const BROWSER_SCHEMAS: Tool[] = [
               type: 'string',
               description: 'Preferred element ref from read_page candidateActions[*].targetRef.',
             },
+            executionTargetKind: {
+              type: 'string',
+              enum: ['page_ref', 'snapshot_locator', 'stable_ref'],
+              description:
+                'Preserve read_page candidateActions[*].executionTargetKind. snapshot_locator tells Tabrix to execute through the current XPath/CSS locator chain instead of treating the synthetic targetRef as a page-local ref.',
+            },
             label: {
               type: 'string',
               description:
@@ -1201,6 +1207,12 @@ export const BROWSER_SCHEMAS: Tool[] = [
               type: 'string',
               description: 'Preferred element ref from read_page candidateActions[*].targetRef.',
             },
+            executionTargetKind: {
+              type: 'string',
+              enum: ['page_ref', 'snapshot_locator', 'stable_ref'],
+              description:
+                'Preserve read_page candidateActions[*].executionTargetKind. snapshot_locator tells Tabrix to execute through the current XPath/CSS locator chain instead of treating the synthetic targetRef as a page-local ref.',
+            },
             label: {
               type: 'string',
               description:
@@ -1315,6 +1327,12 @@ export const BROWSER_SCHEMAS: Tool[] = [
             targetRef: {
               type: 'string',
               description: 'Preferred element ref from read_page candidateActions[*].targetRef.',
+            },
+            executionTargetKind: {
+              type: 'string',
+              enum: ['page_ref', 'snapshot_locator', 'stable_ref'],
+              description:
+                'Preserve read_page candidateActions[*].executionTargetKind. snapshot_locator tells Tabrix to execute through the current XPath/CSS locator chain instead of treating the synthetic targetRef as a page-local ref.',
             },
             label: {
               type: 'string',

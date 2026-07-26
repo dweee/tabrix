@@ -383,7 +383,7 @@ describe('buildSearchSurface', () => {
         candidateActions: [],
         visibleRegionRows: visibleRows(),
       });
-      vi.advanceTimersByTime(30_001);
+      vi.advanceTimersByTime(90_001);
       const second = buildSearchSurface({
         assistantGuidance: guidance,
         tabId: 43,
@@ -397,14 +397,14 @@ describe('buildSearchSurface', () => {
       expect(first?.resultDelta?.observation).toMatchObject({
         sequence: 1,
         previousSequence: null,
-        snapshotTtlMs: 30_000,
+        snapshotTtlMs: 90_000,
       });
       expect(second?.resultDelta).toMatchObject({
         status: 'baseline',
         observation: {
           sequence: 2,
           previousSequence: null,
-          snapshotTtlMs: 30_000,
+          snapshotTtlMs: 90_000,
         },
       });
     } finally {
@@ -1955,6 +1955,170 @@ describe('buildSearchSurface', () => {
         }),
       ]),
     );
+  });
+
+  it('keeps same-label floating options scoped to independent groups and targets', () => {
+    const surface = buildSearchSurface({
+      assistantGuidance: guidance,
+      interactiveElements: [
+        interactive({
+          ref: 'ref_unscoped_any',
+          role: 'button',
+          name: '不限',
+          checked: true,
+        }),
+      ],
+      candidateActions: [
+        {
+          id: 'ca_delivery_any',
+          actionType: 'click',
+          targetRef: 'ref_floating_option_delivery_any',
+          executionTargetKind: 'snapshot_locator',
+          label: '不限',
+          confidence: 0.9,
+          matchReason: 'visible_filter_option',
+          locatorChain: [
+            { type: 'ref', value: 'ref_floating_option_delivery_any' },
+            { type: 'css', value: '[data-panel="delivery"] [data-choice="any"]' },
+          ],
+          intent: 'search.apply_filter.unknown',
+          provenance: {
+            surfaceType: 'floating_surface',
+            panelRef: 'ref_floating_surface_filters',
+            groupId: 'delivery',
+            optionRef: 'ref_floating_option_delivery_any',
+            classificationEvidence: ['fixed_position', 'grouped_choices'],
+          },
+        },
+        {
+          id: 'ca_source_any',
+          actionType: 'click',
+          targetRef: 'ref_floating_option_source_any',
+          executionTargetKind: 'snapshot_locator',
+          label: '不限',
+          confidence: 0.9,
+          matchReason: 'visible_filter_option',
+          locatorChain: [
+            { type: 'ref', value: 'ref_floating_option_source_any' },
+            { type: 'css', value: '[data-panel="source"] [data-choice="any"]' },
+          ],
+          intent: 'search.apply_filter.unknown',
+          provenance: {
+            surfaceType: 'floating_surface',
+            panelRef: 'ref_floating_surface_filters',
+            groupId: 'source',
+            optionRef: 'ref_floating_option_source_any',
+            classificationEvidence: ['fixed_position', 'grouped_choices'],
+          },
+        },
+        {
+          id: 'ca_legacy_any',
+          actionType: 'click',
+          targetRef: 'ref_text_filter_panel_any',
+          label: '不限',
+          confidence: 0.76,
+          matchReason: 'visible_text',
+          locatorChain: [
+            { type: 'ref', value: 'ref_text_filter_panel_any' },
+            { type: 'css', value: '[data-legacy-choice="any"]' },
+          ],
+          intent: 'search.apply_filter.time_range',
+        },
+      ] as ReadPageCandidateAction[],
+      visibleTextContent: '配送范围 不限 同城\n内容来源 不限 官方',
+      visibleSearchFilterState: {
+        filterGroups: [
+          { groupId: 'delivery', groupLabel: '配送范围', selected: '不限' },
+          { groupId: 'source', groupLabel: '内容来源', selected: '官方' },
+        ],
+      },
+    });
+
+    const sameLabelOptions =
+      surface?.filterPanel?.targetableOptions?.filter((option) => option.label === '不限') ?? [];
+    expect(sameLabelOptions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          targetRef: 'ref_floating_option_delivery_any',
+          candidateActionId: 'ca_delivery_any',
+          filterGroup: 'delivery',
+        }),
+        expect.objectContaining({
+          targetRef: 'ref_floating_option_source_any',
+          candidateActionId: 'ca_source_any',
+          filterGroup: 'source',
+        }),
+      ]),
+    );
+    expect(sameLabelOptions).toHaveLength(2);
+    expect(sameLabelOptions.map((option) => option.targetRef)).not.toContain(
+      'ref_text_filter_panel_any',
+    );
+    expect(
+      sameLabelOptions.find((option) => option.filterGroup === 'delivery')?.state,
+    ).toMatchObject({ selected: true, current: true });
+    expect(
+      sameLabelOptions.find((option) => option.filterGroup === 'source')?.state,
+    ).toBeUndefined();
+  });
+
+  it('keeps active state scoped to the originating floating panel when group ids repeat', () => {
+    const actionForPanel = (id: string, panelRef: string): ReadPageCandidateAction => ({
+      id,
+      actionType: 'click',
+      targetRef: `ref_floating_option_${id}`,
+      executionTargetKind: 'snapshot_locator',
+      label: '不限',
+      confidence: 0.9,
+      matchReason: 'visible_filter_option',
+      locatorChain: [
+        { type: 'ref', value: `ref_floating_option_${id}` },
+        { type: 'css', value: `[data-option="${id}"]` },
+      ],
+      intent: 'search.apply_filter.unknown',
+      provenance: {
+        surfaceType: 'floating_surface',
+        panelRef,
+        groupId: 'delivery',
+        optionRef: `ref_floating_option_${id}`,
+        classificationEvidence: ['grouped_choices'],
+      },
+    });
+    const surface = buildSearchSurface({
+      assistantGuidance: guidance,
+      interactiveElements: [],
+      candidateActions: [
+        actionForPanel('primary', 'ref_floating_surface_primary'),
+        actionForPanel('secondary', 'ref_floating_surface_secondary'),
+      ],
+      visibleTextContent: '配送范围 不限 同城',
+      visibleSearchFilterState: {
+        filterGroups: [
+          {
+            groupId: 'delivery',
+            groupLabel: '配送范围',
+            selected: '不限',
+            provenance: { panelRef: 'ref_floating_surface_primary' },
+          },
+          {
+            groupId: 'delivery',
+            groupLabel: '配送范围',
+            selected: '同城',
+            provenance: { panelRef: 'ref_floating_surface_secondary' },
+          },
+        ],
+      },
+    });
+
+    const sameLabelOptions =
+      surface?.filterPanel?.targetableOptions?.filter((option) => option.label === '不限') ?? [];
+    expect(sameLabelOptions).toHaveLength(2);
+    expect(
+      sameLabelOptions.find((option) => option.candidateActionId === 'primary')?.state,
+    ).toMatchObject({ selected: true, current: true });
+    expect(
+      sameLabelOptions.find((option) => option.candidateActionId === 'secondary')?.state,
+    ).toBeUndefined();
   });
 
   it('marks grouped filter state as ambiguous when one group has multiple selected values', () => {

@@ -115,7 +115,7 @@ const searchResultDeltaSnapshotsByContext = new Map<string, SearchResultDeltaSna
 const searchResultObservationStateByTab = new Map<number, SearchResultObservationState>();
 const SEARCH_RESULT_DELTA_MAX_CONTEXTS = 64;
 const SEARCH_RESULT_DELTA_MAX_TABS = 64;
-const SEARCH_RESULT_DELTA_SNAPSHOT_TTL_MS = 30_000;
+const SEARCH_RESULT_DELTA_SNAPSHOT_TTL_MS = 90_000;
 
 function guidanceRequestsSearch(params: {
   guidance: ReadPageAssistantGuidance | undefined;
@@ -902,10 +902,55 @@ function controlStateForElement(
   };
 }
 
-function stateForRecoveredLabel(
+function stateForRecoveredAction(
+  action: ReadPageCandidateAction,
   label: string,
   interactiveElements: readonly ReadPageInteractiveElement[],
+  visibleSearchFilterState?: unknown,
 ): SearchSurfaceControl['state'] | undefined {
+  const directRefs = new Set(
+    [action.targetRef, action.provenance?.optionRef].filter(
+      (value): value is string => typeof value === 'string' && value.length > 0,
+    ),
+  );
+  const directElement = interactiveElements.find((item) => directRefs.has(item.ref));
+  if (directElement) return controlStateForElement(directElement);
+
+  const scopedGroupId = action.provenance?.groupId;
+  if (scopedGroupId) {
+    const scopedPanelRef = action.provenance?.panelRef;
+    const rawState = readObject(visibleSearchFilterState);
+    const filterGroups = Array.isArray(rawState?.filterGroups) ? rawState.filterGroups : [];
+    const matchingGroups = filterGroups
+      .map(readObject)
+      .filter(
+        (item) =>
+          normalizedKey(item?.groupId) === normalizedKey(scopedGroupId) ||
+          normalizedKey(item?.groupLabel) === normalizedKey(scopedGroupId),
+      );
+    const groupForPanel = scopedPanelRef
+      ? matchingGroups.find(
+          (item) =>
+            normalizedKey(readString(readObject(item?.provenance)?.panelRef)) ===
+            normalizedKey(scopedPanelRef),
+        )
+      : undefined;
+    const group =
+      groupForPanel ??
+      (matchingGroups.every((item) => !readString(readObject(item?.provenance)?.panelRef))
+        ? matchingGroups[0]
+        : undefined);
+    const selected = readString(group?.selected);
+    if (selected && normalizedKey(selected) === normalizedKey(label)) {
+      return {
+        selected: true,
+        current: true,
+        reason: 'state matched by floating-surface panel and group provenance',
+      };
+    }
+    return undefined;
+  }
+
   const key = normalizedKey(label);
   const element = interactiveElements.find((item) => normalizedKey(item.name) === key);
   return element ? controlStateForElement(element) : undefined;
@@ -975,11 +1020,17 @@ function controlForRecoveredAction(params: {
   label: string;
   action: ReadPageCandidateAction;
   interactiveElements: readonly ReadPageInteractiveElement[];
+  visibleSearchFilterState?: unknown;
   reason: string;
   confidence: number;
   filterGroup?: SearchSurfaceControl['filterGroup'];
 }): SearchSurfaceControl {
-  const state = stateForRecoveredLabel(params.label, params.interactiveElements);
+  const state = stateForRecoveredAction(
+    params.action,
+    params.label,
+    params.interactiveElements,
+    params.visibleSearchFilterState,
+  );
   return {
     kind: params.kind,
     targetRef: params.action.targetRef,
@@ -1135,6 +1186,7 @@ function filterPanelFromVisibleText(
   visibleTextContent: string | null | undefined,
   candidateActions: readonly ReadPageCandidateAction[],
   interactiveElements: readonly ReadPageInteractiveElement[],
+  visibleSearchFilterState?: unknown,
 ): SearchSurfaceFilterPanel {
   const outOfBandFilterOptions = outOfBandFilterPanelOptionElements(interactiveElements);
   const optionLabels = uniqueLabels([
@@ -1146,13 +1198,62 @@ function filterPanelFromVisibleText(
   ]);
   const actionLabels = extractShortLabels(visibleTextContent, FILTER_PANEL_ACTION_PATTERN, 8);
   const targetableOptions: SearchSurfaceControl[] = [];
+  const allVisibleCandidateActions = candidateActions.filter((action) =>
+    isVisibleFilterPanelCandidateAction(action, candidateActionLabel(action)),
+  );
+  const scopedLabels = new Set(
+    allVisibleCandidateActions
+      .filter(
+        (action) =>
+          action.provenance?.surfaceType === 'floating_surface' &&
+          Boolean(action.provenance.panelRef) &&
+          Boolean(action.provenance.groupId),
+      )
+      .map((action) => normalizedKey(candidateActionLabel(action)))
+      .filter(Boolean),
+  );
+  const visibleCandidateActions = allVisibleCandidateActions.filter((action) => {
+    const labelKey = normalizedKey(candidateActionLabel(action));
+    if (!scopedLabels.has(labelKey)) return true;
+    return (
+      action.provenance?.surfaceType === 'floating_surface' &&
+      Boolean(action.provenance.panelRef) &&
+      Boolean(action.provenance.groupId)
+    );
+  });
+  for (const action of visibleCandidateActions) {
+    const label = candidateActionLabel(action);
+    if (!label || !action.locatorChain.length) continue;
+    const scopedGroup =
+      typeof action.provenance?.groupId === 'string' && action.provenance.groupId.trim()
+        ? action.provenance.groupId.trim()
+        : inferFilterGroupFromVisibleText(label, visibleTextContent);
+    pushUniqueControl(
+      targetableOptions,
+      controlForRecoveredAction({
+        kind: controlKindForFilterPanelLabel(label),
+        label,
+        action,
+        interactiveElements,
+        visibleSearchFilterState,
+        reason:
+          'filter panel option was recovered from a scoped locator-backed floating-surface action',
+        confidence: action.provenance?.panelRef ? 0.9 : 0.78,
+        ...(scopedGroup ? { filterGroup: scopedGroup } : {}),
+      }),
+    );
+  }
   for (const label of [...optionLabels, ...actionLabels]) {
     const action = actionForFilterPanelLabel(candidateActions, label, interactiveElements);
+    const scopedActionsForLabel = visibleCandidateActions.filter(
+      (candidate) => normalizedKey(candidateActionLabel(candidate)) === normalizedKey(label),
+    );
+    if (scopedActionsForLabel.some((candidate) => candidate.provenance?.groupId)) continue;
     const outOfBandElement = outOfBandFilterOptions.find(
       (element) => normalizedKey(element.name) === normalizedKey(label),
     );
     if (!action?.locatorChain?.length && !outOfBandElement) continue;
-    if (outOfBandElement) {
+    if (outOfBandElement && scopedActionsForLabel.length === 0) {
       pushUniqueControl(
         targetableOptions,
         controlForElement({
@@ -1855,6 +1956,7 @@ export function buildSearchSurface(params: {
     params.visibleTextContent,
     params.candidateActions,
     params.interactiveElements,
+    params.visibleSearchFilterState,
   );
   const filterState = mergeVisibleSearchFilterState(
     buildGroupedFilterState({ categoryTabs, controls, filterPanel }),
