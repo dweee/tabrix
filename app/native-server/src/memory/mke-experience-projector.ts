@@ -236,14 +236,24 @@ function isBusinessAchieved(trace: MemoryTrace): boolean {
   return hasVerifiedAiSuccessFeedback(trace);
 }
 
-function hasCoordinateDependency(value: unknown): boolean {
+function hasCoordinateDependency(value: unknown, path: readonly string[] = []): boolean {
   if (value === null || value === undefined) return false;
   if (typeof value === 'string') return TRANSIENT_TARGET_SIGNAL_PATTERN.test(value);
   if (typeof value === 'number' || typeof value === 'boolean') return false;
-  if (Array.isArray(value)) return value.some(hasCoordinateDependency);
+  if (Array.isArray(value)) {
+    return value.some((item, index) => hasCoordinateDependency(item, [...path, String(index)]));
+  }
   if (typeof value !== 'object') return false;
   const record = value as Record<string, unknown>;
-  const keys = Object.keys(record).map((key) => key.toLowerCase());
+  const entries = Object.entries(record).filter(([key]) => {
+    const normalizedKey = key.toLowerCase();
+    const insideCandidateAction = path.some((part) => part.toLowerCase() === 'candidateaction');
+    return !(
+      insideCandidateAction &&
+      (normalizedKey === 'snapshotrect' || normalizedKey === 'center')
+    );
+  });
+  const keys = entries.map(([key]) => key.toLowerCase());
   if (
     (keys.includes('x') && keys.includes('y')) ||
     keys.some((key) =>
@@ -254,7 +264,7 @@ function hasCoordinateDependency(value: unknown): boolean {
   ) {
     return true;
   }
-  return Object.values(record).some(hasCoordinateDependency);
+  return entries.some(([key, item]) => hasCoordinateDependency(item, [...path, key]));
 }
 
 function hasStableActionTarget(trace: MemoryTrace): boolean {
@@ -291,12 +301,7 @@ function hasReplayableQuality(trace: MemoryTrace): boolean {
   ) {
     return false;
   }
-  if (
-    hasCoordinateDependency(trace.requestParams) ||
-    hasCoordinateDependency(trace.actionTarget) ||
-    hasCoordinateDependency(trace.preObservation) ||
-    hasCoordinateDependency(trace.postObservation)
-  ) {
+  if (hasCoordinateDependency(trace.requestParams) || hasCoordinateDependency(trace.actionTarget)) {
     return false;
   }
   return hasStableActionTarget(trace);

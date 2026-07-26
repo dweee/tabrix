@@ -266,6 +266,50 @@ interface Coordinates {
   y: number;
 }
 
+interface SnapshotRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+function snapshotRectCenter(rect: unknown): Coordinates | null {
+  if (!rect || typeof rect !== 'object') return null;
+  const value = rect as Partial<SnapshotRect>;
+  const x = Number(value.x);
+  const y = Number(value.y);
+  const width = Number(value.width);
+  const height = Number(value.height);
+  if (![x, y, width, height].every(Number.isFinite)) return null;
+  if (width <= 0 || height <= 0) return null;
+  return {
+    x: Math.round(x + width / 2),
+    y: Math.round(y + height / 2),
+  };
+}
+
+function candidateAllowsSnapshotPointRebind(
+  candidateAction: CandidateActionInput | undefined,
+): boolean {
+  const visibility = candidateAction?.visibility;
+  const label = String(candidateAction?.label || '').trim();
+  const targetRef = String(candidateAction?.targetRef || '').trim();
+  const locatorChain = Array.isArray(candidateAction?.locatorChain)
+    ? candidateAction.locatorChain.filter((locator) => {
+        const type = String(locator?.type || '').trim();
+        const value = String(locator?.value || '').trim();
+        return Boolean(type && value);
+      })
+    : [];
+  if (!visibility || !label || !targetRef || locatorChain.length === 0) return false;
+  return (
+    visibility.domVisible === true &&
+    visibility.inViewport === true &&
+    visibility.centerHitTarget === true &&
+    visibility.occluded === false
+  );
+}
+
 interface ActionTargetBindingEvidence {
   resolutionSource: ResolvedCandidateActionTarget['source'];
   requestedFrameId: number | null;
@@ -1297,6 +1341,7 @@ class ClickTool extends BaseBrowserToolExecutor {
       if (!tab.id) {
         return createErrorResponse(ERROR_MESSAGES.TAB_NOT_FOUND + ': Active tab has no ID');
       }
+      const resolvedTabId = tab.id;
       const schemeGuard = inferInteractionSchemeGuard(String(tab.url || ''));
       if (!schemeGuard.allowed) {
         return createUnsupportedTabResponse(interaction, tab, schemeGuard);
@@ -1358,6 +1403,17 @@ class ClickTool extends BaseBrowserToolExecutor {
           actionKind: interaction === 'hover' ? 'hover' : 'click',
           observedOutcome,
         });
+      const candidateSnapshotPoint = snapshotRectCenter(args.candidateAction?.snapshotRect);
+      const canUseSnapshotPointForHover =
+        interaction === 'hover' &&
+        candidateSnapshotPoint != null &&
+        candidateAllowsSnapshotPointRebind(args.candidateAction);
+      const hoverRecoveredTargetRef = String(
+        args.candidateAction?.targetRef || args.ref || '',
+      ).trim();
+      const shouldDeferRecoveredHoverSelectorResolution =
+        interaction === 'hover' &&
+        /^ref_text_(menu|search_toolbar|filter_panel|control)_/.test(hoverRecoveredTargetRef);
 
       if (interaction === 'hover' && coordinates && !finalRef && !finalSelector) {
         return createErrorResponse(
@@ -1366,7 +1422,7 @@ class ClickTool extends BaseBrowserToolExecutor {
         );
       }
 
-      if (!coordinates && !finalRef && !finalSelector) {
+      if (!coordinates && !finalRef && !finalSelector && !canUseSnapshotPointForHover) {
         return createErrorResponse(
           ERROR_MESSAGES.INVALID_PARAMETERS +
             ': Provide ref or selector or coordinates (candidateAction did not resolve target)',
@@ -1374,7 +1430,11 @@ class ClickTool extends BaseBrowserToolExecutor {
       }
 
       // If selector is XPath, convert to ref first
-      if (finalSelector && finalSelectorType === 'xpath') {
+      if (
+        finalSelector &&
+        finalSelectorType === 'xpath' &&
+        !shouldDeferRecoveredHoverSelectorResolution
+      ) {
         await this.injectContentScript(
           tab.id,
           ['inject-scripts/accessibility-tree-helper.js'],
@@ -1434,7 +1494,7 @@ class ClickTool extends BaseBrowserToolExecutor {
       }
 
       if (interaction === 'hover') {
-        const candidateHoverRef = String(args.candidateAction?.targetRef || '').trim();
+        const candidateHoverRef = hoverRecoveredTargetRef;
         const shouldTryCandidateHoverRef =
           !finalRef &&
           Boolean(finalSelector) &&
@@ -1444,7 +1504,7 @@ class ClickTool extends BaseBrowserToolExecutor {
           if (!hoverText) return false;
           const locator = createChromeSelectorLocator();
           const textResolved = await locator.locate(
-            tab.id,
+            resolvedTabId,
             {
               candidates: [
                 {
@@ -1469,6 +1529,42 @@ class ClickTool extends BaseBrowserToolExecutor {
                 ? { frameId: textResolved.frameId }
                 : {}),
               source: 'candidate_locator_ref',
+            };
+            return true;
+          }
+          return false;
+        };
+        const resolveHoverTargetBySnapshotPoint = async (): Promise<boolean> => {
+          if (!candidateSnapshotPoint || !canUseSnapshotPointForHover) return false;
+          const resolved = await this.sendMessageToTab(
+            resolvedTabId,
+            {
+              action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_POINT,
+              x: candidateSnapshotPoint.x,
+              y: candidateSnapshotPoint.y,
+              rect: args.candidateAction?.snapshotRect,
+              identity: {
+                label: String(args.candidateAction?.label || '').trim(),
+                targetRef: String(args.candidateAction?.targetRef || '').trim(),
+                locatorChain: Array.isArray(args.candidateAction?.locatorChain)
+                  ? args.candidateAction.locatorChain
+                      .map((locator) => ({
+                        type: String(locator?.type || '').trim(),
+                        value: String(locator?.value || '').trim(),
+                      }))
+                      .filter((locator) => locator.type && locator.value)
+                  : [],
+              },
+            },
+            finalFrameId,
+          );
+          if (resolved && resolved.success && resolved.ref) {
+            finalRef = resolved.ref;
+            finalSelector = undefined;
+            resolvedTarget = {
+              ref: resolved.ref,
+              ...(typeof finalFrameId === 'number' ? { frameId: finalFrameId } : {}),
+              source: 'candidate_snapshot_rect',
             };
             return true;
           }
@@ -1539,7 +1635,7 @@ class ClickTool extends BaseBrowserToolExecutor {
             selectorType: CandidateActionSelectorType;
           }): Promise<boolean> => {
             const resolved = await this.sendMessageToTab(
-              tab.id,
+              resolvedTabId,
               {
                 action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
                 selector: entry.selector,
@@ -1593,6 +1689,21 @@ class ClickTool extends BaseBrowserToolExecutor {
           }
 
           if (!finalRef) {
+            try {
+              if (!(await resolveHoverTargetBySnapshotPoint())) {
+                selectorErrors.push('point:snapshot rect did not resolve a visible target');
+              }
+            } catch (pointError) {
+              selectorErrors.push(
+                `point:${pointError instanceof Error ? pointError.message : String(pointError)}`.slice(
+                  0,
+                  240,
+                ),
+              );
+            }
+          }
+
+          if (!finalRef) {
             return createStructuredClickHelperErrorResponse({
               message: `Failed to resolve hover selector chain: ${
                 selectorErrors.join('; ') || 'unknown error'
@@ -1601,6 +1712,10 @@ class ClickTool extends BaseBrowserToolExecutor {
               targetBinding: buildTargetBinding(),
             });
           }
+        }
+
+        if (!finalRef && !finalSelector) {
+          await resolveHoverTargetBySnapshotPoint();
         }
 
         if (!finalRef) {
@@ -1639,9 +1754,27 @@ class ClickTool extends BaseBrowserToolExecutor {
         }
 
         const hoverActionId = `hover-${tab.id}-${Date.now()}`;
+        const hoverPostActionReadback = buildPostActionReadbackEvidence({
+          candidateAction: effectiveCandidateAction,
+          dispatchSucceeded: true,
+          actionKind: 'hover',
+          observedOutcome: 'verification_required',
+        });
+        const hoverPostActionDelta = buildBrowserActionPostActionDelta({
+          actionId: hoverActionId,
+          actionKind: 'hover',
+          tabId: tab.id,
+          targetRef: finalRef,
+          observedOutcome: 'verification_required',
+          clickDiff: null,
+          verification: null,
+          postActionReadback: hoverPostActionReadback,
+          extraChangedSignals: ['hover_dispatched', 'floating_panel_readback_required'],
+        });
         recordPendingActionBinding(tab.id, {
           actionId: hoverActionId,
           targetRef: finalRef,
+          actionIntent: effectiveCandidateAction?.intent ?? 'hover',
         });
         markBrowserWorldTabAiOperated(tab.id, 'click_element_hover');
         return {
@@ -1662,14 +1795,25 @@ class ClickTool extends BaseBrowserToolExecutor {
                 lane: TABRIX_OWNED_LANE,
                 targetBinding: buildTargetBinding(),
                 businessVerification: buildBusinessVerification(true, 'verification_required'),
-                postActionReadback: buildPostActionReadbackEvidence({
-                  candidateAction: effectiveCandidateAction,
-                  dispatchSucceeded: true,
-                  actionKind: 'hover',
-                  observedOutcome: 'verification_required',
-                }),
+                postActionReadback: hoverPostActionReadback,
+                postActionDelta: hoverPostActionDelta,
+                floatingPanelReadback: {
+                  status: 'fresh_read_required',
+                  expectedSurface: 'floating_panel_or_menu',
+                  requiredNextAction: 'chrome_read_page_force_refresh_same_tab',
+                  expectedObjects: [
+                    'searchSurface.filterPanel',
+                    'searchSurface.filterPanel.targetableOptions',
+                    'searchSurface.filterState',
+                    'candidateActions',
+                  ],
+                  reason:
+                    'Hover dispatch can reveal transient panels that are only safe to trust after a fresh same-tab page read.',
+                  claimBoundary:
+                    'This proves only that hover was dispatched to a known target. Floating-panel content, active state, and result changes must be verified from the next read_page snapshot.',
+                },
                 message:
-                  'Hover dispatched to a known element; run chrome_read_page again to verify menu/modal/page-region changes.',
+                  'Hover dispatched to a known element; run chrome_read_page again to verify floating-panel/menu objects, targetable options, active state, and result deltas.',
                 elementInfo: hoverResult.target,
                 hoverMethod: 'ref',
               }),
@@ -2045,6 +2189,7 @@ class ClickTool extends BaseBrowserToolExecutor {
         recordPendingActionBinding(tab.id, {
           actionId: clickActionId,
           targetRef: finalRef ?? effectiveCandidateAction?.targetRef ?? null,
+          actionIntent: effectiveCandidateAction?.intent ?? 'click',
         });
       }
       const businessVerification = buildBusinessVerification(
@@ -2410,6 +2555,7 @@ class FillTool extends BaseBrowserToolExecutor {
       recordPendingActionBinding(tabId, {
         actionId,
         targetRef: actionTargetRef,
+        actionIntent: args.candidateAction?.intent ?? 'fill',
       });
       markBrowserWorldTabAiOperated(tabId, 'fill_or_select');
       const postActionReadback = buildPostActionReadbackEvidence({

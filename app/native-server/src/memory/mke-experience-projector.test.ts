@@ -944,6 +944,21 @@ describe('MkeExperienceProjector', () => {
       durationMs: 1000,
     },
     {
+      label: 'nested candidate action snapshot geometry with a nominal stable ref',
+      expectedSaved: true,
+      actionTraceId: 'trace-click-nested-candidate-geometry',
+      requestParams: {
+        tabId: 9,
+        ref: 'submit-button',
+        candidateAction: {
+          targetRef: 'tgt_submit',
+          snapshotRect: { x: 120, y: 240, width: 80, height: 24 },
+          center: { x: 160, y: 252 },
+        },
+      },
+      durationMs: 1000,
+    },
+    {
       label: 'fallback action',
       actionTraceId: 'trace-click-fallback',
       requestParams: { tabId: 9, ref: 'submit-button' },
@@ -982,7 +997,7 @@ describe('MkeExperienceProjector', () => {
       },
       durationMs: 1000,
     },
-  ])('does not mine a recipe from AI-approved but unreplayable quality path: $label', (variant) => {
+  ])('applies replayability policy to AI-approved path: $label', (variant) => {
     const opened = openMemoryDb({ dbPath: ':memory:' });
     const traces = new MemoryTraceRepository(opened.db);
     const knowledge = new KnowledgeModelRepository(opened.db);
@@ -1047,12 +1062,27 @@ describe('MkeExperienceProjector', () => {
 
       const result = projector.projectIdleBatch({ nowIso: '2026-06-06T07:30:05.000Z' });
 
-      expect(result).toMatchObject({
-        processedTraceCount: 2,
-        savedExperienceCount: 0,
-        experienceIds: [],
-      });
-      expect(experience.findByScenario(`mke:example.test:${pageModelKey}`)).toEqual([]);
+      expect(traces.get(variant.actionTraceId)?.requestParams).toEqual(variant.requestParams);
+      if (variant.expectedSaved === true) {
+        expect(result).toMatchObject({
+          processedTraceCount: 2,
+          rejectedUnreplayableQualityTraceCount: 0,
+          savedExperienceCount: 1,
+        });
+        const saved = experience.findByScenario(`mke:example.test:${pageModelKey}`);
+        expect(saved).toHaveLength(1);
+        expect(JSON.stringify(saved)).not.toMatch(
+          /snapshotRect|boundingBox|screenX|screenY|clientX|clientY|"x":|"y":/i,
+        );
+      } else {
+        expect(result).toMatchObject({
+          processedTraceCount: 2,
+          rejectedUnreplayableQualityTraceCount: 1,
+          savedExperienceCount: 0,
+          experienceIds: [],
+        });
+        expect(experience.findByScenario(`mke:example.test:${pageModelKey}`)).toEqual([]);
+      }
     } finally {
       opened.db.close();
     }
@@ -1186,7 +1216,16 @@ describe('MkeExperienceProjector', () => {
 
     const result = projector.projectIdleBatch({ nowIso: '2026-06-06T08:00:05.000Z' });
 
-    expect(result.savedExperienceCount).toBe(0);
+    expect(result).toMatchObject({
+      missingAiFeedbackTraceCount: 2,
+      savedExperienceCount: 0,
+      experienceIds: [],
+    });
+    expect(traces.get('trace-click-auto-feedback')).toMatchObject({
+      toolSuccess: true,
+      businessSuccess: 'unknown',
+      aiFeedback: null,
+    });
     expect(experience.findByScenario(`mke:example.test:${pageModelKey}`)).toEqual([]);
   });
 
@@ -1241,7 +1280,16 @@ describe('MkeExperienceProjector', () => {
 
     const result = projector.projectIdleBatch({ nowIso: '2026-06-06T08:30:05.000Z' });
 
-    expect(result.savedExperienceCount).toBe(0);
+    expect(result).toMatchObject({
+      missingAiFeedbackTraceCount: 2,
+      savedExperienceCount: 0,
+      experienceIds: [],
+    });
+    expect(traces.get('trace-click-system-only-success')).toMatchObject({
+      toolSuccess: true,
+      businessSuccess: 'achieved',
+      aiFeedback: null,
+    });
     expect(experience.findByScenario(`mke:example.test:${pageModelKey}`)).toEqual([]);
   });
 

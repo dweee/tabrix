@@ -1778,6 +1778,302 @@
           return true;
         }
       }
+      if (request && request.action === 'ensureRefForPoint') {
+        try {
+          const x = Number(request.x);
+          const y = Number(request.y);
+          const normalize = (value) =>
+            String(value || '')
+              .replace(/\s+/g, ' ')
+              .trim();
+          const identity =
+            request.identity && typeof request.identity === 'object' ? request.identity : {};
+          const label = normalize(identity.label);
+          const targetRef = normalize(identity.targetRef);
+          const locatorChain = Array.isArray(identity.locatorChain)
+            ? identity.locatorChain
+                .map((locator) => ({
+                  type: normalize(locator?.type).toLowerCase(),
+                  value: normalize(locator?.value),
+                }))
+                .filter((locator) => locator.type && locator.value)
+            : [];
+          if (!label || !targetRef || locatorChain.length === 0) {
+            sendResponse({
+              success: false,
+              error:
+                'point rebind rejected: exact label, targetRef, and locatorChain identity are required',
+            });
+            return true;
+          }
+          const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+          const addPoint = (points, point) => {
+            if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
+            const clamped = {
+              x: Math.round(clamp(point.x, 0, Math.max(0, window.innerWidth - 1))),
+              y: Math.round(clamp(point.y, 0, Math.max(0, window.innerHeight - 1))),
+            };
+            if (!points.some((existing) => existing.x === clamped.x && existing.y === clamped.y)) {
+              points.push(clamped);
+            }
+          };
+          const samplePoints = [];
+          if (Number.isFinite(x) && Number.isFinite(y)) {
+            addPoint(samplePoints, { x, y });
+          }
+          const rect = request.rect && typeof request.rect === 'object' ? request.rect : null;
+          const rx = Number(rect?.x);
+          const ry = Number(rect?.y);
+          const rw = Number(rect?.width);
+          const rh = Number(rect?.height);
+          if ([rx, ry, rw, rh].every(Number.isFinite) && rw > 0 && rh > 0) {
+            const left = clamp(rx, 0, Math.max(0, window.innerWidth - 1));
+            const right = clamp(rx + rw - 1, 0, Math.max(0, window.innerWidth - 1));
+            const top = clamp(ry, 0, Math.max(0, window.innerHeight - 1));
+            const bottom = clamp(ry + rh - 1, 0, Math.max(0, window.innerHeight - 1));
+            if (right >= left && bottom >= top) {
+              addPoint(samplePoints, { x: (left + right) / 2, y: (top + bottom) / 2 });
+              addPoint(samplePoints, {
+                x: left + Math.max(1, (right - left) * 0.25),
+                y: (top + bottom) / 2,
+              });
+              addPoint(samplePoints, {
+                x: right - Math.max(1, (right - left) * 0.25),
+                y: (top + bottom) / 2,
+              });
+              addPoint(samplePoints, {
+                x: (left + right) / 2,
+                y: top + Math.max(1, (bottom - top) * 0.25),
+              });
+              addPoint(samplePoints, {
+                x: (left + right) / 2,
+                y: bottom - Math.max(1, (bottom - top) * 0.25),
+              });
+            }
+          }
+          if (samplePoints.length === 0) {
+            sendResponse({ success: false, error: 'point x/y or rect must be finite and visible' });
+            return true;
+          }
+          const normalizedLabel = label.toLocaleLowerCase();
+          const accessibleNames = (el) =>
+            [
+              el.getAttribute?.('aria-label'),
+              el.getAttribute?.('title'),
+              el.getAttribute?.('alt'),
+              el.textContent,
+            ]
+              .map(normalize)
+              .filter(Boolean);
+          const labelMatches = (el) => {
+            const candidates = [...accessibleNames(el)].map((value) => value.toLocaleLowerCase());
+            return candidates.some((value) => value === normalizedLabel);
+          };
+          const isVisible = (el) => {
+            const rect = el.getBoundingClientRect();
+            const style = window.getComputedStyle(el);
+            return (
+              rect.width > 0 &&
+              rect.height > 0 &&
+              style.visibility !== 'hidden' &&
+              style.display !== 'none' &&
+              Number(style.opacity || '1') !== 0 &&
+              rect.right > 0 &&
+              rect.bottom > 0 &&
+              rect.left < window.innerWidth &&
+              rect.top < window.innerHeight
+            );
+          };
+          const implicitRole = (el) => {
+            const explicitRole = normalize(el.getAttribute?.('role')).toLowerCase();
+            if (explicitRole) return explicitRole;
+            const tag = String(el.tagName || '').toLowerCase();
+            if (tag === 'button' || tag === 'summary') return 'button';
+            if (tag === 'a' && el.getAttribute?.('href')) return 'link';
+            if (tag === 'select') return 'combobox';
+            if (tag === 'textarea') return 'textbox';
+            if (tag === 'input') {
+              const type = normalize(el.getAttribute?.('type') || 'text').toLowerCase();
+              if (type === 'checkbox') return 'checkbox';
+              if (type === 'radio') return 'radio';
+              if (type === 'button' || type === 'submit' || type === 'reset') return 'button';
+              return 'textbox';
+            }
+            return '';
+          };
+          const isInteractive = (el) => {
+            const tag = String(el.tagName || '').toLowerCase();
+            const role = implicitRole(el);
+            return (
+              ['button', 'a', 'input', 'textarea', 'select', 'label', 'summary'].includes(tag) ||
+              [
+                'button',
+                'link',
+                'menuitem',
+                'option',
+                'tab',
+                'checkbox',
+                'radio',
+                'switch',
+                'textbox',
+                'combobox',
+              ].includes(role) ||
+              el.getAttribute?.('tabindex') != null ||
+              typeof el.onclick === 'function'
+            );
+          };
+          const expectedRoles = new Set();
+          for (const locator of locatorChain) {
+            if (locator.type === 'role') {
+              expectedRoles.add(locator.value.toLowerCase());
+            }
+            if (locator.type === 'css') {
+              const roleMatch = locator.value.match(
+                /\[\s*role\s*=\s*["']?([a-z0-9_-]+)["']?\s*\]/i,
+              );
+              if (roleMatch?.[1]) expectedRoles.add(roleMatch[1].toLowerCase());
+            }
+          }
+          const roleMatches = (el) =>
+            expectedRoles.size === 0 || expectedRoles.has(implicitRole(el));
+          const elementsOverlap = (left, right) =>
+            left === right || left.contains(right) || right.contains(left);
+          const mappedRefMatches = (el) => {
+            const refs = [
+              targetRef,
+              ...locatorChain
+                .filter((locator) => locator.type === 'ref')
+                .map((locator) => locator.value),
+            ].filter(Boolean);
+            return refs.some((ref) => {
+              const mapped = window.__claudeElementMap?.[ref]?.deref?.();
+              return mapped instanceof Element && elementsOverlap(mapped, el);
+            });
+          };
+          const locatorMatches = (el) =>
+            locatorChain.some((locator) => {
+              try {
+                if (locator.type === 'css') {
+                  return Array.from(document.querySelectorAll(locator.value)).some((match) =>
+                    elementsOverlap(match, el),
+                  );
+                }
+                if (locator.type === 'xpath') {
+                  const result = document.evaluate(
+                    locator.value,
+                    document,
+                    null,
+                    XPathResult.ORDERED_NODE_SNAPSHOT_TYPE,
+                    null,
+                  );
+                  for (let index = 0; index < result.snapshotLength; index += 1) {
+                    const match = result.snapshotItem(index);
+                    if (match instanceof Element && elementsOverlap(match, el)) return true;
+                  }
+                }
+              } catch {
+                return false;
+              }
+              return false;
+            });
+
+          const candidates = [];
+          for (const point of samplePoints) {
+            let el = document.elementFromPoint(point.x, point.y);
+            if (!el || !(el instanceof Element)) continue;
+            let cursor = el;
+            for (let depth = 0; cursor && cursor instanceof Element && depth < 6; depth += 1) {
+              if (!candidates.includes(cursor)) candidates.push(cursor);
+              cursor = cursor.parentElement;
+            }
+          }
+          if (candidates.length === 0) {
+            sendResponse({ success: false, error: 'no element found at point' });
+            return true;
+          }
+          const matchingCandidates = candidates.filter(
+            (candidate) =>
+              isVisible(candidate) &&
+              isInteractive(candidate) &&
+              labelMatches(candidate) &&
+              roleMatches(candidate),
+          );
+          const preferred = matchingCandidates[0];
+          if (!preferred) {
+            const hasExactLabel = candidates.some(
+              (candidate) => isVisible(candidate) && labelMatches(candidate),
+            );
+            sendResponse({
+              success: false,
+              error: hasExactLabel
+                ? 'point rebind rejected: exact-label target is not interactive or role-compatible'
+                : 'point rebind rejected: current point does not match the exact candidate label',
+            });
+            return true;
+          }
+          const matchingInteractiveTargets = Array.from(document.querySelectorAll('*')).filter(
+            (candidate) =>
+              candidate instanceof Element &&
+              isVisible(candidate) &&
+              isInteractive(candidate) &&
+              labelMatches(candidate) &&
+              roleMatches(candidate),
+          );
+          const uniqueLabelMatch =
+            matchingInteractiveTargets.length === 1 &&
+            elementsOverlap(matchingInteractiveTargets[0], preferred);
+          const refCorroborated = mappedRefMatches(preferred);
+          const locatorCorroborated = locatorMatches(preferred);
+          if (!refCorroborated && !locatorCorroborated) {
+            sendResponse({
+              success: false,
+              error:
+                'point rebind rejected: exact label is not identity; no current ref or locator corroborates the target',
+            });
+            return true;
+          }
+
+          let refId = null;
+          for (const k in window.__claudeElementMap) {
+            if (
+              window.__claudeElementMap[k].deref &&
+              window.__claudeElementMap[k].deref() === preferred
+            ) {
+              refId = k;
+              break;
+            }
+          }
+          if (!refId) {
+            refId = `ref_${++window.__claudeRefCounter}`;
+            window.__claudeElementMap[refId] = new WeakRef(preferred);
+          }
+          const preferredRect = preferred.getBoundingClientRect();
+          sendResponse({
+            success: true,
+            ref: refId,
+            center: {
+              x: Math.round(preferredRect.left + preferredRect.width / 2),
+              y: Math.round(preferredRect.top + preferredRect.height / 2),
+            },
+            target: {
+              tagName: String(preferred.tagName || ''),
+              role: implicitRole(preferred) || null,
+              text: normalize(preferred.textContent).slice(0, 120),
+            },
+            identityEvidence: {
+              exactLabelMatched: true,
+              roleMatched: true,
+              refCorroborated,
+              locatorCorroborated,
+              uniqueLabelMatch,
+            },
+          });
+          return true;
+        } catch (e) {
+          sendResponse({ success: false, error: String(e && e.message ? e.message : e) });
+          return true;
+        }
+      }
       if (request && request.action === 'dispatchHoverForRef') {
         handleHoverForRef(String(request.ref || '').trim())
           .then((result) => sendResponse(result))

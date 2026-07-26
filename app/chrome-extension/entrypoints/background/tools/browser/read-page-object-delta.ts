@@ -14,6 +14,7 @@ import {
   type ReadPagePageObjectSummary,
   type ReadPagePageType,
   type ReadPageReadinessVerdict,
+  type ReadPageSearchResultDelta,
   type ReadPageTargetStateChangeSummary,
 } from '@tabrix/shared';
 import type { CandidateActionSeed } from './read-page-candidate-actions';
@@ -51,6 +52,7 @@ export interface PendingActionBinding {
   actionId: string;
   targetObjectId: string | null;
   targetRef: string | null;
+  actionIntent: string | null;
   recordedAtMs: number;
 }
 
@@ -60,7 +62,12 @@ const LAST_ACTION_MAX_TABS = 64;
 
 export function recordPendingActionBinding(
   tabId: number,
-  binding: { actionId: string; targetObjectId?: string | null; targetRef?: string | null },
+  binding: {
+    actionId: string;
+    targetObjectId?: string | null;
+    targetRef?: string | null;
+    actionIntent?: string | null;
+  },
 ): void {
   if (!Number.isFinite(tabId)) return;
   const actionId = typeof binding.actionId === 'string' ? binding.actionId.trim() : '';
@@ -70,6 +77,10 @@ export function recordPendingActionBinding(
     actionId,
     targetObjectId: binding.targetObjectId ?? null,
     targetRef: binding.targetRef ?? null,
+    actionIntent:
+      typeof binding.actionIntent === 'string' && binding.actionIntent.trim()
+        ? binding.actionIntent.trim()
+        : null,
     recordedAtMs: Date.now(),
   });
   while (lastActionByTab.size > LAST_ACTION_MAX_TABS) {
@@ -451,6 +462,7 @@ export function buildReadPagePageDeltaReport(params: {
   cdpSignals?: ReadPageObjectDeltaSignals;
   previousCdpSignals?: ReadPageObjectDeltaSignals;
   pendingActionBinding?: PendingActionBinding | null;
+  searchResultDelta?: ReadPageSearchResultDelta;
 }): ReadPagePageDeltaReport | undefined {
   if (!params.previousSnapshot) return undefined;
 
@@ -486,7 +498,6 @@ export function buildReadPagePageDeltaReport(params: {
       changedRegionSet.add(object.regionType);
     }
   }
-  const changedRegions = [...changedRegionSet];
   const changedObjectSummary = objectDelta.length;
   const countObjectsInRegions = (
     objects: readonly ReadPagePageObjectSummary[],
@@ -514,15 +525,20 @@ export function buildReadPagePageDeltaReport(params: {
   const qrCodeAppeared =
     appearedObjects.some((object) => object.regionType === 'qr_code') ||
     currentQrObjectCount > previousQrObjectCount;
-  const resultListChanged = [...appearedObjects, ...disappearedObjects].some((object) => {
-    const kind = String(object.objectType || object.kind || '').toLowerCase();
-    return (
-      object.regionType === 'result_list' ||
-      object.containerKind === 'result_list' ||
-      kind === 'result_card' ||
-      kind === 'list_item'
-    );
-  });
+  const resultListChanged =
+    (params.searchResultDelta?.status === 'changed' &&
+      params.searchResultDelta.changedEnough === true) ||
+    [...appearedObjects, ...disappearedObjects].some((object) => {
+      const kind = String(object.objectType || object.kind || '').toLowerCase();
+      return (
+        object.regionType === 'result_list' ||
+        object.containerKind === 'result_list' ||
+        kind === 'result_card' ||
+        kind === 'list_item'
+      );
+    });
+  if (resultListChanged) changedRegionSet.add('result_list');
+  const changedRegions = [...changedRegionSet];
   const sameObjectFormStateChanged = params.currentSnapshot.objects.some((currentObject) => {
     const previousObject = previousObjectById.get(currentObject.objectId);
     if (!previousObject) return false;

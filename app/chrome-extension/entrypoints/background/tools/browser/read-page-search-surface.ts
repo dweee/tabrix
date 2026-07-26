@@ -84,6 +84,38 @@ type SearchSurfaceFilterState = NonNullable<ReadPageSearchSurface['filterState']
 type SearchSurfaceFilterGroupState = SearchSurfaceFilterState['contentType'];
 type SearchSurfaceGenericFilterGroupState = SearchSurfaceFilterState['filterGroups'][number];
 type SearchSurfaceFilterCandidate = SearchSurfaceFilterGroupState['candidates'][number];
+type SearchResultDelta = NonNullable<ReadPageSearchSurface['resultDelta']>;
+
+interface SearchResultDeltaSnapshot {
+  contextKey: string;
+  tabId: number;
+  documentEpoch: string;
+  observationSequence: number;
+  resultCards: ReadPageSearchResultCard[];
+  observedAtMs: number;
+}
+
+interface SearchResultObservationState {
+  documentKey: string;
+  documentEpoch: number;
+  lastObservationSequence: number;
+  lastObservedAtMs: number;
+}
+
+interface SearchResultObservationContext {
+  accepted: boolean;
+  contextKey: string;
+  documentEpoch: string;
+  observationSequence: number;
+  observedAtMs: number;
+  rejectionReason?: string;
+}
+
+const searchResultDeltaSnapshotsByContext = new Map<string, SearchResultDeltaSnapshot>();
+const searchResultObservationStateByTab = new Map<number, SearchResultObservationState>();
+const SEARCH_RESULT_DELTA_MAX_CONTEXTS = 64;
+const SEARCH_RESULT_DELTA_MAX_TABS = 64;
+const SEARCH_RESULT_DELTA_SNAPSHOT_TTL_MS = 30_000;
 
 function guidanceRequestsSearch(params: {
   guidance: ReadPageAssistantGuidance | undefined;
@@ -111,6 +143,252 @@ function safeLabel(value: unknown): string | undefined {
 
 function normalizedKey(value: unknown): string {
   return normalizeText(value).toLowerCase();
+}
+
+function normalizeSearchResultKeyPart(value: unknown): string {
+  return normalizedKey(value).replace(/\s+/g, ' ').slice(0, 120);
+}
+
+function stableSearchResultCardKey(card: ReadPageSearchResultCard): string {
+  const stableTargetIdentity = normalizeSearchResultKeyPart(
+    card.candidateActionId || card.targetRef || card.id,
+  );
+  if (/^(https?:\/\/|\/)/i.test(stableTargetIdentity)) {
+    return `target:${stableTargetIdentity}`;
+  }
+  const title = normalizeSearchResultKeyPart(card.title);
+  const secondary = normalizeSearchResultKeyPart(card.secondaryText);
+  const primary = normalizeSearchResultKeyPart(card.primaryText);
+  const semanticKey = [title, secondary || primary].filter(Boolean).join('|');
+  if (semanticKey) return semanticKey;
+  return stableTargetIdentity;
+}
+
+function dedupeResultCardsByStableKey(
+  cards: readonly ReadPageSearchResultCard[],
+): ReadPageSearchResultCard[] {
+  const seen = new Set<string>();
+  const deduped: ReadPageSearchResultCard[] = [];
+  for (const card of cards) {
+    const key = stableSearchResultCardKey(card);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(card);
+  }
+  return deduped;
+}
+
+function sampleResultKeys(cards: readonly ReadPageSearchResultCard[], limit = 5): string[] {
+  return cards
+    .map((card) => stableSearchResultCardKey(card))
+    .filter(Boolean)
+    .slice(0, limit);
+}
+
+export function buildSearchResultDelta(params: {
+  previousResultCards?: readonly ReadPageSearchResultCard[] | null;
+  currentResultCards: readonly ReadPageSearchResultCard[];
+}): SearchResultDelta {
+  const current = dedupeResultCardsByStableKey(params.currentResultCards);
+  const previous = dedupeResultCardsByStableKey(params.previousResultCards ?? []);
+
+  if (current.length === 0) {
+    return {
+      status: 'not_available',
+      attribution: 'observation_only',
+      actionId: null,
+      beforeResultCount: previous.length,
+      afterResultCount: 0,
+      retainedCount: 0,
+      addedCount: 0,
+      removedCount: previous.length,
+      reorderedCount: 0,
+      overlapRate: null,
+      changedEnough: false,
+      sampleAddedResultKeys: [],
+      sampleRemovedResultKeys: sampleResultKeys(previous),
+      reason: 'no reliable structured result cards are available in the current read_page snapshot',
+      claimBoundary:
+        'Result delta is DOM/AX result-card evidence only; AI must still judge whether the page answers the task.',
+    };
+  }
+
+  if (previous.length === 0) {
+    return {
+      status: 'baseline',
+      attribution: 'observation_only',
+      actionId: null,
+      beforeResultCount: 0,
+      afterResultCount: current.length,
+      retainedCount: 0,
+      addedCount: current.length,
+      removedCount: 0,
+      reorderedCount: 0,
+      overlapRate: null,
+      changedEnough: false,
+      sampleAddedResultKeys: sampleResultKeys(current),
+      sampleRemovedResultKeys: [],
+      reason: 'first reliable structured result-card snapshot for this same-tab search context',
+      claimBoundary:
+        'Result delta is DOM/AX result-card evidence only; AI must still judge whether the page answers the task.',
+    };
+  }
+
+  const previousByKey = new Map<string, ReadPageSearchResultCard>();
+  previous.forEach((card) => {
+    const key = stableSearchResultCardKey(card);
+    previousByKey.set(key, card);
+  });
+
+  const previousKeys = previous.map((card) => stableSearchResultCardKey(card));
+  const previousKeySet = new Set(previousKeys);
+  const currentKeys = current.map((card) => stableSearchResultCardKey(card));
+  const currentKeySet = new Set(currentKeys);
+  const retained = current.filter((card) => previousByKey.has(stableSearchResultCardKey(card)));
+  const added = current.filter((card) => !previousByKey.has(stableSearchResultCardKey(card)));
+  const removed = previous.filter((card) => !currentKeySet.has(stableSearchResultCardKey(card)));
+  const previousRetainedKeys = previousKeys.filter((key) => currentKeySet.has(key));
+  const currentRetainedKeys = currentKeys.filter((key) => previousKeySet.has(key));
+  const reorderedCount = currentRetainedKeys.reduce(
+    (count, key, index) => count + (previousRetainedKeys[index] === key ? 0 : 1),
+    0,
+  );
+  const overlapRate = Number(
+    (retained.length / Math.max(previous.length, current.length)).toFixed(2),
+  );
+  const changedEnough = added.length > 0 || removed.length > 0 || reorderedCount > 0;
+
+  return {
+    status: changedEnough ? 'changed' : 'unchanged',
+    attribution: 'observation_only',
+    actionId: null,
+    beforeResultCount: previous.length,
+    afterResultCount: current.length,
+    retainedCount: retained.length,
+    addedCount: added.length,
+    removedCount: removed.length,
+    reorderedCount,
+    overlapRate,
+    changedEnough,
+    sampleAddedResultKeys: sampleResultKeys(added),
+    sampleRemovedResultKeys: sampleResultKeys(removed),
+    reason: changedEnough
+      ? 'structured result-card set changed between same-tab search snapshots'
+      : 'structured result-card set is unchanged between same-tab search snapshots',
+    claimBoundary:
+      'Result delta is DOM/AX result-card evidence only; AI must still judge whether the page answers the task.',
+  };
+}
+
+function normalizeSearchDeltaUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    const query =
+      parsed.searchParams.get('q') ??
+      parsed.searchParams.get('query') ??
+      parsed.searchParams.get('keyword') ??
+      parsed.searchParams.get('search') ??
+      parsed.searchParams.get('text') ??
+      '';
+    return `${parsed.origin}${parsed.pathname}?query=${normalizeSearchResultKeyPart(query)}`;
+  } catch {
+    return normalizeSearchResultKeyPart(url);
+  }
+}
+
+function searchResultDeltaContextKey(params: {
+  tabId?: number | null;
+  currentUrl?: string | null;
+}): string | null {
+  if (typeof params.tabId !== 'number' || !Number.isFinite(params.tabId)) return null;
+  const url = normalizeText(params.currentUrl);
+  if (!url) return null;
+  return `tab:${params.tabId}:search:${normalizeSearchDeltaUrl(url)}`;
+}
+
+function pruneExpiredSearchResultDeltaSnapshots(nowMs: number): void {
+  for (const [contextKey, snapshot] of searchResultDeltaSnapshotsByContext) {
+    if (nowMs - snapshot.observedAtMs > SEARCH_RESULT_DELTA_SNAPSHOT_TTL_MS) {
+      searchResultDeltaSnapshotsByContext.delete(contextKey);
+    }
+  }
+}
+
+function beginSearchResultObservation(params: {
+  tabId?: number | null;
+  currentUrl?: string | null;
+  observedAtMs: number;
+}): SearchResultObservationContext | null {
+  const contextKey = searchResultDeltaContextKey(params);
+  if (!contextKey || typeof params.tabId !== 'number') return null;
+  const documentKey = normalizeSearchDeltaUrl(normalizeText(params.currentUrl));
+  const previousState = searchResultObservationStateByTab.get(params.tabId);
+  if (previousState && params.observedAtMs < previousState.lastObservedAtMs) {
+    return {
+      accepted: false,
+      contextKey,
+      documentEpoch: `epoch:${previousState.documentEpoch}`,
+      observationSequence: previousState.lastObservationSequence,
+      observedAtMs: params.observedAtMs,
+      rejectionReason:
+        'observation started before the latest accepted same-tab read and was discarded as out of order',
+    };
+  }
+
+  const documentChanged = Boolean(previousState && previousState.documentKey !== documentKey);
+  const documentEpoch = documentChanged
+    ? previousState!.documentEpoch + 1
+    : (previousState?.documentEpoch ?? 1);
+  const observationSequence = (previousState?.lastObservationSequence ?? 0) + 1;
+  if (documentChanged) {
+    for (const [key, snapshot] of searchResultDeltaSnapshotsByContext) {
+      if (snapshot.tabId === params.tabId) searchResultDeltaSnapshotsByContext.delete(key);
+    }
+  }
+  searchResultObservationStateByTab.delete(params.tabId);
+  searchResultObservationStateByTab.set(params.tabId, {
+    documentKey,
+    documentEpoch,
+    lastObservationSequence: observationSequence,
+    lastObservedAtMs: params.observedAtMs,
+  });
+  while (searchResultObservationStateByTab.size > SEARCH_RESULT_DELTA_MAX_TABS) {
+    const firstTabId = searchResultObservationStateByTab.keys().next().value;
+    if (firstTabId === undefined) break;
+    searchResultObservationStateByTab.delete(firstTabId);
+  }
+  return {
+    accepted: true,
+    contextKey,
+    documentEpoch: `epoch:${documentEpoch}`,
+    observationSequence,
+    observedAtMs: params.observedAtMs,
+  };
+}
+
+function rememberSearchResultDeltaSnapshot(snapshot: SearchResultDeltaSnapshot): boolean {
+  const existing = searchResultDeltaSnapshotsByContext.get(snapshot.contextKey);
+  if (
+    existing &&
+    existing.documentEpoch === snapshot.documentEpoch &&
+    (snapshot.observationSequence <= existing.observationSequence ||
+      snapshot.observedAtMs < existing.observedAtMs)
+  ) {
+    return false;
+  }
+  searchResultDeltaSnapshotsByContext.delete(snapshot.contextKey);
+  searchResultDeltaSnapshotsByContext.set(snapshot.contextKey, snapshot);
+  while (searchResultDeltaSnapshotsByContext.size > SEARCH_RESULT_DELTA_MAX_CONTEXTS) {
+    const firstKey = searchResultDeltaSnapshotsByContext.keys().next().value;
+    if (firstKey === undefined) break;
+    searchResultDeltaSnapshotsByContext.delete(firstKey);
+  }
+  return true;
+}
+
+export function resetSearchResultDeltaMemoryForTests(): void {
+  searchResultDeltaSnapshotsByContext.clear();
+  searchResultObservationStateByTab.clear();
 }
 
 function filterSemanticLabel(value: unknown): string {
@@ -850,7 +1128,7 @@ function filterPanelLabelsFromCandidateActions(
     .filter((action) => isVisibleFilterPanelCandidateAction(action, candidateActionLabel(action)))
     .map((action) => candidateActionLabel(action))
     .filter((label): label is string => Boolean(label))
-    .filter((label) => isFilterPanelOptionLabel(label) || FILTER_PANEL_ACTION_PATTERN.test(label));
+    .filter((label) => label.length <= 80);
 }
 
 function filterPanelFromVisibleText(
@@ -1154,12 +1432,14 @@ function mergeVisibleSearchFilterState(
     sort.selected ? null : 'sort',
     timeRange.selected ? null : 'timeRange',
   ].filter((item): item is 'contentType' | 'sort' | 'timeRange' => Boolean(item));
-  const appliedLabels = uniqueStrings([
-    ...readStringArray(state.appliedLabels),
-    contentType.selected,
-    sort.selected,
-    timeRange.selected,
-  ]);
+  const appliedLabels = uniqueStrings(
+    [
+      ...readStringArray(state.appliedLabels),
+      contentType.selected,
+      sort.selected,
+      timeRange.selected,
+    ].filter((label): label is string => typeof label === 'string' && label.length > 0),
+  );
   const ambiguous = contentType.ambiguous || sort.ambiguous || timeRange.ambiguous;
   return {
     status: ambiguous
@@ -1387,6 +1667,9 @@ function observationCoverageForSearch(params: {
 export function buildSearchSurface(params: {
   assistantGuidance?: ReadPageAssistantGuidance;
   pageRole?: string | null;
+  tabId?: number | null;
+  currentUrl?: string | null;
+  observationStartedAtMs?: number | null;
   interactiveElements: ReadPageInteractiveElement[];
   candidateActions: ReadPageCandidateAction[];
   visibleSearchFilterState?: unknown;
@@ -1592,6 +1875,68 @@ export function buildSearchSurface(params: {
     observedResultCount: resultCards.length,
     visibleTextContent: params.visibleTextContent,
   });
+  const observationStartedAtMs =
+    typeof params.observationStartedAtMs === 'number' &&
+    Number.isFinite(params.observationStartedAtMs)
+      ? params.observationStartedAtMs
+      : Date.now();
+  pruneExpiredSearchResultDeltaSnapshots(Date.now());
+  const resultObservation = beginSearchResultObservation({
+    tabId: params.tabId,
+    currentUrl: params.currentUrl ?? params.visibleRegionRows?.pageInfo?.url,
+    observedAtMs: observationStartedAtMs,
+  });
+  const previousResultSnapshot = resultObservation?.accepted
+    ? searchResultDeltaSnapshotsByContext.get(resultObservation.contextKey)
+    : undefined;
+  const resultDelta = resultObservation
+    ? resultObservation.accepted
+      ? {
+          ...buildSearchResultDelta({
+            previousResultCards:
+              previousResultSnapshot?.documentEpoch === resultObservation.documentEpoch
+                ? previousResultSnapshot.resultCards
+                : undefined,
+            currentResultCards: resultCards,
+          }),
+          observation: {
+            documentEpoch: resultObservation.documentEpoch,
+            sequence: resultObservation.observationSequence,
+            previousSequence: previousResultSnapshot?.observationSequence ?? null,
+            observedAt: new Date(resultObservation.observedAtMs).toISOString(),
+            previousObservedAt:
+              typeof previousResultSnapshot?.observedAtMs === 'number'
+                ? new Date(previousResultSnapshot.observedAtMs).toISOString()
+                : null,
+            snapshotTtlMs: SEARCH_RESULT_DELTA_SNAPSHOT_TTL_MS,
+          },
+        }
+      : {
+          ...buildSearchResultDelta({
+            currentResultCards: resultCards,
+          }),
+          status: 'ambiguous',
+          reason: resultObservation.rejectionReason ?? 'out-of-order observation was discarded',
+          observation: {
+            documentEpoch: resultObservation.documentEpoch,
+            sequence: resultObservation.observationSequence,
+            previousSequence: resultObservation.observationSequence,
+            observedAt: new Date(resultObservation.observedAtMs).toISOString(),
+            previousObservedAt: null,
+            snapshotTtlMs: SEARCH_RESULT_DELTA_SNAPSHOT_TTL_MS,
+          },
+        }
+    : undefined;
+  if (resultObservation?.accepted && resultCards.length > 0) {
+    rememberSearchResultDeltaSnapshot({
+      contextKey: resultObservation.contextKey,
+      tabId: params.tabId!,
+      documentEpoch: resultObservation.documentEpoch,
+      observationSequence: resultObservation.observationSequence,
+      resultCards,
+      observedAtMs: resultObservation.observedAtMs,
+    });
+  }
   const observationCoverage = observationCoverageForSearch({
     frameContext: params.frameContext,
     visibleButUnresolved,
@@ -1662,6 +2007,7 @@ export function buildSearchSurface(params: {
             ? 'fewer than 10 structured result cards are visible; scroll or detail readback is required before claiming Top 10 completeness'
             : 'no structured result cards observed; search/list completion is not proven',
     },
+    ...(resultDelta ? { resultDelta } : {}),
     resultCoverage,
     observationCoverage,
     claimBoundary:

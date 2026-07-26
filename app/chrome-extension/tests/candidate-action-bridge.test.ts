@@ -140,6 +140,29 @@ describe('candidateAction bridge', () => {
     });
     expect(payload.actionId).toMatch(/^hover-4106-\d+$/);
     expect(payload.verification.requiresFreshReadPage).toBe(true);
+    expect(payload.postActionDelta).toMatchObject({
+      deltaKind: 'post_action_tool_delta',
+      actionKind: 'hover',
+      tabId: 4106,
+      targetRef: 'ref_more',
+      observedOutcome: 'verification_required',
+      changed: true,
+      changedSignals: ['hover_dispatched', 'floating_panel_readback_required'],
+      readbackStatus: 'fresh_read_required',
+      recommendation: 'chrome_read_page_force_refresh_same_tab',
+      businessSuccessProven: false,
+    });
+    expect(payload.floatingPanelReadback).toMatchObject({
+      status: 'fresh_read_required',
+      expectedSurface: 'floating_panel_or_menu',
+      requiredNextAction: 'chrome_read_page_force_refresh_same_tab',
+      expectedObjects: [
+        'searchSurface.filterPanel',
+        'searchSurface.filterPanel.targetableOptions',
+        'searchSurface.filterState',
+        'candidateActions',
+      ],
+    });
     expect(consumePendingActionBinding(4106)).toMatchObject({
       actionId: payload.actionId,
       targetRef: 'ref_more',
@@ -406,6 +429,150 @@ describe('candidateAction bridge', () => {
       sendSpy.mock.calls.some(
         ([, message]) =>
           message.action === TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR && message.useText === true,
+      ),
+    ).toBe(false);
+  });
+
+  it('rebounds recovered text hover targets from current snapshot rect after stale selectors fail', async () => {
+    vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
+      id: 4114,
+      title: 'App',
+      url: 'https://example.com/app',
+    });
+    vi.spyOn(clickTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(chrome.tabs, 'sendMessage').mockImplementation(async (_tabId, message) => {
+      if (
+        message.action === TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR &&
+        message.useText === true
+      ) {
+        return { success: false, error: 'text not found: Filters' };
+      }
+      return { success: false, error: 'unexpected transport message' };
+    });
+    const sendSpy = vi
+      .spyOn(clickTool as any, 'sendMessageToTab')
+      .mockImplementation(async (_tabId, message) => {
+        if (message.action === TOOL_MESSAGE_TYPES.RESOLVE_REF) {
+          return { success: false, error: 'ref expired' };
+        }
+        if (message.action === TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR) {
+          return { success: false, error: `selector not found: ${message.selector}` };
+        }
+        if (message.action === TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_POINT) {
+          expect(message).toMatchObject({
+            x: 120,
+            y: 50,
+            identity: {
+              label: 'Filters',
+              targetRef: 'ref_text_search_toolbar_3',
+              locatorChain: [{ type: 'css', value: '.stale-filter' }],
+            },
+          });
+          return {
+            success: true,
+            ref: 'ref_rebound_filter_by_point',
+            identityEvidence: {
+              exactLabelMatched: true,
+              uniqueLabelMatch: true,
+            },
+          };
+        }
+        if (message.action === TOOL_MESSAGE_TYPES.DISPATCH_HOVER_FOR_REF) {
+          return { success: true, target: { tagName: 'SPAN', text: 'Filters' } };
+        }
+        return { success: false, error: 'unexpected message' };
+      });
+
+    const result = await clickTool.execute({
+      interaction: 'hover',
+      candidateAction: {
+        targetRef: 'ref_text_search_toolbar_3',
+        label: 'Filters',
+        locatorChain: [{ type: 'css', value: '.stale-filter' }],
+        visibility: {
+          source: 'dom',
+          domVisible: true,
+          inViewport: true,
+          centerHitTarget: true,
+          occluded: false,
+          reason: 'visible_unobstructed',
+        },
+        snapshotRect: { x: 100, y: 40, width: 40, height: 20 },
+      },
+    } as any);
+
+    expect(result.isError).toBe(false);
+    const payload = JSON.parse(String((result.content?.[0] as any)?.text || '{}'));
+    expect(payload.targetBinding).toMatchObject({
+      resolutionSource: 'candidate_snapshot_rect',
+      dispatchTarget: 'ref',
+    });
+    expect(payload.floatingPanelReadback).toMatchObject({
+      status: 'fresh_read_required',
+      expectedSurface: 'floating_panel_or_menu',
+    });
+    expect(sendSpy).toHaveBeenCalledWith(
+      4114,
+      expect.objectContaining({
+        action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_POINT,
+      }),
+      undefined,
+    );
+    expect(sendSpy).toHaveBeenCalledWith(
+      4114,
+      expect.objectContaining({
+        action: TOOL_MESSAGE_TYPES.DISPATCH_HOVER_FOR_REF,
+        ref: 'ref_rebound_filter_by_point',
+      }),
+      undefined,
+    );
+  });
+
+  it('fails closed instead of attempting point rebind without strong candidate identity', async () => {
+    vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
+      id: 4115,
+      title: 'App',
+      url: 'https://example.com/app',
+    });
+    vi.spyOn(clickTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(chrome.tabs, 'sendMessage').mockResolvedValue({
+      success: false,
+      error: 'visible text identity unavailable',
+    });
+    const sendSpy = vi
+      .spyOn(clickTool as any, 'sendMessageToTab')
+      .mockImplementation(async (_tabId, message) => {
+        if (message.action === TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR) {
+          return { success: false, error: 'selector is stale' };
+        }
+        return { success: false, error: 'unexpected message' };
+      });
+
+    const result = await clickTool.execute({
+      interaction: 'hover',
+      candidateAction: {
+        targetRef: 'ref_text_search_toolbar_4',
+        locatorChain: [{ type: 'css', value: '.stale-filter' }],
+        visibility: {
+          source: 'dom',
+          domVisible: true,
+          inViewport: true,
+          centerHitTarget: true,
+          occluded: false,
+        },
+        snapshotRect: { x: 100, y: 40, width: 40, height: 20 },
+      },
+    } as any);
+
+    expect(result.isError).toBe(true);
+    expect(
+      sendSpy.mock.calls.some(
+        ([, message]) => message.action === TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_POINT,
+      ),
+    ).toBe(false);
+    expect(
+      sendSpy.mock.calls.some(
+        ([, message]) => message.action === TOOL_MESSAGE_TYPES.DISPATCH_HOVER_FOR_REF,
       ),
     ).toBe(false);
   });
@@ -733,6 +900,46 @@ describe('candidateAction bridge', () => {
     )?.[1] as any;
     expect(clickMessage).toMatchObject({
       selector: '.search-page .filter-trigger',
+    });
+    expect(clickMessage.ref).toBeUndefined();
+  });
+
+  it('routes a newly objectized floating option through its snapshot-local locator', async () => {
+    vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
+      id: 41181,
+      title: 'Search',
+      url: 'https://example.com/search?q=neutral',
+    });
+    vi.spyOn(clickTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    const sendSpy = vi.spyOn(clickTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      dispatchSucceeded: true,
+      signals: { domChanged: true },
+    });
+
+    const result = await clickTool.execute({
+      candidateAction: {
+        targetRef: 'ref_floating_option_2c3acd4f',
+        executionTargetKind: 'snapshot_locator',
+        intent: 'filter.option_select',
+        locatorChain: [
+          { type: 'ref', value: 'ref_floating_option_2c3acd4f' },
+          { type: 'css', value: '[role="listbox"] [role="option"]:nth-of-type(2)' },
+        ],
+      },
+    });
+
+    expect(result.isError).toBe(false);
+    const payload = JSON.parse(String((result.content?.[0] as any)?.text || '{}'));
+    expect(payload.targetBinding).toMatchObject({
+      resolutionSource: 'candidate_locator_css',
+      dispatchTarget: 'selector',
+    });
+    const clickMessage = sendSpy.mock.calls.find(
+      ([, message]) => (message as any)?.action === TOOL_MESSAGE_TYPES.CLICK_ELEMENT,
+    )?.[1] as any;
+    expect(clickMessage).toMatchObject({
+      selector: '[role="listbox"] [role="option"]:nth-of-type(2)',
     });
     expect(clickMessage.ref).toBeUndefined();
   });

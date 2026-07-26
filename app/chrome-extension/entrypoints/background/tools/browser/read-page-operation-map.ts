@@ -129,7 +129,7 @@ function buildDerivedSearchEntryZones(
       readiness: action.actionType === 'fill' ? 'ready' : 'needs_expand',
       targetability: action.locatorChain.length > 0 ? 'locator_chain' : 'target_ref',
       candidateActionIds: [action.id],
-      primaryAction: toExecutableAction(action),
+      primaryAction: projectCandidateActionToExecutableAction(action),
       evidenceLevel: 'targetable_search_entry_signal_needs_post_action_read',
       claimBoundary:
         'zone is planning guidance, not execution authority; search entry trigger is derived from candidateActions and must be verified by a fresh post-action page read before treating a search input as available',
@@ -152,7 +152,8 @@ function selectPrimaryActionForRegion(
           action?.intent === 'publish.upload_media' &&
           (action.actionType === 'click' || action.actionType === 'fill'),
       );
-    if (uploadCandidateAction) return toExecutableAction(uploadCandidateAction);
+    if (uploadCandidateAction)
+      return projectCandidateActionToExecutableAction(uploadCandidateAction);
     return (
       actionableObjects.find(
         (object) =>
@@ -218,7 +219,9 @@ function isSearchEntryAction(
   );
 }
 
-function toExecutableAction(action: ReadPageCandidateAction): ReadPageExecutableAction {
+export function projectCandidateActionToExecutableAction(
+  action: ReadPageCandidateAction,
+): ReadPageExecutableAction {
   return {
     candidateActionId: action.id,
     actionType: action.actionType,
@@ -231,6 +234,7 @@ function toExecutableAction(action: ReadPageCandidateAction): ReadPageExecutable
         actionType: action.actionType,
         targetRef: action.targetRef,
         ...(action.label ? { label: action.label } : {}),
+        ...(typeof action.frameId === 'number' ? { frameId: action.frameId } : {}),
         confidence: action.confidence,
         matchReason: action.matchReason,
         ...(action.actionability ? { actionability: action.actionability } : {}),
@@ -244,8 +248,10 @@ function toExecutableAction(action: ReadPageCandidateAction): ReadPageExecutable
           ? { nextRequiredSelectorSource: action.nextRequiredSelectorSource }
           : {}),
         ...(action.nextRequiredCheck ? { nextRequiredCheck: action.nextRequiredCheck } : {}),
+        ...(action.snapshotRect ? { snapshotRect: action.snapshotRect } : {}),
         locatorChain: action.locatorChain,
         ...(action.intent ? { intent: action.intent } : {}),
+        ...(action.visibility ? { visibility: action.visibility } : {}),
       },
     },
     claimBoundary:

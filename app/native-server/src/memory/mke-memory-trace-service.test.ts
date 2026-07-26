@@ -2106,12 +2106,12 @@ describe('MkeMemoryTraceService', () => {
       });
       expect(pages[0]?.facts).toMatchObject({
         rootRoute: 'https://example.test/search',
-        currentRoute: 'https://example.test/search?keyword=browser',
+        currentRoute: 'https://example.test/search',
         lastObservedTabId: 202,
       });
       expect(pages[0]?.currentState).toMatchObject({
         tabId: 202,
-        currentRoute: 'https://example.test/search?keyword=browser',
+        currentRoute: 'https://example.test/search',
       });
       expect(pages[0]?.sourceTraceIds).toHaveLength(2);
     } finally {
@@ -3087,14 +3087,14 @@ describe('MkeMemoryTraceService', () => {
         pageModelKey: 'tab:example.test',
         objectFingerprint: 'browser_page:https://example.test/search',
         rootRoute: 'https://example.test/search',
-        currentRoute: 'https://example.test/search?keyword=second',
+        currentRoute: 'https://example.test/search',
         tabId: 302,
         isActive: true,
         observationCount: 1,
       });
       expect(tabs[0]?.facts).toMatchObject({
         rootRoute: 'https://example.test/search',
-        currentRoute: 'https://example.test/search?keyword=second',
+        currentRoute: 'https://example.test/search',
         tabIds: [301, 302],
         openTabCount: 2,
         representativeTabId: 302,

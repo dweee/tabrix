@@ -35,6 +35,7 @@ interface CollectResultCardsParams {
 interface VisibleCardScanResult {
   cards: CollectedResultCard[];
   filterState: SearchFilterState;
+  floatingSurfaces: FloatingSurfaceSummary[];
   pageRegions: PageRegionObject[];
   candidateActions: PageCandidateAction[];
   pageInfo: {
@@ -85,12 +86,14 @@ interface PageCandidateAction {
   id: string;
   actionType: 'click' | 'fill' | 'open';
   targetRef: string;
+  executionTargetKind?: 'page_ref' | 'snapshot_locator' | 'stable_ref' | string;
   label: string;
   intent: string;
   matchReason: string;
   actionability: boolean;
   actionabilityReason?: string;
   locatorChain: Array<{ type: 'ref' | 'aria' | 'css' | string; value: string }>;
+  provenance?: FloatingSurfaceProvenance;
 }
 
 interface SearchFilterGroupState {
@@ -99,6 +102,7 @@ interface SearchFilterGroupState {
   source:
     | 'dom_active_state'
     | 'visual_style_state'
+    | 'visible_floating_panel'
     | 'url_parameter_adapter'
     | 'mixed'
     | 'not_observed';
@@ -110,6 +114,60 @@ interface SearchFilterGroupState {
 interface SearchGenericFilterGroupState extends SearchFilterGroupState {
   groupId: string;
   groupLabel?: string;
+  provenance?: FloatingSurfaceGroupProvenance;
+}
+
+interface FloatingSurfaceProvenance {
+  surfaceType: 'floating_surface';
+  panelRef: string;
+  groupId?: string;
+  optionRef?: string;
+  classificationEvidence: string[];
+}
+
+interface FloatingSurfaceGroupProvenance extends FloatingSurfaceProvenance {
+  groupId: string;
+  optionRefs: string[];
+}
+
+interface FloatingFilterOptionObject {
+  element: Element;
+  control: Element;
+  label: string;
+  kind: AppliedSearchFilter['kind'];
+  groupId: string;
+  groupLabel: string;
+  optionRef: string;
+  selected: boolean;
+}
+
+interface FloatingFilterPanelObject {
+  classification: 'filter_panel';
+  element: Element;
+  panelRef: string;
+  classificationEvidence: string[];
+  relatedTriggers: Element[];
+  options: FloatingFilterOptionObject[];
+}
+
+interface GenericFloatingSurfaceObject {
+  classification: 'generic';
+  element: Element;
+  panelRef: string;
+  classificationEvidence: string[];
+  relatedTriggers: Element[];
+  options: FloatingFilterOptionObject[];
+}
+
+type FloatingSurfaceObject = FloatingFilterPanelObject | GenericFloatingSurfaceObject;
+
+interface FloatingSurfaceSummary {
+  surfaceType: 'floating_surface';
+  panelRef: string;
+  classification: 'generic' | 'filter_panel';
+  role?: string;
+  label?: string;
+  classificationEvidence: string[];
 }
 
 interface ScrollStepResult {
@@ -269,6 +327,8 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
     /^(综合|最新|最热|最多点赞|最多评论|最多收藏|latest|popular|most\s*(liked|commented|saved|collected))$/i;
   const timeRangeFilterPattern = /^(不限|一天内|一周内|半年内|24\s*h|7\s*d|week|month|any)$/i;
   const filterTriggerPattern = /^(筛选|已筛选|过滤|排序|filter|filters|filtered|sort|sort by)$/i;
+  const filterPanelActionPattern =
+    /^(清除|重置|确认|应用|收起|clear|reset|confirm|apply|collapse)$/i;
   const filterContainerPattern =
     /(filter|filters|filtered|sort|dropdown|popover|popup|menu|dialog|modal|panel|drawer|筛选|排序)/i;
   const explicitFilterContainerPattern = /(filter|filters|filtered|sort|筛选|排序)/i;
@@ -454,7 +514,55 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
       .sort((left, right) => left.groupId.localeCompare(right.groupId));
   };
 
-  const collectFilterState = (): SearchFilterState => {
+  const genericGroupIdForLabel = (label: string): string =>
+    normalize(label)
+      .replace(/[^\p{L}\p{N}_\-\u4e00-\u9fff]+/gu, '_')
+      .replace(/^_+|_+$/g, '') || 'other';
+
+  const mergeGenericFilterGroups = (
+    filterGroups: readonly SearchGenericFilterGroupState[],
+    floatingGroups: readonly SearchGenericFilterGroupState[],
+  ): SearchGenericFilterGroupState[] => {
+    const byId = new Map<string, SearchGenericFilterGroupState>();
+    for (const group of [...filterGroups, ...floatingGroups]) {
+      const groupId = group.groupId || 'other';
+      const existing = byId.get(groupId);
+      if (!existing) {
+        byId.set(groupId, { ...group, candidates: [...group.candidates] });
+        continue;
+      }
+      const candidates = [...new Set([...existing.candidates, ...group.candidates])];
+      const selectedConflict = Boolean(
+        existing.selected && group.selected && existing.selected !== group.selected,
+      );
+      const selected = selectedConflict ? null : (existing.selected ?? group.selected);
+      byId.set(groupId, {
+        ...existing,
+        ...(group.groupLabel && !existing.groupLabel ? { groupLabel: group.groupLabel } : {}),
+        selected,
+        candidates,
+        ...(group.provenance && !existing.provenance ? { provenance: group.provenance } : {}),
+        source:
+          existing.selected && !group.selected
+            ? existing.source
+            : group.selected && !existing.selected
+              ? group.source
+              : existing.source === group.source
+                ? existing.source
+                : 'mixed',
+        confidence: Math.max(existing.confidence, group.confidence),
+        ambiguous: selectedConflict || existing.ambiguous || group.ambiguous,
+        reason: selectedConflict
+          ? 'conflicting selected options were observed for the same scoped filter group'
+          : existing.reason || group.reason,
+      });
+    }
+    return [...byId.values()].sort((left, right) => left.groupId.localeCompare(right.groupId));
+  };
+
+  const collectFilterState = (
+    floatingPanels: readonly FloatingFilterPanelObject[],
+  ): SearchFilterState => {
     const activeSelectors = [
       '[aria-selected="true"]',
       '[aria-pressed="true"]',
@@ -550,6 +658,8 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
     };
 
     const filterContextForElement = (element: Element): Element | null => {
+      const floatingPanel = floatingPanels.find((panel) => panel.element.contains(element));
+      if (floatingPanel) return floatingPanel.element;
       let current: Element | null = element;
       let depth = 0;
       while (current && current !== document.body && depth <= 6) {
@@ -558,13 +668,6 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
         if (explicitFilterContainerPattern.test(semanticText)) return current;
         if (
           ['listbox', 'tablist', 'radiogroup'].includes(role) &&
-          hasGroupedFilterChoices(current)
-        ) {
-          return current;
-        }
-        if (
-          ['dialog', 'menu', 'menubar'].includes(role) &&
-          filterTriggerPattern.test(semanticText) &&
           hasGroupedFilterChoices(current)
         ) {
           return current;
@@ -627,6 +730,7 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
 
     for (const element of renderedFilterCandidates(activeSelectors)) {
       if (!(element instanceof Element)) continue;
+      if (!filterContextForElement(element)) continue;
       const label = labelForFilterStateCandidate(element);
       if (!label || label.length > 24) continue;
       const kind = classifyFilterLabel(label);
@@ -662,7 +766,10 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
       sort: groupStateForKind(filters, 'sort'),
       timeRange: groupStateForKind(filters, 'time_range'),
     };
-    const filterGroups = genericFilterGroupsForFilters(filters);
+    const filterGroups = mergeGenericFilterGroups(
+      genericFilterGroupsForFilters(filters),
+      collectFloatingFilterGroups(floatingPanels),
+    );
     const appliedFilters = [
       selectedFilterForKind(filters, 'content_type'),
       selectedFilterForKind(filters, 'sort'),
@@ -959,15 +1066,413 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
     return null;
   };
 
+  const elementSemanticText = (element: Element): string => {
+    const values = [
+      element.getAttribute('aria-label'),
+      element.getAttribute('title'),
+      (element as HTMLElement).id,
+      (element as HTMLElement).className,
+    ];
+    for (const attr of Array.from(element.attributes)) values.push(attr.value);
+    return normalize(values.join(' '));
+  };
+
+  interface FloatingPanelLabelRecord {
+    element: Element;
+    control: Element | null;
+    label: string;
+    kind: AppliedSearchFilter['kind'];
+  }
+
+  const isDirectInteractiveControl = (element: Element): boolean => {
+    const tag = element.tagName.toLowerCase();
+    if (['button', 'a', 'input', 'select', 'textarea', 'label', 'summary'].includes(tag)) {
+      return true;
+    }
+    const role = normalize(element.getAttribute('role')).toLowerCase();
+    if (['button', 'menuitem', 'option', 'tab', 'checkbox', 'radio', 'switch'].includes(role)) {
+      return true;
+    }
+    if (element.hasAttribute('tabindex') || element.hasAttribute('aria-haspopup')) return true;
+    try {
+      return window.getComputedStyle(element).cursor === 'pointer';
+    } catch {
+      return false;
+    }
+  };
+
+  const floatingSurfaceContainers = (): Element[] => {
+    const candidates = Array.from(
+      document.querySelectorAll(
+        [
+          '[role="dialog"]',
+          '[role="menu"]',
+          '[role="listbox"]',
+          '[role="radiogroup"]',
+          '[popover]',
+          '[class*="filter" i]',
+          '[class*="sort" i]',
+          '[class*="dropdown" i]',
+          '[class*="popover" i]',
+          '[class*="popup" i]',
+          '[class*="menu" i]',
+          '[class*="panel" i]',
+          '[class*="drawer" i]',
+        ].join(','),
+      ),
+    )
+      .filter((element): element is Element => element instanceof Element)
+      .filter((element) => {
+        if (!elementIsVisible(element)) return false;
+        const rect = element.getBoundingClientRect();
+        if (rect.width < 120 || rect.height < 80) return false;
+        return !(rect.width > window.innerWidth * 0.9 || rect.height > window.innerHeight * 0.95);
+      });
+    const candidateSet = new Set(candidates);
+    return candidates
+      .filter((element) => {
+        let ancestor = element.parentElement;
+        while (ancestor && ancestor !== document.body) {
+          if (candidateSet.has(ancestor)) return false;
+          ancestor = ancestor.parentElement;
+        }
+        return true;
+      })
+      .slice(0, 20);
+  };
+
+  const panelLabelRecords = (container: Element): FloatingPanelLabelRecord[] =>
+    Array.from(
+      container.querySelectorAll(
+        [
+          '[role="heading"]',
+          'h1',
+          'h2',
+          'h3',
+          'h4',
+          'button',
+          'a',
+          '[role="button"]',
+          '[role="menuitem"]',
+          '[role="option"]',
+          '[role="tab"]',
+          '[tabindex]',
+          'li',
+          'span',
+          'div',
+        ].join(','),
+      ),
+    )
+      .filter((element): element is Element => element instanceof Element)
+      .filter(elementIsVisible)
+      .map((element): FloatingPanelLabelRecord | null => {
+        const control = isDirectInteractiveControl(element) ? element : null;
+        if (
+          !control &&
+          Array.from(element.children).some(
+            (child) => child instanceof Element && isDirectInteractiveControl(child),
+          )
+        ) {
+          return null;
+        }
+        const label = normalize(
+          ownVisibleText(element) ||
+            element.getAttribute('aria-label') ||
+            element.getAttribute('title') ||
+            (control ? element.textContent : '') ||
+            '',
+        );
+        if (!label || label.length > 24) return null;
+        return {
+          element,
+          control,
+          label,
+          kind: classifyFilterLabel(label),
+        };
+      })
+      .filter((record): record is FloatingPanelLabelRecord => Boolean(record));
+
+  const relatedTriggersForSurface = (container: Element): Element[] => {
+    const panelId = normalize(container.getAttribute('id'));
+    const labelledByIds = new Set(
+      normalize(container.getAttribute('aria-labelledby')).split(/\s+/).filter(Boolean),
+    );
+    return Array.from(
+      document.querySelectorAll(
+        'button, a, [role="button"], [aria-controls], [aria-owns], [aria-haspopup]',
+      ),
+    )
+      .filter((element): element is Element => element instanceof Element)
+      .filter(elementIsVisible)
+      .filter((element) => {
+        const ownedIds = new Set(
+          `${element.getAttribute('aria-controls') || ''} ${element.getAttribute('aria-owns') || ''}`
+            .trim()
+            .split(/\s+/)
+            .filter(Boolean),
+        );
+        return Boolean(
+          (panelId && ownedIds.has(panelId)) || (element.id && labelledByIds.has(element.id)),
+        );
+      });
+  };
+
+  const selectedStateForOption = (element: Element): boolean => {
+    const ariaCurrent = normalize(element.getAttribute('aria-current')).toLowerCase();
+    return (
+      element.getAttribute('aria-selected') === 'true' ||
+      element.getAttribute('aria-pressed') === 'true' ||
+      element.getAttribute('aria-checked') === 'true' ||
+      Boolean(ariaCurrent && ariaCurrent !== 'false') ||
+      /\b(active|selected|current|checked|applied)\b/i.test(
+        normalize((element as HTMLElement).className || ''),
+      )
+    );
+  };
+
+  const filterGroupLabelForKind = (kind: AppliedSearchFilter['kind']): string | null => {
+    if (kind === 'content_type') return 'content_type';
+    if (kind === 'sort') return 'sort';
+    if (kind === 'time_range') return 'time_range';
+    return null;
+  };
+
+  const optionsForFloatingSurface = (
+    container: Element,
+    panelRef: string,
+  ): FloatingFilterOptionObject[] => {
+    const records = panelLabelRecords(container);
+    const options: FloatingFilterOptionObject[] = [];
+    let currentGroupLabel: string | null = null;
+    for (let index = 0; index < records.length; index += 1) {
+      const record = records[index];
+      if (!record) continue;
+      const nextOptionCount = records
+        .slice(index + 1, index + 6)
+        .filter(
+          (next) =>
+            Boolean(next.control) &&
+            !filterTriggerPattern.test(next.label) &&
+            !filterPanelActionPattern.test(next.label),
+        ).length;
+      const isHeading =
+        !record.control &&
+        record.kind === 'unknown' &&
+        !filterTriggerPattern.test(record.label) &&
+        !filterPanelActionPattern.test(record.label) &&
+        nextOptionCount >= 2;
+      if (isHeading) {
+        currentGroupLabel = record.label;
+        continue;
+      }
+      if (!record.control) continue;
+      if (filterTriggerPattern.test(record.label) || filterPanelActionPattern.test(record.label)) {
+        continue;
+      }
+      const groupLabel = currentGroupLabel ?? filterGroupLabelForKind(record.kind);
+      if (!groupLabel) continue;
+      const groupId = genericGroupIdForLabel(groupLabel);
+      const label = canonicalFilterLabel(record.label);
+      options.push({
+        element: record.element,
+        control: record.control,
+        label,
+        kind: record.kind,
+        groupId,
+        groupLabel,
+        optionRef: stablePageTargetRef('floating_option', `${panelRef}|${groupId}|${label}`),
+        selected: selectedStateForOption(record.control),
+      });
+    }
+    return options;
+  };
+
+  const collectFloatingSurfaces = (): FloatingSurfaceObject[] => {
+    const hasVisibleSearchSurface = Boolean(
+      document.querySelector(
+        '[role="search"], [role="searchbox"], input[type="search"], form[action*="search" i]',
+      ),
+    );
+    const surfaces: FloatingSurfaceObject[] = [];
+    for (const container of floatingSurfaceContainers()) {
+      const selector = selectorForElement(container) || '';
+      const panelIdentity = normalize(
+        `${elementSemanticText(container)}|${selector}|${container.getAttribute('role') || ''}`,
+      );
+      const panelRef = stablePageTargetRef('floating_surface', panelIdentity || selector);
+      const relatedTriggers = relatedTriggersForSurface(container);
+      const filterRelatedTriggers = relatedTriggers.filter((trigger) => {
+        const label = labelForControl(trigger);
+        return (
+          filterTriggerPattern.test(label) ||
+          explicitFilterContainerPattern.test(elementSemanticText(trigger))
+        );
+      });
+      const options = optionsForFloatingSurface(container, panelRef);
+      const recognizedKinds = new Set(
+        options.map((option) => option.kind).filter((kind) => kind !== 'unknown'),
+      );
+      const classificationEvidence: string[] = [];
+      if (explicitFilterContainerPattern.test(elementSemanticText(container))) {
+        classificationEvidence.push('search_filter_semantics');
+      }
+      if (filterRelatedTriggers.length > 0) {
+        classificationEvidence.push('trigger_ownership', 'aria_relation');
+        if (
+          filterRelatedTriggers.some(
+            (trigger) =>
+              trigger.getAttribute('aria-expanded') === 'true' ||
+              normalize(trigger.getAttribute('data-state')).toLowerCase() === 'open',
+          )
+        ) {
+          classificationEvidence.push('open_state_dom_evidence');
+        }
+      }
+      if (hasVisibleSearchSurface && options.length >= 2 && recognizedKinds.size >= 1) {
+        classificationEvidence.push('search_surface_grouped_choices');
+      }
+      const classification =
+        classificationEvidence.length > 0 && options.length > 0 ? 'filter_panel' : 'generic';
+      surfaces.push({
+        classification,
+        element: container,
+        panelRef,
+        classificationEvidence: [...new Set(classificationEvidence)],
+        relatedTriggers: filterRelatedTriggers,
+        options,
+      });
+    }
+    return surfaces;
+  };
+
+  const collectFloatingFilterGroups = (
+    panels: readonly FloatingFilterPanelObject[],
+  ): SearchGenericFilterGroupState[] => {
+    const groups = new Map<
+      string,
+      {
+        panel: FloatingFilterPanelObject;
+        groupId: string;
+        groupLabel: string;
+        candidates: string[];
+        optionRefs: string[];
+        selectedLabels: string[];
+      }
+    >();
+    for (const panel of panels) {
+      for (const option of panel.options) {
+        const key = `${panel.panelRef}|${option.groupId}`;
+        const existing = groups.get(key) ?? {
+          panel,
+          groupId: option.groupId,
+          groupLabel: option.groupLabel,
+          candidates: [],
+          optionRefs: [],
+          selectedLabels: [],
+        };
+        if (!existing.candidates.includes(option.label)) existing.candidates.push(option.label);
+        if (!existing.optionRefs.includes(option.optionRef)) {
+          existing.optionRefs.push(option.optionRef);
+        }
+        if (option.selected && !existing.selectedLabels.includes(option.label)) {
+          existing.selectedLabels.push(option.label);
+        }
+        groups.set(key, existing);
+      }
+    }
+    return [...groups.values()]
+      .filter((group) => group.candidates.length >= 2)
+      .map((group): SearchGenericFilterGroupState => {
+        const ambiguous = group.selectedLabels.length > 1;
+        return {
+          groupId: group.groupId,
+          groupLabel: group.groupLabel,
+          selected: ambiguous ? null : (group.selectedLabels[0] ?? null),
+          candidates: group.candidates,
+          source: 'visible_floating_panel',
+          confidence: group.selectedLabels.length > 0 ? 0.78 : 0.68,
+          ambiguous,
+          reason: ambiguous
+            ? 'conflicting selected options were observed inside the same floating panel group'
+            : 'filter group inferred from scoped controls inside a classified floating surface',
+          provenance: {
+            surfaceType: 'floating_surface',
+            panelRef: group.panel.panelRef,
+            groupId: group.groupId,
+            optionRefs: group.optionRefs,
+            classificationEvidence: group.panel.classificationEvidence,
+          },
+        };
+      })
+      .sort((left, right) => left.groupId.localeCompare(right.groupId));
+  };
+
   const filterActionKindForLabel = (label: string): 'filter_trigger' | `filter_${string}` => {
     if (filterTriggerPattern.test(label)) return 'filter_trigger';
     const kind = classifyFilterLabel(label);
     return `filter_${kind}`;
   };
 
-  const visibleFilterCandidateActions = (): PageCandidateAction[] => {
+  const visibleFilterCandidateActions = (
+    panels: readonly FloatingFilterPanelObject[],
+  ): PageCandidateAction[] => {
     const actionByKey = new Map<string, { action: PageCandidateAction; score: number }>();
-    const candidateElements = Array.from(
+    const addAction = (action: PageCandidateAction, score: number): void => {
+      const key = `${action.intent}|${action.targetRef}|${action.label}`;
+      const previous = actionByKey.get(key);
+      if (!previous || score > previous.score) actionByKey.set(key, { action, score });
+    };
+
+    for (const panel of panels) {
+      for (const option of panel.options) {
+        const control = option.control;
+        if (!panel.element.contains(control) || !elementIsVisible(control)) continue;
+        const hitScore = centerHitScore(control);
+        if (hitScore < 0) continue;
+        const selector = selectorForElement(control);
+        const concreteXpath = xpathForElement(control);
+        const kind = filterActionKindForLabel(option.label);
+        const action: PageCandidateAction = {
+          id: `ca_${kind}_${stableIdentityHash(
+            `${panel.panelRef}|${option.groupId}|${option.label}`,
+          )}`,
+          actionType: 'click',
+          targetRef: option.optionRef,
+          executionTargetKind: 'snapshot_locator',
+          label: option.label,
+          intent: `search.apply_filter.${option.kind}`,
+          matchReason: 'visible_filter_option',
+          actionability: Boolean(selector),
+          ...(selector ? {} : { actionabilityReason: 'missing_stable_selector' }),
+          locatorChain: [
+            { type: 'ref', value: option.optionRef },
+            ...(concreteXpath ? [{ type: 'xpath', value: concreteXpath }] : []),
+            ...(selector ? [{ type: 'css', value: selector }] : []),
+          ],
+          provenance: {
+            surfaceType: 'floating_surface',
+            panelRef: panel.panelRef,
+            groupId: option.groupId,
+            optionRef: option.optionRef,
+            classificationEvidence: panel.classificationEvidence,
+          },
+        };
+        const rect = control.getBoundingClientRect();
+        const directText = ownVisibleText(control);
+        const accessibleText = normalize(
+          control.getAttribute('aria-label') || control.getAttribute('title') || '',
+        );
+        const score =
+          (selector ? 1000 : 0) +
+          (directText === option.label ? 700 : 0) +
+          (accessibleText === option.label ? 300 : 0) +
+          hitScore +
+          Math.min(120, (rect.width * rect.height) / 100);
+        addAction(action, score);
+      }
+    }
+
+    const triggerCandidates = Array.from(
       document.querySelectorAll(
         [
           'button',
@@ -977,92 +1482,66 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
           '[role="option"]',
           '[role="tab"]',
           '[aria-haspopup]',
+          '[aria-controls]',
+          '[aria-owns]',
           '[aria-label]',
           '[title]',
           '[tabindex]',
-          '[class*="filter" i]',
-          '[class*="sort" i]',
-          '[class*="dropdown" i]',
-          '[class*="popover" i]',
-          '[class*="menu" i]',
-          '[class*="panel" i]',
         ].join(','),
       ),
     );
-
-    const textElements = Array.from(document.querySelectorAll('span,div,p,li')).filter(
-      (element) => {
-        const label = labelForControl(element);
-        if (!label || label.length > 24) return false;
-        return filterTriggerPattern.test(label) || classifyFilterLabel(label) !== 'unknown';
-      },
-    );
-    const filterOptionRects = [...candidateElements, ...textElements]
-      .filter((element): element is Element => element instanceof Element)
-      .map((element) => {
-        const label = labelForControl(element);
-        if (
-          !label ||
-          filterTriggerPattern.test(label) ||
-          classifyFilterLabel(label) === 'unknown'
-        ) {
-          return null;
-        }
-        const control = closestClickableControl(element);
-        if (!control) return null;
-        const rect = control.getBoundingClientRect();
-        if (rect.width <= 0 || rect.height <= 0) return null;
-        return rect;
-      })
-      .filter((rect): rect is DOMRect => Boolean(rect));
-
-    const isPlausibleFilterTrigger = (control: Element): boolean => {
-      if (filterOptionRects.length === 0) return true;
+    const isPlausibleFilterTrigger = (
+      control: Element,
+    ): { panel: FloatingFilterPanelObject | null; plausible: boolean } => {
+      const relatedPanel = panels.find((panel) => panel.relatedTriggers.includes(control)) ?? null;
+      if (relatedPanel) return { panel: relatedPanel, plausible: true };
+      if (panels.length === 0) return { panel: null, plausible: true };
       const rect = control.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) return false;
+      if (rect.width <= 0 || rect.height <= 0) return { panel: null, plausible: false };
       const centerY = rect.top + rect.height / 2;
       const maxHorizontalGap = Math.max(360, window.innerWidth * 0.22);
-      return filterOptionRects.some((optionRect) => {
-        const optionCenterY = optionRect.top + optionRect.height / 2;
-        const verticalGap = Math.abs(optionCenterY - centerY);
-        const horizontalGap =
-          optionRect.right < rect.left
-            ? rect.left - optionRect.right
-            : rect.right < optionRect.left
-              ? optionRect.left - rect.right
-              : 0;
-        return verticalGap <= 128 && horizontalGap <= maxHorizontalGap;
-      });
+      const panel = panels.find((candidate) =>
+        candidate.options.some((option) => {
+          const optionRect = option.control.getBoundingClientRect();
+          const optionCenterY = optionRect.top + optionRect.height / 2;
+          const verticalGap = Math.abs(optionCenterY - centerY);
+          const horizontalGap =
+            optionRect.right < rect.left
+              ? rect.left - optionRect.right
+              : rect.right < optionRect.left
+                ? optionRect.left - rect.right
+                : 0;
+          return verticalGap <= 128 && horizontalGap <= maxHorizontalGap;
+        }),
+      );
+      return { panel: panel ?? null, plausible: Boolean(panel) };
     };
 
-    for (const element of [...candidateElements, ...textElements].slice(0, 500)) {
+    for (const element of triggerCandidates.slice(0, 300)) {
       if (!(element instanceof Element)) continue;
       if (!elementIsVisible(element)) continue;
       const label = labelForControl(element);
       if (!label || label.length > 24) continue;
-      const filterKind = classifyFilterLabel(label);
-      const isTrigger = filterTriggerPattern.test(label);
-      if (!isTrigger && filterKind === 'unknown') continue;
+      if (!filterTriggerPattern.test(label)) continue;
       const control = closestClickableControl(element);
       if (!control) continue;
-      if (isTrigger && !isPlausibleFilterTrigger(control)) continue;
+      if (panels.some((panel) => panel.element.contains(control))) continue;
+      const triggerContext = isPlausibleFilterTrigger(control);
+      if (!triggerContext.plausible) continue;
       const hitScore = centerHitScore(control);
       if (hitScore < 0) continue;
       const selector = selectorForElement(control);
       const concreteXpath = xpathForElement(control);
-      const canonicalLabel = isTrigger ? label : canonicalFilterLabel(label);
-      const kind = filterActionKindForLabel(canonicalLabel);
+      const canonicalLabel = label;
+      const kind = 'filter_trigger';
       const targetRef = stablePageTargetRef(kind, canonicalLabel);
-
-      const intent =
-        kind === 'filter_trigger' ? 'search.open_filters' : `search.apply_filter.${filterKind}`;
       const action: PageCandidateAction = {
         id: `ca_${kind}_${stableIdentityHash(`${canonicalLabel}|${selector || ''}`)}`,
         actionType: 'click',
         targetRef,
         label: canonicalLabel,
-        intent,
-        matchReason: isTrigger ? 'visible_filter_trigger' : 'visible_filter_option',
+        intent: 'search.open_filters',
+        matchReason: 'visible_filter_trigger',
         actionability: Boolean(selector),
         ...(selector ? {} : { actionabilityReason: 'missing_stable_selector' }),
         locatorChain: [
@@ -1072,6 +1551,15 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
           { type: 'xpath', value: xpathForVisibleTextControl(canonicalLabel) },
           ...(selector ? [{ type: 'css', value: selector }] : []),
         ],
+        ...(triggerContext.panel
+          ? {
+              provenance: {
+                surfaceType: 'floating_surface' as const,
+                panelRef: triggerContext.panel.panelRef,
+                classificationEvidence: triggerContext.panel.classificationEvidence,
+              },
+            }
+          : {}),
       };
       const rect = control.getBoundingClientRect();
       const tag = control.tagName.toLowerCase();
@@ -1088,11 +1576,7 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
         (['button', 'menuitem', 'option', 'tab'].includes(role) ? 80 : 0) +
         hitScore +
         Math.min(120, (rect.width * rect.height) / 100);
-      const dedupeKey = `${intent}|${targetRef}|${canonicalLabel}`;
-      const previous = actionByKey.get(dedupeKey);
-      if (!previous || score > previous.score) {
-        actionByKey.set(dedupeKey, { action, score });
-      }
+      addAction(action, score);
     }
 
     return Array.from(actionByKey.values())
@@ -1648,10 +2132,14 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
   }
 
   cards.sort((left, right) => left.firstSeenGlobalTop - right.firstSeenGlobalTop);
-  const filterState = collectFilterState();
+  const floatingSurfaces = collectFloatingSurfaces();
+  const floatingFilterPanels = floatingSurfaces.filter(
+    (surface): surface is FloatingFilterPanelObject => surface.classification === 'filter_panel',
+  );
+  const filterState = collectFilterState(floatingFilterPanels);
   const searchAction = searchInputCandidate();
   const observedFilterActions = filterCandidateActions(filterState);
-  const visibleFilterActions = visibleFilterCandidateActions();
+  const visibleFilterActions = visibleFilterCandidateActions(floatingFilterPanels);
   const visibleCardActions: PageCandidateAction[] = cards
     .map((card) => card.actionTarget?.toolArgs?.candidateAction)
     .filter((action): action is NonNullable<typeof action> => Boolean(action))
@@ -1688,6 +2176,26 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
   return {
     cards,
     filterState,
+    floatingSurfaces: floatingSurfaces.map((surface) => ({
+      surfaceType: 'floating_surface' as const,
+      panelRef: surface.panelRef,
+      classification: surface.classification,
+      ...(normalize(surface.element.getAttribute('role'))
+        ? { role: normalize(surface.element.getAttribute('role')) }
+        : {}),
+      ...(normalize(
+        surface.element.getAttribute('aria-label') || surface.element.getAttribute('title') || '',
+      )
+        ? {
+            label: normalize(
+              surface.element.getAttribute('aria-label') ||
+                surface.element.getAttribute('title') ||
+                '',
+            ),
+          }
+        : {}),
+      classificationEvidence: surface.classificationEvidence,
+    })),
     pageRegions: [
       ...(searchAction
         ? [
@@ -2241,29 +2749,36 @@ class CollectResultCardsTool extends BaseBrowserToolExecutor {
             ];
       const cards = selectedCards.map((card, index) => {
         const stableTarget = stableResultCardTarget(card);
+        const semanticCard = withCollectedResultCardSemanticAliases(card);
         return {
           rank: index + 1,
-          title: card.title,
-          ...(card.url ? { url: card.url } : {}),
+          title: semanticCard.title,
+          ...(semanticCard.url ? { url: semanticCard.url } : {}),
           ...(stableTarget
             ? {
                 targetRef: stableTarget.targetRef,
                 candidateActionId: stableTarget.candidateActionId,
                 targetabilityStatus: 'stable_click_target',
               }
-            : card.url
+            : semanticCard.url
               ? { targetabilityStatus: 'url_fallback' }
               : { targetabilityStatus: 'not_targetable' }),
-          ...(card.primaryText ? { primaryText: card.primaryText } : {}),
-          ...(card.secondaryText ? { secondaryText: card.secondaryText } : {}),
-          ...(card.metaText ? { metaText: card.metaText } : {}),
-          ...(card.interactionText ? { interactionText: card.interactionText } : {}),
-          ...(card.actionTarget ? { actionTarget: card.actionTarget } : {}),
-          imageCount: card.imageCount,
-          sourceScrollY: card.sourceScrollY,
-          rect: card.rect,
-          confidence: card.confidence,
-          reasons: card.reasons,
+          ...(semanticCard.primaryText ? { primaryText: semanticCard.primaryText } : {}),
+          ...(semanticCard.secondaryText ? { secondaryText: semanticCard.secondaryText } : {}),
+          ...(semanticCard.metaText ? { metaText: semanticCard.metaText } : {}),
+          ...(semanticCard.interactionText
+            ? { interactionText: semanticCard.interactionText }
+            : {}),
+          ...(semanticCard.author ? { author: semanticCard.author } : {}),
+          ...(semanticCard.time ? { time: semanticCard.time } : {}),
+          ...(semanticCard.interaction ? { interaction: semanticCard.interaction } : {}),
+          ...(semanticCard.likes ? { likes: semanticCard.likes } : {}),
+          ...(semanticCard.actionTarget ? { actionTarget: semanticCard.actionTarget } : {}),
+          imageCount: semanticCard.imageCount,
+          sourceScrollY: semanticCard.sourceScrollY,
+          rect: semanticCard.rect,
+          confidence: semanticCard.confidence,
+          reasons: semanticCard.reasons,
         };
       });
       const complete = cards.length >= minResults;
@@ -2342,7 +2857,7 @@ class CollectResultCardsTool extends BaseBrowserToolExecutor {
         targetabilitySummary,
         complete,
         status: complete ? 'complete_enough' : 'partial',
-        cards: cards.map((card) => withCollectedResultCardSemanticAliases(card)),
+        cards,
         collection,
         recommendedNextAction,
         claimBoundary,

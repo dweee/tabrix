@@ -213,6 +213,7 @@ describe('tabrix metadata envelope', () => {
   });
 
   it.each([
+    [TOOL_NAMES.BROWSER.GET_WINDOWS_AND_TABS],
     [TOOL_NAMES.BROWSER.PERFORMANCE_START_TRACE],
     [TOOL_NAMES.BROWSER.PERFORMANCE_STOP_TRACE],
     [TOOL_NAMES.CONTEXT.CHOOSE],
@@ -242,7 +243,6 @@ describe('tabrix metadata envelope', () => {
   });
 
   it.each([
-    [TOOL_NAMES.BROWSER.GET_WINDOWS_AND_TABS],
     [TOOL_NAMES.BROWSER.SCREENSHOT],
     [TOOL_NAMES.BROWSER.CONSOLE],
     [TOOL_NAMES.BROWSER.NETWORK_CAPTURE],

@@ -381,6 +381,9 @@ export async function buildModeOutput(params: {
   sharedPayload.searchSurface = buildSearchSurface({
     assistantGuidance: params.assistantGuidance,
     pageRole: sharedPayload.summary?.pageRole,
+    tabId: params.tabId,
+    currentUrl: params.currentUrl,
+    observationStartedAtMs: Date.parse(observedAt),
     interactiveElements,
     candidateActions,
     visibleSearchFilterState: params.visibleSearchFilterState,
@@ -408,7 +411,7 @@ export async function buildModeOutput(params: {
     objectLifecycle: sharedPayload.objectLifecycle,
     cdpSensing: params.loadReadiness.cdpSensing,
   });
-  const { pageObjectSnapshot, postActionDeltaEvidence } =
+  const { pageObjectSnapshot, postActionDeltaEvidence, searchResultDelta } =
     buildAndRememberReadPageObjectSensingOutput({
       tabId: params.tabId,
       currentUrl: params.currentUrl,
@@ -421,7 +424,11 @@ export async function buildModeOutput(params: {
       pageStability: params.pageStability,
       loadReadiness: params.loadReadiness,
       visibleTextContent: params.visibleTextContent,
+      searchResultDelta: sharedPayload.searchSurface?.resultDelta,
     });
+  if (sharedPayload.searchSurface?.resultDelta && searchResultDelta) {
+    sharedPayload.searchSurface.resultDelta = searchResultDelta;
+  }
   if (postActionDeltaEvidence) {
     sharedPayload.postActionDeltaEvidence = postActionDeltaEvidence;
   }

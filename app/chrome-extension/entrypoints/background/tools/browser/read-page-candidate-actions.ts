@@ -910,6 +910,7 @@ export function buildCandidateActions(
       ...(nextRequiredSelector ? { nextRequiredSelector } : {}),
       ...(nextRequiredSelectorSource ? { nextRequiredSelectorSource } : {}),
       ...(nextRequiredCheck ? { nextRequiredCheck } : {}),
+      ...(element.rect ? { snapshotRect: element.rect } : {}),
       locatorChain,
       ...(intent ? { intent } : {}),
     });
@@ -1041,6 +1042,7 @@ function bindVisibleRegionRowsToDetailActions(
         : 'source_element_actionability=unknown; source=visible_region_rows; target_freshness=current_read_page_snapshot_only; business_success_not_proven_by_candidate_action',
       ...(element?.visibility ? { visibility: element.visibility } : {}),
       nextRequiredCheck: 'run_action_then_fresh_same_tab_read_to_verify_page_or_object_state',
+      ...(element?.rect ? { snapshotRect: element.rect } : {}),
       locatorChain,
       intent,
     };

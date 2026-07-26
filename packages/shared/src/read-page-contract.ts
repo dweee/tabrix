@@ -360,6 +360,37 @@ export interface ReadPageSearchResultCard {
   reason: string;
 }
 
+export interface ReadPageSearchResultDelta {
+  status: 'not_available' | 'baseline' | 'unchanged' | 'changed' | 'ambiguous' | string;
+  /**
+   * Result-card comparison is observation-only unless the authoritative
+   * postActionDeltaEvidence chain binds it to a pending action.
+   */
+  attribution: 'observation_only' | 'action_bound';
+  actionId: string | null;
+  postActionWatchId?: string;
+  beforeResultCount: number;
+  afterResultCount: number;
+  retainedCount: number;
+  addedCount: number;
+  removedCount: number;
+  reorderedCount: number;
+  overlapRate: number | null;
+  changedEnough: boolean;
+  sampleAddedResultKeys: string[];
+  sampleRemovedResultKeys: string[];
+  observation?: {
+    documentEpoch: string;
+    sequence: number;
+    previousSequence: number | null;
+    observedAt: string;
+    previousObservedAt: string | null;
+    snapshotTtlMs: number;
+  };
+  reason: string;
+  claimBoundary: string;
+}
+
 export interface ReadPageSearchSurface {
   status: 'not_detected' | 'detected' | 'ambiguous';
   queryState?: 'unknown' | 'empty' | 'non_empty';
@@ -397,6 +428,7 @@ export interface ReadPageSearchSurface {
     status: 'not_requested' | 'sufficient' | 'insufficient' | 'not_proven' | string;
     reason: string;
   };
+  resultDelta?: ReadPageSearchResultDelta;
   resultCoverage?: {
     observedResultCount: number;
     visibleRowsUsed: boolean;
@@ -625,6 +657,12 @@ export interface ReadPageCandidateAction {
   actionType: 'click' | 'fill' | string;
   targetRef: string;
   /**
+   * Declares how targetRef must be executed. Snapshot-local object handles
+   * require a live locator from the same read_page result and must never be
+   * forwarded as page-local accessibility refs.
+   */
+  executionTargetKind?: 'page_ref' | 'snapshot_locator' | 'stable_ref' | (string & {});
+  /**
    * Optional AI-facing action label copied from the source interactive element
    * after redaction. This is planning/evidence text only; execution still uses
    * targetRef / locatorChain.
@@ -683,6 +721,12 @@ export interface ReadPageCandidateAction {
    * values or account data.
    */
   nextRequiredCheck?: string;
+  /**
+   * Optional viewport rectangle copied from the current source object. This is
+   * snapshot-local execution evidence only; consumers must not persist it as a
+   * durable selector and must re-read after using it for an action.
+   */
+  snapshotRect?: ReadPageElementRect;
   locatorChain: ReadPageCandidateActionLocator[];
   /**
    * Optional AI-facing action intent. It lets the executor choose the right

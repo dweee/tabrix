@@ -16,6 +16,7 @@ import { buildCandidateActions } from '@/entrypoints/background/tools/browser/re
 import { extractVisibleRegionRows } from '@/entrypoints/background/tools/browser/visible-region-rows';
 import { inferPageUnderstanding } from '@/entrypoints/background/tools/browser/read-page-understanding';
 import { collectVisibleSearchSurfaceActions } from '@/entrypoints/background/tools/browser/read-page-visible-search-surface-actions';
+import { bindSearchResultDeltaToPostActionEvidence } from '@/entrypoints/background/tools/browser/read-page-object-sensing-output';
 import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
 
 const MODE_MINIMUM_FIELDS: Record<'compact' | 'normal' | 'full', string[]> = {
@@ -3913,6 +3914,7 @@ describe('read_page mode', () => {
         actionId: 'click-7004-1',
         targetObjectId: 'obj_cta',
         targetRef: 'ref_cta',
+        actionIntent: 'content.open_detail',
         recordedAtMs: Date.now(),
       },
       previousSnapshot: {
@@ -3976,6 +3978,162 @@ describe('read_page mode', () => {
       source: 'read_page_delta_report',
       actionId: 'click-7004-1',
       targetObjectId: 'obj_cta',
+    });
+  });
+
+  it('uses rich result delta as list refresh evidence without creating an independent action id', () => {
+    const previousSnapshot = {
+      source: 'read_page_object_snapshot',
+      snapshotId: 'before-results',
+      observedAt: '2026-07-26T00:00:00.000Z',
+      pageUrl: 'https://example.test/search?q=ai',
+      pageTitle: 'Search',
+      pageType: 'content',
+      pageRole: 'search_results',
+      pageState: {
+        pageStability: 'stable_or_unknown',
+        readiness: 'ready',
+        baseUrl: 'example.test',
+        frameCount: 1,
+      },
+      sourceProvenance: ['dom'],
+      freshness: 'fresh',
+      objects: [],
+      actionableTargets: [],
+      objectCount: 0,
+      actionableObjectCount: 0,
+      claimBoundary: 'test',
+    } as any;
+    const currentSnapshot = {
+      ...previousSnapshot,
+      snapshotId: 'after-results',
+      observedAt: '2026-07-26T00:00:01.000Z',
+    };
+    const searchResultDelta = {
+      status: 'changed',
+      attribution: 'observation_only',
+      actionId: null,
+      beforeResultCount: 3,
+      afterResultCount: 3,
+      retainedCount: 2,
+      addedCount: 1,
+      removedCount: 1,
+      reorderedCount: 0,
+      overlapRate: 0.67,
+      changedEnough: true,
+      sampleAddedResultKeys: ['new result|author'],
+      sampleRemovedResultKeys: ['old result|author'],
+      reason: 'structured result-card set changed',
+      claimBoundary: 'observation only',
+    } as any;
+
+    const observationOnlyReport = buildReadPagePageDeltaReport({
+      tabId: 7006,
+      previousSnapshot,
+      currentSnapshot,
+      searchResultDelta,
+    });
+    const actionBoundReport = buildReadPagePageDeltaReport({
+      tabId: 7006,
+      previousSnapshot,
+      currentSnapshot,
+      pendingActionBinding: {
+        actionId: 'filter-7006-1',
+        targetObjectId: 'obj_filter',
+        targetRef: 'ref_filter',
+        actionIntent: 'filter.option_select',
+        recordedAtMs: Date.now(),
+      },
+      searchResultDelta,
+    });
+
+    expect(observationOnlyReport).toMatchObject({
+      actionId: null,
+      deltaKind: 'list_refreshed',
+      changedRegions: expect.arrayContaining(['result_list']),
+    });
+    expect(actionBoundReport).toMatchObject({
+      actionId: 'filter-7006-1',
+      deltaKind: 'list_refreshed',
+      changedRegions: expect.arrayContaining(['result_list']),
+    });
+  });
+
+  it('binds result attribution only through authoritative post-action evidence', () => {
+    const resultDelta = {
+      status: 'changed',
+      attribution: 'observation_only',
+      actionId: null,
+      beforeResultCount: 2,
+      afterResultCount: 2,
+      retainedCount: 1,
+      addedCount: 1,
+      removedCount: 1,
+      reorderedCount: 0,
+      overlapRate: 0.5,
+      changedEnough: true,
+      sampleAddedResultKeys: ['new result|author'],
+      sampleRemovedResultKeys: ['old result|author'],
+      reason: 'structured result-card set changed',
+      claimBoundary: 'observation only',
+    } as any;
+
+    expect(bindSearchResultDeltaToPostActionEvidence(resultDelta, undefined)).toMatchObject({
+      attribution: 'observation_only',
+      actionId: null,
+      postActionWatchId: undefined,
+    });
+    const observationBoundDelta = {
+      ...resultDelta,
+      observation: {
+        documentEpoch: 'epoch:1',
+        sequence: 2,
+        previousSequence: 1,
+        observedAt: '2026-07-26T00:00:02.000Z',
+        previousObservedAt: '2026-07-26T00:00:00.000Z',
+        snapshotTtlMs: 30_000,
+      },
+    } as any;
+    const postActionEvidence = {
+      watchId: 'watch:after-results',
+      actionId: 'filter-7007-1',
+    } as any;
+    expect(
+      bindSearchResultDeltaToPostActionEvidence(observationBoundDelta, postActionEvidence, {
+        actionId: 'filter-7007-1',
+        targetObjectId: 'obj_filter',
+        targetRef: 'ref_filter',
+        actionIntent: 'filter.option_select',
+        recordedAtMs: Date.parse('2026-07-26T00:00:01.000Z'),
+      }),
+    ).toMatchObject({
+      attribution: 'action_bound',
+      actionId: 'filter-7007-1',
+      postActionWatchId: 'watch:after-results',
+    });
+    expect(
+      bindSearchResultDeltaToPostActionEvidence(observationBoundDelta, postActionEvidence, {
+        actionId: 'filter-7007-1',
+        targetObjectId: 'obj_account',
+        targetRef: 'ref_account',
+        actionIntent: 'menu.open',
+        recordedAtMs: Date.parse('2026-07-26T00:00:01.000Z'),
+      }),
+    ).toMatchObject({
+      attribution: 'observation_only',
+      actionId: null,
+    });
+    expect(
+      bindSearchResultDeltaToPostActionEvidence(observationBoundDelta, postActionEvidence, {
+        actionId: 'filter-7007-1',
+        targetObjectId: 'obj_filter',
+        targetRef: 'ref_filter',
+        actionIntent: 'filter.option_select',
+        recordedAtMs: Date.parse('2026-07-25T23:59:59.000Z'),
+      }),
+    ).toMatchObject({
+      attribution: 'observation_only',
+      actionId: null,
     });
   });
 
@@ -4353,14 +4511,28 @@ describe('read_page mode', () => {
         viewport: { width: 1280, height: 720, dpr: 1 },
       });
 
-    const first = await readPageTool.execute({ mode: 'compact' });
-    const second = await readPageTool.execute({ mode: 'compact' });
+    const first = await readPageTool.execute({
+      mode: 'compact',
+      tabId: 5225,
+      assistantGuidance: { taskKind: 'search', requestedObjects: ['result_cards'] },
+    });
+    recordPendingActionBinding(5225, {
+      actionId: 'filter-5225-1',
+      targetRef: 'ref_query',
+      actionIntent: 'filter.option_select',
+    });
+    const second = await readPageTool.execute({
+      mode: 'compact',
+      tabId: 5225,
+      assistantGuidance: { taskKind: 'search', requestedObjects: ['result_cards'] },
+    });
     const firstPayload = JSON.parse((first.content[0] as { text: string }).text);
     const secondPayload = JSON.parse((second.content[0] as { text: string }).text);
 
     expect(firstPayload.postActionDeltaEvidence).toBeUndefined();
     expect(secondPayload.postActionDeltaEvidence).toMatchObject({
-      deltaKind: 'read_refresh_delta',
+      deltaKind: 'post_action_delta',
+      actionId: 'filter-5225-1',
       observedChangeKind: 'list_refreshed',
       changedRegions: expect.arrayContaining(['result_list']),
       objectDelta: {
@@ -4368,6 +4540,11 @@ describe('read_page mode', () => {
         changedObjectIds: expect.arrayContaining(['ref_card_new', 'ref_card_old']),
       },
       recommendedNextAction: 'continue_with_post_action_delta_context',
+    });
+    expect(secondPayload.searchSurface?.resultDelta).toMatchObject({
+      status: 'not_available',
+      attribution: 'observation_only',
+      actionId: null,
     });
   });
 

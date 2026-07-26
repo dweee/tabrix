@@ -67,6 +67,7 @@ function recordNavigationPendingAction(tabId: number | null | undefined, actionI
     actionId,
     targetObjectId: null,
     targetRef: null,
+    actionIntent: 'navigation',
   });
 }
 

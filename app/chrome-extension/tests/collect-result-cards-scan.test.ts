@@ -168,9 +168,308 @@ describe('collect result cards DOM scan', () => {
       (action) => action.label === '一周内' && action.intent === 'search.apply_filter.time_range',
     );
     const xpathLocators = oneWeekAction?.locatorChain.filter((locator) => locator.type === 'xpath');
-    expect(xpathLocators?.length).toBeGreaterThanOrEqual(2);
+    expect(xpathLocators).toHaveLength(1);
     expect(xpathLocators?.[0]?.value).toMatch(/^\/html|^\/\/\*\[@id=/);
-    expect(xpathLocators?.[1]?.value).toContain('normalize-space');
+    expect(xpathLocators?.some((locator) => locator.value.includes('normalize-space'))).toBe(false);
+  });
+
+  it('objectizes grouped options from a generic hover-revealed floating panel', () => {
+    setViewport();
+    document.body.innerHTML = `
+      <header>
+        <button data-testid="filter-trigger" data-rect="1060,24,92,40">筛选</button>
+      </header>
+      <section
+        role="dialog"
+        aria-label="Filters"
+        class="floating-popover-panel"
+        data-testid="floating-filter-panel"
+        data-rect="820,80,420,560"
+      >
+        <div data-testid="group-sort" data-rect="852,112,96,24">排序依据</div>
+        <button data-testid="sort-default" data-rect="852,144,96,40">综合</button>
+        <button data-testid="sort-latest" data-rect="960,144,96,40">最新</button>
+        <div data-testid="group-type" data-rect="852,208,96,24">笔记类型</div>
+        <div role="option" data-testid="type-image-text" data-rect="852,240,96,40">图文</div>
+        <div role="option" data-testid="type-video" data-rect="960,240,96,40">视频</div>
+        <div data-testid="group-scope" data-rect="852,304,96,24">搜索范围</div>
+        <button data-testid="scope-seen" data-rect="852,336,96,40">已看过</button>
+        <button data-testid="scope-unseen" data-rect="960,336,96,40">未看过</button>
+        <div data-testid="group-source" data-rect="852,400,96,24">内容来源</div>
+        <button data-testid="source-original" data-rect="852,432,96,40">原创</button>
+        <button data-testid="source-official" data-rect="960,432,96,40">官方</button>
+      </section>
+      <main role="list" data-testid="list" data-rect="0,100,780,580">
+        <article role="listitem" data-testid="card-alpha" data-rect="20,140,260,180">
+          <a data-testid="link-alpha" data-rect="28,148,240,112" href="https://example.test/note/alpha">AI 图片创作提示词合集</a>
+          <span>作者 1</span>
+          <span>收藏 100</span>
+        </article>
+      </main>
+    `;
+    installRects();
+
+    const scan = scanVisibleResultCardsInPage();
+
+    expect(scan.floatingSurfaces).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          surfaceType: 'floating_surface',
+          classification: 'filter_panel',
+          panelRef: expect.stringMatching(/^ref_floating_surface_[0-9a-f]{8}$/),
+          classificationEvidence: expect.arrayContaining(['search_filter_semantics']),
+        }),
+      ]),
+    );
+    expect(scan.candidateActions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: '原创',
+          intent: 'search.apply_filter.unknown',
+          matchReason: 'visible_filter_option',
+          executionTargetKind: 'snapshot_locator',
+          actionability: true,
+          provenance: expect.objectContaining({
+            surfaceType: 'floating_surface',
+            panelRef: expect.stringMatching(/^ref_floating_surface_[0-9a-f]{8}$/),
+            groupId: '内容来源',
+            optionRef: expect.stringMatching(/^ref_floating_option_[0-9a-f]{8}$/),
+          }),
+          locatorChain: expect.arrayContaining([
+            expect.objectContaining({
+              type: 'css',
+              value: expect.stringContaining('button[data-testid="source-original"]'),
+            }),
+          ]),
+        }),
+        expect.objectContaining({
+          label: '官方',
+          intent: 'search.apply_filter.unknown',
+          matchReason: 'visible_filter_option',
+          actionability: true,
+        }),
+      ]),
+    );
+    expect(scan.filterState.filterGroups).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          groupId: '内容来源',
+          groupLabel: '内容来源',
+          candidates: ['原创', '官方'],
+          source: 'visible_floating_panel',
+          provenance: expect.objectContaining({
+            surfaceType: 'floating_surface',
+            panelRef: expect.stringMatching(/^ref_floating_surface_[0-9a-f]{8}$/),
+            groupId: '内容来源',
+            optionRefs: expect.arrayContaining([
+              expect.stringMatching(/^ref_floating_option_[0-9a-f]{8}$/),
+            ]),
+          }),
+        }),
+        expect.objectContaining({
+          groupId: '搜索范围',
+          groupLabel: '搜索范围',
+          candidates: ['已看过', '未看过'],
+          source: 'visible_floating_panel',
+        }),
+      ]),
+    );
+    expect(scan.pageRegions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          regionId: 'search_filters',
+          candidateActionIds: expect.arrayContaining([
+            expect.stringMatching(/^ca_filter_unknown_[0-9a-f]{8}$/),
+          ]),
+        }),
+      ]),
+    );
+  });
+
+  it('keeps unrelated help and account dialogs as generic floating surfaces', () => {
+    setViewport();
+    document.body.innerHTML = `
+      <section role="dialog" aria-label="Help center" data-testid="help-dialog" data-rect="820,80,420,260">
+        <button class="active" data-testid="help-latest" data-rect="852,120,120,40">最新</button>
+        <button data-testid="help-video" data-rect="984,120,120,40">视频</button>
+        <button data-testid="help-week" data-rect="852,176,120,40">一周内</button>
+      </section>
+      <section role="dialog" aria-label="Account settings" data-testid="account-dialog" data-rect="820,360,420,260">
+        <button class="selected" data-testid="account-image" data-rect="852,400,120,40">图文</button>
+        <button data-testid="account-popular" data-rect="984,400,120,40">最热</button>
+      </section>
+      <main role="list" data-testid="list" data-rect="0,100,780,580">
+        <article role="listitem" data-testid="card-alpha" data-rect="20,140,260,180">
+          <a data-testid="link-alpha" data-rect="28,148,240,112" href="https://example.test/note/alpha">AI image workflow</a>
+        </article>
+      </main>
+    `;
+    installRects();
+
+    const scan = scanVisibleResultCardsInPage();
+
+    expect(scan.floatingSurfaces).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          surfaceType: 'floating_surface',
+          classification: 'generic',
+          label: 'Help center',
+          classificationEvidence: [],
+        }),
+        expect.objectContaining({
+          surfaceType: 'floating_surface',
+          classification: 'generic',
+          label: 'Account settings',
+          classificationEvidence: [],
+        }),
+      ]),
+    );
+    expect(scan.filterState.status).toBe('not_observed');
+    expect(scan.filterState.filterGroups).toEqual([]);
+    expect(
+      scan.candidateActions.some((action) => action.intent.startsWith('search.apply_filter.')),
+    ).toBe(false);
+  });
+
+  it('extracts nested option text once and keeps the concrete panel option target', () => {
+    setViewport();
+    document.body.innerHTML = `
+      <button
+        aria-controls="filter-surface"
+        aria-expanded="true"
+        data-testid="filter-trigger"
+        data-rect="1060,24,92,40"
+      >筛选</button>
+      <section
+        id="filter-surface"
+        role="dialog"
+        aria-label="Filters"
+        data-testid="filter-panel"
+        data-rect="820,80,420,300"
+      >
+        <div data-testid="group-source" data-rect="852,112,120,24">内容来源</div>
+        <div data-testid="original-wrapper" data-rect="852,144,120,40">
+          <button data-testid="source-original" data-rect="852,144,120,40"><span>原创</span></button>
+        </div>
+        <div data-testid="official-wrapper" data-rect="984,144,120,40">
+          <button data-testid="source-official" data-rect="984,144,120,40"><span>官方</span></button>
+        </div>
+      </section>
+      <main role="list" data-testid="list" data-rect="0,100,780,580">
+        <article role="listitem" data-testid="card-alpha" data-rect="20,240,260,180">
+          <a data-testid="link-alpha" data-rect="28,248,240,112" href="https://example.test/note/alpha">AI image workflow</a>
+        </article>
+      </main>
+    `;
+    installRects();
+
+    const scan = scanVisibleResultCardsInPage();
+    const originalActions = scan.candidateActions.filter(
+      (action) => action.label === '原创' && action.intent === 'search.apply_filter.unknown',
+    );
+
+    expect(originalActions).toHaveLength(1);
+    expect(originalActions[0]?.locatorChain).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'css',
+          value: expect.stringContaining('button[data-testid="source-original"]'),
+        }),
+      ]),
+    );
+    expect(scan.filterState.filterGroups).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          groupId: '内容来源',
+          candidates: ['原创', '官方'],
+        }),
+      ]),
+    );
+  });
+
+  it('never rebinds a panel option to a same-label control elsewhere on the page', () => {
+    setViewport();
+    document.body.innerHTML = `
+      <nav data-testid="page-nav" data-rect="0,0,600,72">
+        <button data-testid="outside-original" data-rect="20,16,120,40">原创</button>
+      </nav>
+      <section
+        role="dialog"
+        aria-label="Filters"
+        data-testid="filter-panel"
+        data-rect="820,80,420,300"
+      >
+        <div data-testid="group-source" data-rect="852,112,120,24">内容来源</div>
+        <button data-testid="panel-original" data-rect="852,144,120,40">原创</button>
+        <button data-testid="panel-official" data-rect="984,144,120,40">官方</button>
+      </section>
+      <main role="list" data-testid="list" data-rect="0,100,780,580">
+        <article role="listitem" data-testid="card-alpha" data-rect="20,140,260,180">
+          <a data-testid="link-alpha" data-rect="28,148,240,112" href="https://example.test/note/alpha">AI image workflow</a>
+        </article>
+      </main>
+    `;
+    installRects();
+
+    const scan = scanVisibleResultCardsInPage();
+    const action = scan.candidateActions.find(
+      (candidate) =>
+        candidate.label === '原创' && candidate.intent === 'search.apply_filter.unknown',
+    );
+
+    expect(action?.locatorChain).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'css',
+          value: expect.stringContaining('button[data-testid="panel-original"]'),
+        }),
+      ]),
+    );
+    expect(action?.locatorChain).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'css',
+          value: expect.stringContaining('button[data-testid="outside-original"]'),
+        }),
+      ]),
+    );
+  });
+
+  it('scopes active state to classified filter panels and marks conflicting panel options ambiguous', () => {
+    setViewport();
+    document.body.innerHTML = `
+      <nav data-testid="global-tabs" data-rect="0,0,600,72">
+        <button class="active" data-testid="global-video" data-rect="20,16,120,40">视频</button>
+      </nav>
+      <section
+        role="dialog"
+        aria-label="Filters"
+        data-testid="filter-panel"
+        data-rect="820,80,420,300"
+      >
+        <div data-testid="group-sort" data-rect="852,112,120,24">排序依据</div>
+        <button class="active" data-testid="sort-latest" data-rect="852,144,120,40">最新</button>
+        <button aria-selected="true" data-testid="sort-popular" data-rect="984,144,120,40">最热</button>
+      </section>
+      <main role="list" data-testid="list" data-rect="0,100,780,580">
+        <article role="listitem" data-testid="card-alpha" data-rect="20,140,260,180">
+          <a data-testid="link-alpha" data-rect="28,148,240,112" href="https://example.test/note/alpha">AI image workflow</a>
+        </article>
+      </main>
+    `;
+    installRects();
+
+    const scan = scanVisibleResultCardsInPage();
+    const sortGroup = scan.filterState.filterGroups.find((group) => group.groupId === '排序依据');
+
+    expect(scan.filterState.contentType).toBeUndefined();
+    expect(scan.filterState.appliedLabels).not.toContain('视频');
+    expect(scan.filterState.sort).toBeUndefined();
+    expect(sortGroup).toMatchObject({
+      selected: null,
+      candidates: ['最新', '最热'],
+      ambiguous: true,
+    });
   });
 
   it('objectizes a visible search input as a fillable search target', () => {

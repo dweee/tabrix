@@ -17,6 +17,7 @@ import {
   safeAiOperationLabel,
 } from './read-page-perception-neutral';
 import { dominantLayoutHint } from './read-page-region-semantics';
+import { projectCandidateActionToExecutableAction } from './read-page-operation-map';
 
 const GLOBAL_MENU_MIN_ITEMS = 4;
 const MAX_NAVIGATION_REGION_OBJECTS = 12;
@@ -447,29 +448,5 @@ function toExecutableAction(
       return (right.confidence ?? 0) - (left.confidence ?? 0);
     })[0];
   if (!action) return undefined;
-  return {
-    candidateActionId: action.id,
-    actionType: action.actionType,
-    targetRef: action.targetRef,
-    locatorChain: action.locatorChain,
-    toolName: action.actionType === 'fill' ? 'chrome_fill_or_select' : 'chrome_click_element',
-    toolArgs: {
-      candidateAction: {
-        id: action.id,
-        actionType: action.actionType,
-        targetRef: action.targetRef,
-        confidence: action.confidence,
-        matchReason: action.matchReason,
-        ...(action.actionability ? { actionability: action.actionability } : {}),
-        ...(action.actionabilityReason ? { actionabilityReason: action.actionabilityReason } : {}),
-        ...(action.intentBoundary ? { intentBoundary: action.intentBoundary } : {}),
-        ...(action.nextRequiredTool ? { nextRequiredTool: action.nextRequiredTool } : {}),
-        ...(action.nextRequiredCheck ? { nextRequiredCheck: action.nextRequiredCheck } : {}),
-        locatorChain: action.locatorChain,
-        ...(action.intent ? { intent: action.intent } : {}),
-      },
-    },
-    claimBoundary:
-      'primaryAction is an execution hint only; success still requires Tabrix tool result and post-action verification',
-  };
+  return projectCandidateActionToExecutableAction(action);
 }

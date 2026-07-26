@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   ReadPageAssistantGuidance,
   ReadPageCandidateAction,
@@ -7,8 +7,10 @@ import type {
 } from '@tabrix/shared';
 import {
   buildSearchSurface,
+  buildSearchResultDelta,
   extractFilterPanelLabelsFromVisibleText,
   parseCollectionCountCandidate,
+  resetSearchResultDeltaMemoryForTests,
 } from '@/entrypoints/background/tools/browser/read-page-search-surface';
 
 function interactive(overrides: Partial<ReadPageInteractiveElement>): ReadPageInteractiveElement {
@@ -44,58 +46,67 @@ function candidate(overrides: Partial<ReadPageCandidateAction>): ReadPageCandida
   };
 }
 
-function visibleRows(): ReadPageVisibleRegionRows {
+function visibleRows(
+  rows?: Partial<ReadPageVisibleRegionRows['rows'][number]>[],
+): ReadPageVisibleRegionRows {
+  const baseRows: ReadPageVisibleRegionRows['rows'] = [
+    {
+      rowId: 'row_1',
+      title: 'AI poster workflow for shopping season',
+      primaryText: 'AI poster workflow for shopping season',
+      summary: null,
+      secondaryText: 'Design Lab',
+      metaText: 'today',
+      interactionText: '收藏 2,945',
+      visibleTextFields: ['AI poster workflow for shopping season'],
+      targetRef: 'ref_card_1',
+      targetRefCoverageRate: 1,
+      boundingBox: null,
+      regionId: 'region_row_1',
+      sourceRegion: 'content',
+      confidence: 0.86,
+      qualityReasons: ['target_ref_available'],
+    },
+    {
+      rowId: 'row_2',
+      title: 'Prompt patterns for poster variants',
+      primaryText: 'Prompt patterns for poster variants',
+      summary: null,
+      secondaryText: 'Creative Ops',
+      metaText: 'yesterday',
+      interactionText: '1.8万收藏',
+      visibleTextFields: ['Prompt patterns for poster variants'],
+      targetRef: 'ref_card_2',
+      targetRefCoverageRate: 1,
+      boundingBox: null,
+      regionId: 'region_row_2',
+      sourceRegion: 'content',
+      confidence: 0.84,
+      qualityReasons: ['target_ref_available'],
+    },
+  ];
+  const finalRows = rows?.length
+    ? rows.map((row, index) => ({
+        ...baseRows[Math.min(index, baseRows.length - 1)],
+        ...row,
+      }))
+    : baseRows;
   return {
     sourceDataSource: 'dom_region_rows',
-    rows: [
-      {
-        rowId: 'row_1',
-        title: 'AI poster workflow for shopping season',
-        primaryText: 'AI poster workflow for shopping season',
-        summary: null,
-        secondaryText: 'Design Lab',
-        metaText: 'today',
-        interactionText: '收藏 2,945',
-        visibleTextFields: ['AI poster workflow for shopping season'],
-        targetRef: 'ref_card_1',
-        targetRefCoverageRate: 1,
-        boundingBox: null,
-        regionId: 'region_row_1',
-        sourceRegion: 'content',
-        confidence: 0.86,
-        qualityReasons: ['target_ref_available'],
-      },
-      {
-        rowId: 'row_2',
-        title: 'Prompt patterns for poster variants',
-        primaryText: 'Prompt patterns for poster variants',
-        summary: null,
-        secondaryText: 'Creative Ops',
-        metaText: 'yesterday',
-        interactionText: '1.8万收藏',
-        visibleTextFields: ['Prompt patterns for poster variants'],
-        targetRef: 'ref_card_2',
-        targetRefCoverageRate: 1,
-        boundingBox: null,
-        regionId: 'region_row_2',
-        sourceRegion: 'content',
-        confidence: 0.84,
-        qualityReasons: ['target_ref_available'],
-      },
-    ],
-    rowCount: 2,
+    rows: finalRows,
+    rowCount: finalRows.length,
     visibleRegionRowsUsed: true,
     visibleRegionRowsRejectedReason: null,
     sourceRegion: 'content',
     rowExtractionConfidence: 0.86,
     cardExtractorUsed: true,
     cardPatternConfidence: 0.82,
-    cardRowsCount: 2,
+    cardRowsCount: finalRows.length,
     rowOrder: 'visual_order',
     targetRefCoverageRate: 1,
     regionQualityScore: 0.78,
-    visibleDomRowsCandidateCount: 2,
-    visibleDomRowsSelectedCount: 2,
+    visibleDomRowsCandidateCount: finalRows.length,
+    visibleDomRowsSelectedCount: finalRows.length,
     lowValueRegionRejectedCount: 0,
     footerLikeRejectedCount: 0,
     navigationLikeRejectedCount: 0,
@@ -137,6 +148,10 @@ describe('buildSearchSurface', () => {
     taskKind: 'search',
     requestedObjects: ['search_input', 'result_cards', 'detail_metrics'],
   };
+
+  beforeEach(() => {
+    resetSearchResultDeltaMemoryForTests();
+  });
 
   it('returns search controls and result cards when the assistant asks for search objects', () => {
     const surface = buildSearchSurface({
@@ -188,6 +203,295 @@ describe('buildSearchSurface', () => {
       status: 'insufficient',
     });
     expect(surface?.claimBoundary).toContain('observation');
+  });
+
+  it('reports same-tab search result deltas from structured result cards', () => {
+    const baseline = buildSearchSurface({
+      assistantGuidance: guidance,
+      tabId: 42,
+      currentUrl: 'https://example.com/search?q=poster&page=1',
+      interactiveElements: [],
+      candidateActions: [],
+      visibleRegionRows: visibleRows(),
+    });
+    expect(baseline?.resultDelta).toMatchObject({
+      status: 'baseline',
+      beforeResultCount: 0,
+      afterResultCount: 2,
+      changedEnough: false,
+    });
+
+    const after = buildSearchSurface({
+      assistantGuidance: guidance,
+      tabId: 42,
+      currentUrl: 'https://example.com/search?q=poster&filter=video',
+      interactiveElements: [],
+      candidateActions: [],
+      visibleRegionRows: visibleRows([
+        {
+          rowId: 'row_2_after',
+          title: 'Prompt patterns for poster variants',
+          primaryText: 'Prompt patterns for poster variants',
+          secondaryText: 'Creative Ops',
+          metaText: 'yesterday',
+          targetRef: 'ref_card_2_after',
+        },
+        {
+          rowId: 'row_3_after',
+          title: 'Short video prompt board',
+          primaryText: 'Short video prompt board',
+          secondaryText: 'Video Studio',
+          metaText: 'today',
+          interactionText: '收藏 80',
+          targetRef: 'ref_card_3_after',
+        },
+      ]),
+    });
+
+    expect(after?.resultDelta).toMatchObject({
+      status: 'changed',
+      attribution: 'observation_only',
+      actionId: null,
+      beforeResultCount: 2,
+      afterResultCount: 2,
+      retainedCount: 1,
+      addedCount: 1,
+      removedCount: 1,
+      reorderedCount: 0,
+      overlapRate: 0.5,
+      changedEnough: true,
+      sampleAddedResultKeys: ['short video prompt board|video studio'],
+      sampleRemovedResultKeys: ['ai poster workflow for shopping season|design lab'],
+    });
+    expect(after?.resultDelta?.claimBoundary).toContain('DOM/AX result-card evidence');
+  });
+
+  it('builds pure result delta facts without a browser snapshot store', () => {
+    const before = buildSearchSurface({
+      assistantGuidance: guidance,
+      interactiveElements: [],
+      candidateActions: [],
+      visibleRegionRows: visibleRows(),
+    })?.resultCards;
+    const after = buildSearchSurface({
+      assistantGuidance: guidance,
+      interactiveElements: [],
+      candidateActions: [],
+      visibleRegionRows: visibleRows([
+        {
+          rowId: 'row_2_after',
+          title: 'Prompt patterns for poster variants',
+          primaryText: 'Prompt patterns for poster variants',
+          secondaryText: 'Creative Ops',
+          metaText: 'yesterday',
+        },
+      ]),
+    })?.resultCards;
+
+    expect(
+      buildSearchResultDelta({
+        previousResultCards: before ?? [],
+        currentResultCards: after ?? [],
+      }),
+    ).toMatchObject({
+      status: 'changed',
+      retainedCount: 1,
+      addedCount: 0,
+      removedCount: 1,
+      changedEnough: true,
+    });
+  });
+
+  it('does not treat volatile metadata changes as result-card replacement', () => {
+    const before = buildSearchSurface({
+      assistantGuidance: guidance,
+      interactiveElements: [],
+      candidateActions: [],
+      visibleRegionRows: visibleRows(),
+    })?.resultCards;
+    const after = buildSearchSurface({
+      assistantGuidance: guidance,
+      interactiveElements: [],
+      candidateActions: [],
+      visibleRegionRows: visibleRows([
+        { metaText: '3 hours ago', interactionText: '收藏 3,012' },
+        { metaText: '2 days ago', interactionText: '2.1万收藏' },
+      ]),
+    })?.resultCards;
+
+    expect(
+      buildSearchResultDelta({
+        previousResultCards: before ?? [],
+        currentResultCards: after ?? [],
+      }),
+    ).toMatchObject({
+      status: 'unchanged',
+      retainedCount: 2,
+      addedCount: 0,
+      removedCount: 0,
+      reorderedCount: 0,
+      changedEnough: false,
+    });
+  });
+
+  it('counts reordering only within the retained-card sequence', () => {
+    const before = buildSearchSurface({
+      assistantGuidance: guidance,
+      interactiveElements: [],
+      candidateActions: [],
+      visibleRegionRows: visibleRows([
+        { title: 'Alpha', primaryText: 'Alpha', secondaryText: 'Author A' },
+        { title: 'Beta', primaryText: 'Beta', secondaryText: 'Author B' },
+        { title: 'Gamma', primaryText: 'Gamma', secondaryText: 'Author C' },
+      ]),
+    })?.resultCards;
+    const after = buildSearchSurface({
+      assistantGuidance: guidance,
+      interactiveElements: [],
+      candidateActions: [],
+      visibleRegionRows: visibleRows([
+        { title: 'New', primaryText: 'New', secondaryText: 'Author N' },
+        { title: 'Beta', primaryText: 'Beta', secondaryText: 'Author B' },
+        { title: 'Gamma', primaryText: 'Gamma', secondaryText: 'Author C' },
+      ]),
+    })?.resultCards;
+
+    expect(
+      buildSearchResultDelta({
+        previousResultCards: before ?? [],
+        currentResultCards: after ?? [],
+      }),
+    ).toMatchObject({
+      retainedCount: 2,
+      addedCount: 1,
+      removedCount: 1,
+      reorderedCount: 0,
+    });
+  });
+
+  it('expires old snapshots and starts a new observation baseline', () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-07-26T00:00:00.000Z'));
+      const firstObservedAt = Date.now();
+      const first = buildSearchSurface({
+        assistantGuidance: guidance,
+        tabId: 43,
+        currentUrl: 'https://example.com/search?q=poster',
+        observationStartedAtMs: firstObservedAt,
+        interactiveElements: [],
+        candidateActions: [],
+        visibleRegionRows: visibleRows(),
+      });
+      vi.advanceTimersByTime(30_001);
+      const second = buildSearchSurface({
+        assistantGuidance: guidance,
+        tabId: 43,
+        currentUrl: 'https://example.com/search?q=poster',
+        observationStartedAtMs: Date.now(),
+        interactiveElements: [],
+        candidateActions: [],
+        visibleRegionRows: visibleRows(),
+      });
+
+      expect(first?.resultDelta?.observation).toMatchObject({
+        sequence: 1,
+        previousSequence: null,
+        snapshotTtlMs: 30_000,
+      });
+      expect(second?.resultDelta).toMatchObject({
+        status: 'baseline',
+        observation: {
+          sequence: 2,
+          previousSequence: null,
+          snapshotTtlMs: 30_000,
+        },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('discards out-of-order same-tab observations without overwriting the latest snapshot', () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(5_000);
+      const first = buildSearchSurface({
+        assistantGuidance: guidance,
+        tabId: 44,
+        currentUrl: 'https://example.com/search?q=poster',
+        observationStartedAtMs: 2_000,
+        interactiveElements: [],
+        candidateActions: [],
+        visibleRegionRows: visibleRows(),
+      });
+      const stale = buildSearchSurface({
+        assistantGuidance: guidance,
+        tabId: 44,
+        currentUrl: 'https://example.com/search?q=poster',
+        observationStartedAtMs: 1_000,
+        interactiveElements: [],
+        candidateActions: [],
+        visibleRegionRows: visibleRows([{ title: 'Stale', primaryText: 'Stale' }]),
+      });
+      const latest = buildSearchSurface({
+        assistantGuidance: guidance,
+        tabId: 44,
+        currentUrl: 'https://example.com/search?q=poster',
+        observationStartedAtMs: 3_000,
+        interactiveElements: [],
+        candidateActions: [],
+        visibleRegionRows: visibleRows(),
+      });
+
+      expect(first?.resultDelta?.observation?.sequence).toBe(1);
+      expect(stale?.resultDelta).toMatchObject({
+        status: 'ambiguous',
+        attribution: 'observation_only',
+        actionId: null,
+      });
+      expect(stale?.resultDelta?.reason).toContain('out of order');
+      expect(latest?.resultDelta).toMatchObject({
+        status: 'unchanged',
+        observation: {
+          sequence: 2,
+          previousSequence: 1,
+        },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('advances the document epoch and drops cross-document comparison state', () => {
+    const first = buildSearchSurface({
+      assistantGuidance: guidance,
+      tabId: 45,
+      currentUrl: 'https://example.com/search?q=poster',
+      observationStartedAtMs: 1_000,
+      interactiveElements: [],
+      candidateActions: [],
+      visibleRegionRows: visibleRows(),
+    });
+    const navigated = buildSearchSurface({
+      assistantGuidance: guidance,
+      tabId: 45,
+      currentUrl: 'https://example.com/search?q=video',
+      observationStartedAtMs: 2_000,
+      interactiveElements: [],
+      candidateActions: [],
+      visibleRegionRows: visibleRows(),
+    });
+
+    expect(first?.resultDelta?.observation?.documentEpoch).toBe('epoch:1');
+    expect(navigated?.resultDelta).toMatchObject({
+      status: 'baseline',
+      observation: {
+        documentEpoch: 'epoch:2',
+        sequence: 2,
+        previousSequence: null,
+      },
+    });
   });
 
   it('recognizes a search textbox by stable structural identity when its visible label is dynamic', () => {
@@ -1145,7 +1449,7 @@ describe('buildSearchSurface', () => {
     });
   });
 
-  it('merges locator-backed visible filter candidate actions into the filter panel summary', () => {
+  it('objects a hover-revealed filter panel with targetable options, active state, and result cards', () => {
     const surface = buildSearchSurface({
       assistantGuidance: guidance,
       interactiveElements: [
@@ -1195,6 +1499,40 @@ describe('buildSearchSurface', () => {
           ],
         }),
       ],
+      visibleSearchFilterState: {
+        status: 'observed',
+        appliedLabels: ['图文', '最多收藏', '一周内'],
+        contentType: '图文',
+        sort: '最多收藏',
+        timeRange: '一周内',
+        groups: {
+          contentType: {
+            selected: '图文',
+            candidates: ['不限', '视频', '图文'],
+            source: 'dom_active_state',
+            confidence: 0.9,
+            ambiguous: false,
+            reason: 'selected option inferred from active DOM state',
+          },
+          sort: {
+            selected: '最多收藏',
+            candidates: ['综合', '最新', '最多收藏'],
+            source: 'dom_active_state',
+            confidence: 0.9,
+            ambiguous: false,
+            reason: 'selected option inferred from active DOM state',
+          },
+          timeRange: {
+            selected: '一周内',
+            candidates: ['不限', '一天内', '一周内'],
+            source: 'dom_active_state',
+            confidence: 0.9,
+            ambiguous: false,
+            reason: 'selected option inferred from active DOM state',
+          },
+        },
+      },
+      visibleRegionRows: visibleRows(),
       visibleTextContent: 'Filters 综合',
     });
 
@@ -1224,6 +1562,19 @@ describe('buildSearchSurface', () => {
         }),
       ]),
     );
+    expect(surface?.filterState).toMatchObject({
+      status: 'observed',
+      selected: {
+        contentType: '图文',
+        sort: '最多收藏',
+        timeRange: '一周内',
+      },
+      appliedLabels: expect.arrayContaining(['图文', '最多收藏', '一周内']),
+    });
+    expect(surface?.resultCards?.map((card) => card.targetRef)).toEqual([
+      'ref_card_1',
+      'ref_card_2',
+    ]);
   });
 
   it('merges visible DOM/style filter state when structured controls only prove defaults', () => {

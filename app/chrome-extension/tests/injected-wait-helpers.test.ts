@@ -134,6 +134,81 @@ describe('injected state-driven waits', () => {
     expect(response.elementInfo.isVisible).toBe(true);
   });
 
+  it('fills a rendered composite input when a decorative sibling owns its center hit point', async () => {
+    document.body.innerHTML = `
+      <div class="composite-search">
+        <textarea id="query" placeholder="Search"></textarea>
+        <div id="decoration">Ask AI</div>
+      </div>
+    `;
+    const input = document.getElementById('query') as HTMLTextAreaElement;
+    const decoration = document.getElementById('decoration') as HTMLDivElement;
+    setRect(input, { left: 20, top: 30, width: 420, height: 96 });
+    setRect(decoration, { left: 120, top: 50, width: 180, height: 40 });
+    document.elementFromPoint = vi.fn(() => decoration);
+
+    const listener = installInjectedHelper(
+      'inject-scripts/fill-helper.js',
+      '__FILL_HELPER_INITIALIZED__',
+    );
+    const response = await sendRequest(listener, {
+      action: 'fillElement',
+      selector: '#query',
+      value: 'composite query',
+    });
+
+    expect(response.success).toBe(true);
+    expect(input.value).toBe('composite query');
+    expect(response.elementInfo.isVisible).toBe(true);
+  });
+
+  it('rejects a rendered input hidden behind a modal overlay', async () => {
+    document.body.innerHTML = `
+      <main><input id="query" type="search" /></main>
+      <div id="modal" role="dialog" aria-modal="true">Blocking dialog</div>
+    `;
+    const input = document.getElementById('query') as HTMLInputElement;
+    const modal = document.getElementById('modal') as HTMLDivElement;
+    setRect(input, { left: 20, top: 30, width: 420, height: 48 });
+    setRect(modal, { left: 0, top: 0, width: 1024, height: 768 });
+    document.elementFromPoint = vi.fn(() => modal);
+
+    const listener = installInjectedHelper(
+      'inject-scripts/fill-helper.js',
+      '__FILL_HELPER_INITIALIZED__',
+    );
+    const response = await sendRequest(listener, {
+      action: 'fillElement',
+      selector: '#query',
+      value: 'must not fill',
+    });
+
+    expect(response.success).not.toBe(true);
+    expect(response.error).toContain('not visible');
+    expect(input.value).toBe('');
+  });
+
+  it('still rejects fillable controls that are outside the viewport', async () => {
+    document.body.innerHTML = '<input id="offscreen" type="search" />';
+    const input = document.getElementById('offscreen') as HTMLInputElement;
+    setRect(input, { left: 20, top: 1200, width: 220, height: 32 });
+    document.elementFromPoint = vi.fn(() => input);
+
+    const listener = installInjectedHelper(
+      'inject-scripts/fill-helper.js',
+      '__FILL_HELPER_INITIALIZED__',
+    );
+    const response = await sendRequest(listener, {
+      action: 'fillElement',
+      selector: '#offscreen',
+      value: 'must not fill',
+    });
+
+    expect(response.success).not.toBe(true);
+    expect(response.error).toContain('not visible');
+    expect(input.value).toBe('');
+  });
+
   it('fill reports stale ref lookup failures instead of hiding them', async () => {
     Object.defineProperty(window, '__claudeElementMap', {
       configurable: true,

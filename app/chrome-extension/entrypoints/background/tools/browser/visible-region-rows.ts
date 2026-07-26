@@ -1159,6 +1159,7 @@ function normalizeTargetRefFamily(value: string | null | undefined): string {
 function hasNearbyTitleRow(rows: VisibleRegionRow[], row: VisibleRegionRow): boolean {
   const rowBox = row.boundingBox;
   if (!rowBox || typeof rowBox.y !== 'number') return false;
+  const rowY = rowBox.y;
   return rows.some((candidate) => {
     if (
       candidate === row ||
@@ -1169,7 +1170,7 @@ function hasNearbyTitleRow(rows: VisibleRegionRow[], row: VisibleRegionRow): boo
     }
     const candidateBox = candidate.boundingBox;
     if (!candidateBox || typeof candidateBox.y !== 'number') return false;
-    const verticalDistance = Math.abs(candidateBox.y - rowBox.y);
+    const verticalDistance = Math.abs(candidateBox.y - rowY);
     if (verticalDistance > 90) return false;
     if (typeof rowBox.x === 'number' && typeof candidateBox.x === 'number') {
       return Math.abs(rowBox.x - candidateBox.x) <= 80;

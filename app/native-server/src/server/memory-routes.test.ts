@@ -242,6 +242,7 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
   });
 
   test.each([
+    [TOOL_NAMES.BROWSER.GET_WINDOWS_AND_TABS],
     [TOOL_NAMES.BROWSER.PERFORMANCE_START_TRACE],
     [TOOL_NAMES.BROWSER.PERFORMANCE_STOP_TRACE],
     [TOOL_NAMES.CONTEXT.CHOOSE],
@@ -284,7 +285,6 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
   );
 
   test.each([
-    [TOOL_NAMES.BROWSER.GET_WINDOWS_AND_TABS],
     [TOOL_NAMES.BROWSER.SCREENSHOT],
     [TOOL_NAMES.BROWSER.CONSOLE],
     [TOOL_NAMES.BROWSER.NETWORK_CAPTURE],
@@ -416,7 +416,6 @@ describe('memory read routes (B-001 · Stage 3e)', () => {
   );
 
   test.each([
-    [TOOL_NAMES.BROWSER.GET_WINDOWS_AND_TABS],
     [TOOL_NAMES.BROWSER.SCREENSHOT],
     [TOOL_NAMES.BROWSER.CONSOLE],
     [TOOL_NAMES.BROWSER.NETWORK_CAPTURE],

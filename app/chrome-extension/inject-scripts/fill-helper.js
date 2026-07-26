@@ -142,6 +142,43 @@ if (window.__FILL_HELPER_INITIALIZED__) {
     );
   }
 
+  function isInteractiveOverlay(element) {
+    if (!element || !(element instanceof Element)) return true;
+    const tagName = String(element.tagName || '').toLowerCase();
+    const role = String(element.getAttribute('role') || '').toLowerCase();
+    const tabIndex = Number(element.getAttribute('tabindex'));
+    return (
+      ['a', 'button', 'input', 'select', 'textarea', 'summary'].includes(tagName) ||
+      /^(button|link|checkbox|radio|menuitem|option|tab|textbox|combobox)$/.test(role) ||
+      element.hasAttribute('contenteditable') ||
+      (element.hasAttribute('tabindex') && Number.isFinite(tabIndex) && tabIndex >= 0)
+    );
+  }
+
+  function isLocalDecorativeOverlay(target, hitTarget) {
+    if (!target || !hitTarget || !(hitTarget instanceof Element)) return false;
+    if (isInteractiveOverlay(hitTarget)) return false;
+    if (
+      hitTarget.closest(
+        'dialog,[role="dialog"],[role="alertdialog"],[aria-modal="true"],[inert],[popover]',
+      )
+    ) {
+      return false;
+    }
+    const hitStyle = window.getComputedStyle(hitTarget);
+    if (hitStyle.position === 'fixed' || hitStyle.position === 'sticky') return false;
+
+    let localContainer = target.parentElement;
+    for (let depth = 0; localContainer && depth < 3; depth += 1) {
+      if (localContainer === document.body || localContainer === document.documentElement) {
+        return false;
+      }
+      if (localContainer.contains(hitTarget)) return true;
+      localContainer = localContainer.parentElement;
+    }
+    return false;
+  }
+
   function resolveElementForSelector(selector) {
     if (!selector) return null;
     const matches = Array.from(document.querySelectorAll(selector));
@@ -494,9 +531,13 @@ if (window.__FILL_HELPER_INITIALIZED__) {
   function isElementVisible(element) {
     if (!element) return false;
 
-    const style = window.getComputedStyle(element);
-    if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
-      return false;
+    let current = element;
+    while (current && current instanceof Element) {
+      const style = window.getComputedStyle(current);
+      if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+        return false;
+      }
+      current = current.parentElement;
     }
 
     const rect = element.getBoundingClientRect();
@@ -521,7 +562,8 @@ if (window.__FILL_HELPER_INITIALIZED__) {
     const elementAtPoint = document.elementFromPoint(centerX, centerY);
     if (!elementAtPoint) return false;
 
-    return element === elementAtPoint || element.contains(elementAtPoint);
+    if (element === elementAtPoint || element.contains(elementAtPoint)) return true;
+    return isDirectlyFillableElement(element) && isLocalDecorativeOverlay(element, elementAtPoint);
   }
 
   // Listen for messages from the extension

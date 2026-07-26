@@ -65,6 +65,7 @@ export const TOOL_MESSAGE_TYPES = {
   GENERATE_ACCESSIBILITY_TREE: 'generateAccessibilityTree',
   RESOLVE_REF: 'resolveRef',
   ENSURE_REF_FOR_SELECTOR: 'ensureRefForSelector',
+  ENSURE_REF_FOR_POINT: 'ensureRefForPoint',
   VERIFY_FINGERPRINT: 'verifyFingerprint',
   DISPATCH_HOVER_FOR_REF: 'dispatchHoverForRef',
 
