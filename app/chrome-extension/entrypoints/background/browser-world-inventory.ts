@@ -723,6 +723,7 @@ async function loadPersistedAiTabOwnership(): Promise<void> {
       readSucceeded = true;
     } catch {
       // BrowserWorld can recover from the other storage area, or retry on the next resync.
+      continue;
     }
   }
   aiTabOwnershipStorageLoaded = readSucceeded;
@@ -739,6 +740,7 @@ async function savePersistedAiTabOwnership(): Promise<void> {
       await storage.set({ [AI_TAB_OWNERSHIP_STORAGE_KEY]: records });
     } catch {
       // BrowserWorld must keep running even if extension storage is temporarily unavailable.
+      continue;
     }
   }
 }
@@ -1592,6 +1594,7 @@ function bind(hook: EventHook | undefined, listener: any): void {
       hook.removeListener?.(listener);
     } catch {
       // Best-effort detach for tests and service-worker restart.
+      return;
     }
   });
 }

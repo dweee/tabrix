@@ -106,8 +106,23 @@ export interface RecordChooseContextOutcomeInput {
   recordedAt: string;
 }
 
+export interface ChooseContextArtifactUsageSignal {
+  successful: boolean;
+  adopted: boolean;
+  selectedArtifacts: SelectedChooseContextArtifactAudit[];
+}
+
 export type RecordChooseContextOutcomeResult =
-  | { status: 'ok'; outcomeId: string }
+  | {
+      status: 'ok';
+      outcomeId: string;
+      /**
+       * Present only for the first definitive outcome of a decision.
+       * The caller must use this explicit AI write-back signal rather than
+       * inferring library success from browser/tool execution.
+       */
+      artifactUsage?: ChooseContextArtifactUsageSignal;
+    }
   | { status: 'unknown_decision' };
 
 export interface ChooseContextDecisionRow {
@@ -141,6 +156,7 @@ interface DecisionDbRow {
   strategy: string;
   fallback_strategy: string | null;
   created_at: string;
+  selected_artifacts_blob: string | null;
 }
 
 function serializeSelectedArtifacts(
@@ -159,6 +175,35 @@ function serializeSelectedArtifacts(
     schema: 'tabrix_choose_context_selected_artifacts_v1',
     items,
   });
+}
+
+function deserializeSelectedArtifacts(
+  blobValue: string | null,
+): SelectedChooseContextArtifactAudit[] {
+  if (!blobValue) return [];
+  try {
+    const payload = JSON.parse(blobValue) as {
+      schema?: unknown;
+      items?: unknown;
+    };
+    if (
+      payload.schema !== 'tabrix_choose_context_selected_artifacts_v1' ||
+      !Array.isArray(payload.items)
+    ) {
+      return [];
+    }
+    return payload.items.filter(
+      (item): item is SelectedChooseContextArtifactAudit =>
+        Boolean(item) &&
+        typeof item === 'object' &&
+        typeof (item as SelectedChooseContextArtifactAudit).kind === 'string' &&
+        (item as SelectedChooseContextArtifactAudit).kind.length > 0 &&
+        typeof (item as SelectedChooseContextArtifactAudit).ref === 'string' &&
+        (item as SelectedChooseContextArtifactAudit).ref.length > 0,
+    );
+  } catch {
+    return [];
+  }
 }
 
 interface OutcomeAggRow {
@@ -234,28 +279,68 @@ export class ChooseContextTelemetryRepository {
    * when the `decisionId` does not exist so the MCP layer can
    * distinguish "decision id we forgot about" from "permission denied".
    */
-  recordOutcome(input: RecordChooseContextOutcomeInput): RecordChooseContextOutcomeResult {
-    // We use a dedicated SELECT rather than relying on the FK
-    // constraint to fire because better-sqlite3 surfaces FK errors as
-    // generic SqliteError, which we would have to string-match. An
-    // explicit existence probe is one extra cheap query and gives the
-    // caller a clean structural status code.
-    const exists = this.db
-      .prepare(`SELECT 1 AS x FROM tabrix_choose_context_decisions WHERE decision_id = ?`)
-      .get(input.decisionId) as { x: number } | undefined;
-    if (!exists) {
-      return { status: 'unknown_decision' };
-    }
+  recordOutcome(
+    input: RecordChooseContextOutcomeInput,
+    applyArtifactUsage?: (signal: ChooseContextArtifactUsageSignal) => void,
+  ): RecordChooseContextOutcomeResult {
+    const record = this.db.transaction((): RecordChooseContextOutcomeResult => {
+      // The decision probe and prior-outcome check share the insert
+      // transaction so one decision cannot emit duplicate library-use signals.
+      const decision = this.db
+        .prepare(
+          `SELECT selected_artifacts_blob
+             FROM tabrix_choose_context_decisions
+            WHERE decision_id = ?`,
+        )
+        .get(input.decisionId) as { selected_artifacts_blob: string | null } | undefined;
+      if (!decision) {
+        return { status: 'unknown_decision' };
+      }
 
-    const outcomeId = randomUUID();
-    this.db
-      .prepare(
-        `INSERT INTO tabrix_choose_context_outcomes (
-           outcome_id, decision_id, outcome, recorded_at
-         ) VALUES (?, ?, ?, ?)`,
-      )
-      .run(outcomeId, input.decisionId, input.outcome, input.recordedAt);
-    return { status: 'ok', outcomeId };
+      const priorDefinitive = this.db
+        .prepare(
+          `SELECT COUNT(*) AS count
+             FROM tabrix_choose_context_outcomes
+            WHERE decision_id = ?
+              AND outcome IN ('reuse', 'fallback', 'completed', 'retried')`,
+        )
+        .get(input.decisionId) as { count: number };
+
+      const outcomeId = randomUUID();
+      this.db
+        .prepare(
+          `INSERT INTO tabrix_choose_context_outcomes (
+             outcome_id, decision_id, outcome, recorded_at
+           ) VALUES (?, ?, ?, ?)`,
+        )
+        .run(outcomeId, input.decisionId, input.outcome, input.recordedAt);
+
+      if (priorDefinitive.count > 0) {
+        return { status: 'ok', outcomeId };
+      }
+
+      const selectedArtifacts = deserializeSelectedArtifacts(decision.selected_artifacts_blob);
+      if (selectedArtifacts.length === 0) {
+        return { status: 'ok', outcomeId };
+      }
+
+      const successful = input.outcome === 'reuse' || input.outcome === 'completed';
+      const artifactUsage = {
+        successful,
+        adopted: successful,
+        selectedArtifacts,
+      };
+      // The callback writes to repositories backed by the same SQLite handle.
+      // Running it inside this transaction prevents a persisted telemetry
+      // outcome from claiming success when the four-library update failed.
+      applyArtifactUsage?.(artifactUsage);
+      return {
+        status: 'ok',
+        outcomeId,
+        artifactUsage,
+      };
+    });
+    return record();
   }
 
   findDecision(decisionId: string): ChooseContextDecisionRow | null {

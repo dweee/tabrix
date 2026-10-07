@@ -158,15 +158,7 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).not.toContain('Current tab is not a clickable web page');
     expect(tabSource).not.toContain('Page changed, read to confirm');
     expect(tabSource).not.toContain('isInternalTraceText(value)');
-    expect(tabSource).toContain("if (value === 'achieved' || value === 'true') return 'AI通过'");
-    expect(tabSource).toContain("if (value === 'partial') return 'AI部分完成'");
-    expect(tabSource).toContain(
-      "if (value === 'not_achieved' || value === 'false') return 'AI未通过'",
-    );
-    expect(tabSource).toContain("return '待AI评价'");
-    expect(tabSource).toContain("trace.aiFeedbackState === 'pending'");
-    expect(tabSource).toContain('trace.aiFeedbackRequired === true');
-    expect(tabSource).toContain("return '无需AI评价'");
+    expect(tabSource).toContain('formatMkeAiFeedbackStatus(trace)');
     expect(tabSource).not.toContain("return '业务通过'");
     expect(tabSource).not.toContain("return '待AI回写'");
   });
@@ -213,7 +205,8 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('function formatAiFeedbackLine');
     expect(tabSource).not.toContain('function formatAiFeedbackConfidenceLabel');
     expect(tabSource).toContain('function formatTraceLocationFact');
-    expect(tabSource).toContain('function formatReadableFeedbackLine');
+    expect(tabSource).toContain('formatMkeAiFeedback(trace)');
+    expect(tabSource).toContain('formatMkeAiFeedbackStatus(trace)');
     expect(tabSource).not.toContain('function formatTraceContext');
     expect(tabSource).not.toContain('trace.taskId,');
     expect(tabSource).not.toContain('trace.toolCallId,');
@@ -355,13 +348,11 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).toContain('formatAiBusinessStatus(trace)');
     expect(tabSource).toContain('trace.aiFeedback?.summary');
     expect(tabSource).toContain('trace.aiFeedback?.reasonCode');
-    expect(tabSource).toContain("'AI评价：待AI评价'");
-    expect(tabSource).toContain("trace.aiFeedbackState === 'pending'");
-    expect(tabSource).toContain('trace.aiFeedbackRequired === true');
-    expect(tabSource).toContain("return trace.aiFeedbackState === 'pending'");
+    expect(tabSource).toContain('formatMkeAiFeedbackDetail(trace)');
+    expect(tabSource).toContain('formatMkeAiFeedback(trace)');
     expect(tabSource).not.toContain('trace.statusView?.aiScore');
     expect(tabSource).not.toContain('trace.aiFeedback?.confidence');
-    expect(tabSource).toContain('AI评价：${compactText');
+    expect(tabSource).toContain('formatMkeAiFeedback(trace)');
     expect(tabSource).not.toContain('AI评分 ${Math.round(score * 100)}%');
     const removedSyntheticFeedbackPattern = new RegExp(
       `${['system', 'Evidence'].join('')}|${['tabrix', 'auto', 'evidence'].join('_')}`,
@@ -371,13 +362,13 @@ describe('Sidepanel MKE data tab', () => {
     expect(tabSource).not.toContain('trace.aiFeedbackScore ??');
     expect(tabSource).not.toContain('`置信 ${Math.round(trace.aiFeedbackScore * 100)}%`');
     expect(tabSource).not.toContain('AI反馈：');
-    expect(tabSource).toContain("replace(/DOM变化/g, '页面变化')");
-    expect(tabSource).toContain("replace(/被浏览器接受/g, '已执行')");
+    expect(tabSource).toContain('formatMkeAiFeedback(trace)');
     expect(tabSource).toContain('function isPresentString');
     expect(tabSource).not.toContain("['Tool / 工具', trace.toolName]");
     expect(tabSource).toContain('detailJson: formatMemoryTraceJson(trace)');
     expect(tabSource).toContain('function formatMemoryTraceJson');
-    expect(tabSource).toContain('aiEvaluation: feedback');
+    expect(tabSource).toContain('aiEvaluation,');
+    expect(tabSource).toContain('formatMkeAiFeedbackDetail(trace)');
     expect(tabSource).not.toContain('traceId: trace.traceId');
     expect(tabSource).not.toContain('taskId: trace.taskId');
     expect(tabSource).not.toContain('toolCallId: trace.toolCallId');

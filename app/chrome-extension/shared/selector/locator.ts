@@ -524,10 +524,9 @@ export class SelectorLocator {
 export function createChromeSelectorLocatorTransport(): SelectorLocatorTransport {
   return {
     sendMessage: async (tabId, message, options) => {
-      if (options && typeof options.frameId === 'number') {
-        return await chrome.tabs.sendMessage(tabId, message, { frameId: options.frameId });
-      }
-      return await chrome.tabs.sendMessage(tabId, message);
+      return await chrome.tabs.sendMessage(tabId, message, {
+        frameId: options?.frameId ?? 0,
+      });
     },
     getAllFrames: async (tabId) => {
       const frames = await chrome.webNavigation.getAllFrames({ tabId });

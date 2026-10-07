@@ -5040,6 +5040,31 @@ describe('handleToolCall execution wrapper', () => {
       };
     }
 
+    function activeFilterRegion(refSuffix: string): Record<string, unknown> {
+      return {
+        regionId: 'region_filter_panel',
+        regionType: 'filter_panel',
+        state: 'active_filter_state_observed',
+        confidence: 0.84,
+        objects: [
+          {
+            objectId: `filter_${refSuffix}`,
+            label: `filter:${refSuffix}`,
+            objectType: 'control',
+            targetRef: `ref_filter_${refSuffix}`,
+            actionTypes: ['click'],
+            targetability: 'target_ref',
+            confidence: 0.82,
+            reason: 'test active filter state',
+            state: 'selected',
+          },
+        ],
+        candidateActionIds: [`ca_filter_${refSuffix}`],
+        targetability: 'target_ref',
+        claimBoundary: 'test active-filter region',
+      };
+    }
+
     function weakContentListRegion(refPrefix: string): Record<string, unknown> {
       return {
         regionId: 'region_results',
@@ -5741,6 +5766,64 @@ describe('handleToolCall execution wrapper', () => {
       expect(auto.readPageCount).toBe(2);
     });
 
+    it('uncertain click readback invalidates same-task cache without recording action success', async () => {
+      markBridgeReady();
+      const auto = sessionManager.getOrCreateExternalTaskContext('mcp:auto:tab:1');
+      Object.defineProperty(auto, 'readBudget', { value: 5, writable: false });
+
+      mockReadPageRoundTrip('before-uncertain-click');
+      await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        requestedLayer: 'L0+L1',
+      });
+      expect(auto.lastReadLayer).toBe('L0+L1');
+
+      jest
+        .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
+        .mockResolvedValueOnce({
+          status: 'success',
+          data: {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: false,
+                  dispatchSucceeded: false,
+                  error: 'click_helper_response_timeout',
+                  postActionDelta: {
+                    actionId: 'click-1-uncertain',
+                  },
+                  postActionReadback: {
+                    freshReadRequired: true,
+                    sameTabVerificationRequired: true,
+                  },
+                }),
+              },
+            ],
+            isError: false,
+          },
+        } as never);
+      await handleToolCall('chrome_click_element', {
+        tabId: 1,
+        ref: 'ref_filter_option',
+      });
+
+      expect(auto.lastReadLayer).toBeNull();
+      expect(auto.consumePendingPageInteraction(1)).toBeNull();
+      expect(auto.getLifecycleTimeline().at(-1)).toMatchObject({
+        kind: 'refs_invalidated',
+        projectionId: 'click-1-uncertain',
+      });
+
+      mockReadPageRoundTrip('after-uncertain-click');
+      const result = await handleToolCall('chrome_read_page', {
+        tabId: 1,
+        requestedLayer: 'L0+L1',
+      });
+      expect(String(result.content[0].text)).toBe('after-uncertain-click');
+      expect(auto.readPageCount).toBe(2);
+    });
+
     it('binds post-action delta evidence to the pending action and target object', () => {
       const payload = bindPostActionDeltaEvidenceToPendingInteraction(
         {
@@ -6328,7 +6411,7 @@ describe('handleToolCall execution wrapper', () => {
         readPagePayloadWithRegions({
           projectionId: 'projection_before_apply_filter',
           tabId: 11,
-          pageRegions: [contentListRegion('before_filter')],
+          pageRegions: [contentListRegion('before_filter'), activeFilterRegion('default')],
         }),
       );
       await handleToolCall('chrome_read_page', {
@@ -6387,7 +6470,7 @@ describe('handleToolCall execution wrapper', () => {
         readPagePayloadWithRegions({
           projectionId: 'projection_after_apply_filter',
           tabId: 11,
-          pageRegions: [contentListRegion('after_filter')],
+          pageRegions: [contentListRegion('after_filter'), activeFilterRegion('time_range')],
           includeTopNRows: true,
         }),
       );
@@ -6404,7 +6487,7 @@ describe('handleToolCall execution wrapper', () => {
             actionId: 'ca_apply_filter_time_range',
             kind: 'search_results_updated',
             verdict: 'passed',
-            reason: 'result_collection_changed_after_action',
+            reason: 'active_filter_state_changed_with_result_collection_changed_after_action',
           }),
         },
       ]);
@@ -6413,7 +6496,8 @@ describe('handleToolCall execution wrapper', () => {
         canResumeOriginalTask: true,
         nextStep: 'continue_original_task',
         tabId: 11,
-        reason: 'region_state_search_results_updated_passed:result_collection_changed_after_action',
+        reason:
+          'region_state_search_results_updated_passed:active_filter_state_changed_with_result_collection_changed_after_action',
       });
       expect(auto.readPageCount).toBe(2);
     });

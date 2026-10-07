@@ -87,6 +87,20 @@ export function shouldRecordPageInteractionAfterResult(
   return (result as { isError?: boolean }).isError !== true;
 }
 
+export function shouldInvalidateReadForRequiredReadback(
+  toolName: string,
+  args: unknown,
+  result: CallToolResult,
+): boolean {
+  if (!shouldInvalidateReadAfterInteraction(toolName, args)) return false;
+  const payload = readJsonObjectFromCallToolResult(result);
+  const postActionReadback = readObject(payload?.postActionReadback);
+  return (
+    readBoolean(postActionReadback, 'freshReadRequired') === true &&
+    readBoolean(postActionReadback, 'sameTabVerificationRequired') !== false
+  );
+}
+
 export function inferPageInteractionChangeCause(
   toolName: string,
   result: CallToolResult,

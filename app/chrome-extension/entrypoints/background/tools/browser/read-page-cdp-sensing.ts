@@ -43,6 +43,7 @@ export function buildReadPageCDPSensingSummary(
     ...(snapshot.networkActivity ? { networkActivity: snapshot.networkActivity } : {}),
     ...(snapshot.networkResources ? { networkResources: snapshot.networkResources } : {}),
     ...(snapshot.console ? { console: snapshot.console } : {}),
+    ...(snapshot.domControlScan ? { domControlScan: snapshot.domControlScan } : {}),
     ...(snapshot.accessibility ? { accessibility: snapshot.accessibility } : {}),
     ...(snapshot.partialErrors?.length ? { partialErrors: snapshot.partialErrors } : {}),
     claimBoundary:

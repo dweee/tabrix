@@ -1,6 +1,24 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import type { MkeMemoryTraceSummary } from '@tabrix/shared';
 import { describe, expect, it } from 'vitest';
+import {
+  formatMkeAiFeedback,
+  formatMkeAiFeedbackDetail,
+  formatMkeAiFeedbackStatus,
+  formatMkeAiFeedbackStatusTone,
+} from '../entrypoints/sidepanel/tabs/mke-ai-feedback-display';
+
+function trace(overrides: Partial<MkeMemoryTraceSummary> = {}): MkeMemoryTraceSummary {
+  return {
+    traceId: 'trace-1',
+    toolName: 'chrome_click_element',
+    requestAt: '2026-10-04T00:00:00.000Z',
+    responseAt: '2026-10-04T00:00:01.000Z',
+    createdAt: '2026-10-04T00:00:01.000Z',
+    ...overrides,
+  };
+}
 
 describe('MkeDataTab render smoke', () => {
   const source = readFileSync(
@@ -8,6 +26,10 @@ describe('MkeDataTab render smoke', () => {
     'utf8',
   );
   const appSource = readFileSync(resolve(process.cwd(), 'entrypoints/sidepanel/App.vue'), 'utf8');
+  const feedbackSource = readFileSync(
+    resolve(process.cwd(), 'entrypoints/sidepanel/tabs/mke-ai-feedback-display.ts'),
+    'utf8',
+  );
 
   it('keeps the compact four-library shell and object list controls', () => {
     expect(appSource).toContain('<MkeDataTab />');
@@ -58,10 +80,64 @@ describe('MkeDataTab render smoke', () => {
   });
 
   it('does not show browser inventory rows as pending AI feedback', () => {
-    expect(source).toContain("trace.aiFeedbackState === 'pending'");
-    expect(source).toContain('trace.aiFeedbackRequired === true');
-    expect(source).toContain("return '无需AI评价'");
+    expect(feedbackSource).toContain("trace.aiFeedbackState === 'pending'");
+    expect(feedbackSource).toContain('trace.aiFeedbackRequired === true');
+    expect(feedbackSource).toContain("return '无需AI评价'");
     expect(source).not.toContain("'AI评价：无需评价'");
+  });
+
+  it('renders recorded unknown or missing feedback distinctly and keeps its summary', () => {
+    const unknown = trace({
+      aiFeedbackState: 'recorded',
+      aiFeedback: { businessStatus: 'unknown', summary: '页面已点击，但结果未能确认。' },
+    });
+    const missing = trace({
+      aiFeedbackState: 'recorded',
+      aiFeedback: { businessStatus: null, summary: '已提交操作，缺少结果证据。' },
+    });
+
+    expect(formatMkeAiFeedbackStatus(unknown)).toBe('评价已收到，业务结果未知');
+    expect(formatMkeAiFeedback(unknown).line).toBe(
+      '评价已收到，业务结果未知：页面已点击，但结果未能确认',
+    );
+    expect(formatMkeAiFeedbackStatusTone(unknown)).toBe('neutral');
+    expect(formatMkeAiFeedbackStatus(missing)).toBe('评价已收到，业务结果缺失');
+    expect(formatMkeAiFeedback(missing).line).toContain('已提交操作，缺少结果证据');
+    expect(formatMkeAiFeedbackDetail(unknown)).toEqual({
+      status: '评价已收到，业务结果未知',
+      summary: '页面已点击，但结果未能确认。',
+    });
+    expect(formatMkeAiFeedbackDetail(missing)).toEqual({
+      status: '评价已收到，业务结果缺失',
+      summary: '已提交操作，缺少结果证据。',
+    });
+    expect(formatMkeAiFeedbackStatus(missing)).not.toMatch(/待AI评价|无需AI评价|AI通过/);
+    expect(formatMkeAiFeedbackStatus(trace({ aiFeedbackState: 'recorded' }))).toBe(
+      '评价已收到，业务结果缺失',
+    );
+  });
+
+  it('preserves pending, not-required, passed, partial, and failed feedback meanings', () => {
+    expect(formatMkeAiFeedbackStatus(trace({ aiFeedbackState: 'pending' }))).toBe('待AI评价');
+    expect(formatMkeAiFeedbackStatus(trace({ aiFeedbackRequired: true }))).toBe('待AI评价');
+    expect(formatMkeAiFeedbackStatus(trace({ aiFeedbackState: 'not_required' }))).toBe(
+      '无需AI评价',
+    );
+    expect(formatMkeAiFeedbackStatus(trace({ aiFeedback: { businessStatus: 'achieved' } }))).toBe(
+      'AI通过',
+    );
+    expect(formatMkeAiFeedbackStatusTone(trace({ aiFeedback: { businessStatus: 'true' } }))).toBe(
+      'good',
+    );
+    expect(formatMkeAiFeedbackStatus(trace({ aiFeedback: { businessStatus: 'partial' } }))).toBe(
+      'AI部分完成',
+    );
+    expect(
+      formatMkeAiFeedbackStatus(trace({ aiFeedback: { businessStatus: 'not_achieved' } })),
+    ).toBe('AI未通过');
+    expect(formatMkeAiFeedbackStatusTone(trace({ aiFeedback: { businessStatus: 'false' } }))).toBe(
+      'warn',
+    );
   });
 
   it('keeps the right-rail layout compact and readable', () => {

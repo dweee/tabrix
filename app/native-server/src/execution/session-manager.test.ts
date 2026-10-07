@@ -3,6 +3,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { buildMemoryTraceBindingHash } from '../memory/feedback-binding';
+import {
+  ExperienceRecipeRepository,
+  KnowledgeModelRepository,
+} from '../memory/db/mke-core-repository';
+import { KnowledgeApiRepository } from '../memory/knowledge/knowledge-api-repository';
 import { SessionManager } from './session-manager';
 
 describe('SessionManager', () => {
@@ -471,6 +476,146 @@ describe('SessionManager', () => {
       const second = mgr.getOrCreateExternalTaskContext('mcp:auto:tab:10');
       expect(second).not.toBe(first);
       expect(second.readPageCount).toBe(0);
+    } finally {
+      mgr.close();
+    }
+  });
+
+  it('records selected Knowledge and Experience outcomes once per unique artifact', () => {
+    const mgr = new SessionManager({ dbPath: ':memory:' });
+    try {
+      const repos = (
+        mgr as unknown as {
+          repos: {
+            knowledgeModel: KnowledgeModelRepository;
+            experienceRecipe: ExperienceRecipeRepository;
+            knowledgeApi: KnowledgeApiRepository;
+          };
+        }
+      ).repos;
+      const knowledge = repos.knowledgeModel.upsert({
+        knowledgeId: 'knowledge-selected',
+        siteFamily: 'neutral.example',
+        pageRole: 'search_results',
+        pageModelKey: 'neutral-search',
+        pageStateModel: {},
+        objectGraph: {},
+        actionSurface: {},
+        successfulUseCount: 1,
+        failedUseCount: 1,
+        confidenceScore: 0.5,
+        lastValidatedAt: '2026-07-27T01:00:00.000Z',
+        createdAt: '2026-07-27T01:00:00.000Z',
+        updatedAt: '2026-07-27T01:00:00.000Z',
+      });
+      const experience = repos.experienceRecipe.save({
+        experienceId: 'experience-selected',
+        recipeName: 'generic filter recipe',
+        scenarioKey: 'mke:neutral.example:neutral-search',
+        taskSignature: 'tools:chrome_hover_element>chrome_click_element',
+        recipeFingerprint: 'generic-filter-recipe-v1',
+        siteFamily: 'neutral.example',
+        pageRole: 'search_results',
+        pageModelKey: 'neutral-search',
+        preconditions: {},
+        variableSchema: {},
+        steps: [{ toolName: 'chrome_hover_element' }, { toolName: 'chrome_click_element' }],
+        successCheck: {},
+        sourceTraceIds: ['trace-a', 'trace-b'],
+        successCount: 2,
+        failureCount: 0,
+        reliabilityScore: 1,
+        driftState: 'verified_once',
+        createdAt: '2026-07-27T01:00:00.000Z',
+        updatedAt: '2026-07-27T01:00:00.000Z',
+      });
+      const knowledgeApi = repos.knowledgeApi.upsert({
+        site: 'api.neutral.example',
+        family: 'observed',
+        method: 'GET',
+        urlPattern: 'api.neutral.example/items/:id',
+        endpointSignature: 'GET api.neutral.example/items/:id',
+        semanticTag: 'item_list',
+        statusClass: '2xx',
+        requestSummary: {
+          headerKeys: ['accept'],
+          queryKeys: ['page'],
+          bodyKeys: [],
+          hasAuth: false,
+          hasCookie: false,
+        },
+        responseSummary: {
+          contentType: 'application/json',
+          sizeBytes: 256,
+          shape: { kind: 'array', itemCount: 2, sampleItemKeys: ['id'] },
+        },
+        observedAt: '2026-07-27T01:00:00.000Z',
+      });
+      const artifacts = [
+        { kind: 'knowledge_page_model', ref: knowledge.knowledgeId },
+        { kind: 'knowledge_page_model', ref: knowledge.knowledgeId },
+        { kind: 'experience_recipe', ref: experience.experienceId },
+        { kind: 'experience_recipe', ref: experience.experienceId },
+        { kind: 'knowledge_api', ref: knowledgeApi.endpointId },
+        { kind: 'knowledge_api', ref: knowledgeApi.endpointId },
+        { kind: 'knowledge_api', ref: knowledgeApi.site },
+        { kind: 'unknown_kind', ref: 'ignored' },
+        { kind: 'knowledge_page_model', ref: 'missing' },
+      ];
+
+      expect(
+        mgr.recordMkeSelectedArtifactOutcome({
+          successful: true,
+          adopted: true,
+          selectedArtifacts: artifacts,
+          recordedAt: '2026-07-27T02:00:00.000Z',
+        }),
+      ).toEqual({ updatedExperienceCount: 1, updatedKnowledgeCount: 2 });
+      expect(repos.knowledgeModel.get(knowledge.knowledgeId)).toMatchObject({
+        successfulUseCount: 2,
+        failedUseCount: 1,
+        confidenceScore: 0.6667,
+        lastValidatedAt: '2026-07-27T02:00:00.000Z',
+      });
+      expect(repos.experienceRecipe.get(experience.experienceId)).toMatchObject({
+        successCount: 3,
+        failureCount: 0,
+        adoptionCount: 1,
+        reliabilityScore: 1,
+      });
+      expect(
+        repos.knowledgeApi.findBySignature(knowledgeApi.site, knowledgeApi.endpointSignature),
+      ).toMatchObject({
+        successfulUseCount: 1,
+        failedUseCount: 0,
+        lastValidatedAt: '2026-07-27T02:00:00.000Z',
+      });
+
+      mgr.recordMkeSelectedArtifactOutcome({
+        successful: false,
+        adopted: false,
+        selectedArtifacts: artifacts,
+        recordedAt: '2026-07-27T03:00:00.000Z',
+      });
+      expect(repos.knowledgeModel.get(knowledge.knowledgeId)).toMatchObject({
+        successfulUseCount: 2,
+        failedUseCount: 2,
+        confidenceScore: 0.5,
+        lastValidatedAt: '2026-07-27T03:00:00.000Z',
+      });
+      expect(repos.experienceRecipe.get(experience.experienceId)).toMatchObject({
+        successCount: 3,
+        failureCount: 1,
+        reliabilityScore: 0.75,
+        driftState: 'needs_revalidation',
+      });
+      expect(
+        repos.knowledgeApi.findBySignature(knowledgeApi.site, knowledgeApi.endpointSignature),
+      ).toMatchObject({
+        successfulUseCount: 1,
+        failedUseCount: 1,
+        lastValidatedAt: '2026-07-27T03:00:00.000Z',
+      });
     } finally {
       mgr.close();
     }

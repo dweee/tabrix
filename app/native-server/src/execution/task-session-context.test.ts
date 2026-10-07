@@ -339,6 +339,33 @@ describe('TaskSessionContext — redundancy + layer demotion', () => {
     expect(ctx.peekChooseContextDecision()).toBeNull();
     expect(ctx.peekVisibleRegionRows()).toBeNull();
   });
+
+  it('allows a fresh read after an uncertain interaction without recording action success', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.noteUrlChange('https://example.test/search?q=ai', 'search_results');
+    ctx.noteReadPage({
+      layer: 'L0+L1',
+      source: 'dom_region_rows',
+      targetRefs: ['ref_filter_option'],
+    });
+    expect(ctx.shouldAllowReadPage({ requestedLayer: 'L0+L1' }).reason).toBe('read_redundant');
+
+    ctx.noteFreshReadRequiredAfterUncertainInteraction({
+      action: 'chrome_click_element',
+      tabId: 9,
+      targetRefs: ['ref_filter_option'],
+    });
+
+    expect(ctx.shouldAllowReadPage({ requestedLayer: 'L0+L1' })).toMatchObject({
+      allowed: true,
+      reason: '',
+    });
+    expect(ctx.consumePendingPageInteraction(9)).toBeNull();
+    expect(ctx.getLifecycleTimeline().at(-1)).toMatchObject({
+      kind: 'refs_invalidated',
+      invalidatedRefs: ['fresh_read_required_after_uncertain_interaction', 'ref_filter_option'],
+    });
+  });
 });
 
 describe('TaskSessionContext — auth resume gate', () => {
@@ -479,6 +506,50 @@ describe('TaskSessionContext — auth resume gate', () => {
         canContinue: false,
         nextAction: 'run_chrome_read_page_force_refresh',
       },
+    });
+  });
+
+  it('permits only the current CDP and AX candidate without claiming the original task can resume', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.notePageProjectionAndBuildDelta(
+      makeProjection({ tabId: 42 }),
+      makeRuntimeFields({
+        currentPageLoadReadinessStatus: 'cdp_ax_actionable_after_wait',
+        currentPageStability: 'loading',
+        currentPageSnapshotUsableForBusinessAction: true,
+        currentPageLoadReadinessNextStepHint:
+          'use_current_cdp_ax_candidate_then_immediately_force_fresh_same_tab_read',
+      }),
+    );
+
+    expect(ctx.buildTaskResumeReadiness({ tabId: 42 })).toMatchObject({
+      status: 'not_proven',
+      canResumeOriginalTask: false,
+      nextStep: 'verify_postcondition',
+      evidenceKinds: [],
+      reason: 'no_resume_or_business_postcondition_evidence',
+    });
+  });
+
+  it('permits only the current CDP DOM candidate without claiming the original task can resume', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.notePageProjectionAndBuildDelta(
+      makeProjection({ tabId: 42 }),
+      makeRuntimeFields({
+        currentPageLoadReadinessStatus: 'cdp_dom_actionable_after_wait',
+        currentPageStability: 'loading',
+        currentPageSnapshotUsableForBusinessAction: true,
+        currentPageLoadReadinessNextStepHint:
+          'use_current_cdp_dom_candidate_then_immediately_force_fresh_same_tab_read',
+      }),
+    );
+
+    expect(ctx.buildTaskResumeReadiness({ tabId: 42 })).toMatchObject({
+      status: 'not_proven',
+      canResumeOriginalTask: false,
+      nextStep: 'verify_postcondition',
+      evidenceKinds: [],
+      reason: 'no_resume_or_business_postcondition_evidence',
     });
   });
 

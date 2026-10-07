@@ -102,6 +102,32 @@ describe('LivePageContextProvider — lookup order', () => {
     expect(result.fullReadByteLength).toBe(40_000);
   });
 
+  test('treats an explicitly validated current-task compact read as fresh', () => {
+    const provider = new LivePageContextProvider({
+      reader: makeReader({
+        findLatestForUrl: () =>
+          makeSnap({
+            currentPageValidated: true,
+            fullReadByteLength: 0,
+            protocolL0Blob: null,
+            protocolL1Blob: null,
+            protocolL2Blob: null,
+            candidateActionCount: 12,
+          }),
+      }),
+    });
+
+    const result = provider.getContext({ url: 'https://example.com/issues' });
+
+    expect(result).toMatchObject({
+      source: 'live_snapshot',
+      candidateActionsCount: 12,
+      fullReadByteLength: 0,
+      factSnapshotVerdict: 'fresh',
+      readinessVerdict: 'ready',
+    });
+  });
+
   test('preserves explicit object_library_snapshot source without calling it live', () => {
     const snap = makeSnap({
       contextSource: 'object_library_snapshot',

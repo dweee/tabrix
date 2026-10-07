@@ -60,6 +60,17 @@ const lastActionByTab = new Map<number, PendingActionBinding>();
 const LAST_ACTION_MAX_AGE_MS = 30_000;
 const LAST_ACTION_MAX_TABS = 64;
 
+function isResultChangingActionIntent(intent: string | null | undefined): boolean {
+  return Boolean(
+    intent &&
+    (intent === 'search.submit' ||
+      intent === 'search.category_select' ||
+      intent === 'filter.option_select' ||
+      intent === 'filter.time_range_select' ||
+      intent.startsWith('search.apply_filter.')),
+  );
+}
+
 export function recordPendingActionBinding(
   tabId: number,
   binding: {
@@ -68,10 +79,19 @@ export function recordPendingActionBinding(
     targetRef?: string | null;
     actionIntent?: string | null;
   },
+  options?: { preserveResultChangingAction?: boolean },
 ): void {
   if (!Number.isFinite(tabId)) return;
   const actionId = typeof binding.actionId === 'string' ? binding.actionId.trim() : '';
   if (!actionId) return;
+  const existing = peekPendingActionBinding(tabId);
+  if (
+    options?.preserveResultChangingAction === true &&
+    existing &&
+    isResultChangingActionIntent(existing.actionIntent)
+  ) {
+    return;
+  }
   lastActionByTab.delete(tabId);
   lastActionByTab.set(tabId, {
     actionId,
@@ -90,15 +110,30 @@ export function recordPendingActionBinding(
   }
 }
 
-export function consumePendingActionBinding(tabId: number): PendingActionBinding | null {
+export function peekPendingActionBinding(tabId: number): PendingActionBinding | null {
   if (!Number.isFinite(tabId)) return null;
   const binding = lastActionByTab.get(tabId);
   if (!binding) return null;
-  lastActionByTab.delete(tabId);
   if (Date.now() - binding.recordedAtMs > LAST_ACTION_MAX_AGE_MS) {
+    lastActionByTab.delete(tabId);
     return null;
   }
   return { ...binding };
+}
+
+export function clearPendingActionBinding(tabId: number, actionId?: string): void {
+  if (!Number.isFinite(tabId)) return;
+  const binding = lastActionByTab.get(tabId);
+  if (!binding) return;
+  if (actionId && binding.actionId !== actionId) return;
+  lastActionByTab.delete(tabId);
+}
+
+export function consumePendingActionBinding(tabId: number): PendingActionBinding | null {
+  const binding = peekPendingActionBinding(tabId);
+  if (!binding) return null;
+  lastActionByTab.delete(tabId);
+  return binding;
 }
 
 export function buildCDPRouteFingerprint(

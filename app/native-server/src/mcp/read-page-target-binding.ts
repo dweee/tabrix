@@ -8,26 +8,55 @@ import type {
 import { readJsonObjectFromCallToolResult } from './register-tool-result-json';
 import { readObject, readPositiveInteger, readString } from './register-tool-value-readers';
 
+export interface ReadPageIdentity {
+  url: string | null;
+  pageRole: string | null;
+}
+
+export function extractReadPageIdentity(payload: Record<string, unknown> | null): ReadPageIdentity {
+  if (!payload) return { url: null, pageRole: null };
+
+  const page = readObject(payload.page);
+  const summary = readObject(payload.summary);
+  const pageObjectSnapshot = readObject(payload.pageObjectSnapshot);
+  const compactFacts = readObject(readObject(payload.browserPageObjectCompact)?.facts);
+  const compactTab = readObject(compactFacts?.tab);
+
+  return {
+    url:
+      readString(page?.url) ??
+      readString(payload.url) ??
+      readString(payload.pageUrl) ??
+      readString(pageObjectSnapshot?.pageUrl) ??
+      readString(compactTab?.currentTabUrl),
+    pageRole:
+      readString(summary?.pageRole) ??
+      readString(payload.pageRole) ??
+      readString(pageObjectSnapshot?.pageRole),
+  };
+}
+
 export function buildReadPageContextMeasurement(
   payload: Record<string, unknown> | null,
   requestedLayer: ReadPageRequestedLayer,
 ): TaskReadPageContextMeasurement | null {
-  if (!payload || requestedLayer !== 'L0+L1+L2') return null;
+  if (!payload) return null;
   let fullReadByteLength = 0;
-  try {
-    fullReadByteLength = JSON.stringify(payload).length;
-  } catch {
-    return null;
+  if (requestedLayer === 'L0+L1+L2') {
+    try {
+      fullReadByteLength = JSON.stringify(payload).length;
+    } catch {
+      return null;
+    }
+    if (!Number.isFinite(fullReadByteLength) || fullReadByteLength <= 0) return null;
   }
-  if (!Number.isFinite(fullReadByteLength) || fullReadByteLength <= 0) return null;
 
-  const page = readObject(payload.page);
-  const summary = readObject(payload.summary);
+  const identity = extractReadPageIdentity(payload);
   const candidateActions = Array.isArray(payload.candidateActions) ? payload.candidateActions : [];
   const highValueObjects = Array.isArray(payload.highValueObjects) ? payload.highValueObjects : [];
   return {
-    url: readString(page?.url) ?? readString(payload.url) ?? readString(payload.pageUrl),
-    pageRole: readString(summary?.pageRole) ?? readString(payload.pageRole),
+    url: identity.url,
+    pageRole: identity.pageRole,
     fullReadByteLength,
     candidateActionsCount: candidateActions.length,
     highValueObjectCount: highValueObjects.length,

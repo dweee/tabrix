@@ -74,6 +74,64 @@ export function buildLoadReadiness(input: {
   const cdpConsoleErrorCount = input.cdpSensing?.console?.errorCount ?? 0;
   const cdpHardFailure = cdpNetworkFailureCount >= 3 || cdpConsoleErrorCount >= 3;
   const cdpSignalsSpaNavigation = input.cdpStabilityHint === 'spa_navigating';
+  const cdpActionableNodeCount = input.cdpSensing?.accessibility?.actionableNodeCount ?? 0;
+  const cdpDisabledNodeCount = input.cdpSensing?.accessibility?.stateSignals.disabledCount ?? 0;
+  const cdpLocatorCandidateCount =
+    input.cdpSensing?.accessibility?.locatorCoverage?.locatorCandidateCount ?? 0;
+  const cdpTargetBoundActionableCandidate = input.cdpSensing?.accessibility?.objectCandidates?.find(
+    (candidate) => {
+      const locator = candidate.locator;
+      const visibility = candidate.visibilityProbe;
+      const role = candidate.role.toLowerCase();
+      const roleSupportsAction = new Set([
+        'button',
+        'checkbox',
+        'combobox',
+        'link',
+        'menuitem',
+        'option',
+        'searchbox',
+        'switch',
+        'tab',
+        'textbox',
+      ]).has(role);
+      const hasLocator = Boolean(
+        locator?.cssSelector || locator?.axNodeId || typeof locator?.backendDOMNodeId === 'number',
+      );
+      const hasVisualBounds =
+        Number(locator?.visualBounds?.x ?? -1) >= 0 &&
+        Number(locator?.visualBounds?.y ?? -1) >= 0 &&
+        Number(locator?.visualBounds?.width ?? 0) > 0 &&
+        Number(locator?.visualBounds?.height ?? 0) > 0;
+      const targetVisibilityProven = visibility
+        ? visibility.domVisible === true &&
+          visibility.inViewport === true &&
+          visibility.occluded === false &&
+          visibility.centerHitTarget !== false
+        : hasVisualBounds;
+      return (
+        (candidate.actionTypes.length > 0 || roleSupportsAction) &&
+        candidate.state.disabled !== true &&
+        hasLocator &&
+        hasVisualBounds &&
+        targetVisibilityProven
+      );
+    },
+  );
+  const cdpAxActionable =
+    cdpTargetBoundActionableCandidate?.locator?.source === 'cdp_ax' &&
+    cdpActionableNodeCount > cdpDisabledNodeCount &&
+    cdpLocatorCandidateCount > 0 &&
+    Boolean(cdpTargetBoundActionableCandidate);
+  const cdpDomActionable = cdpTargetBoundActionableCandidate?.locator?.source === 'cdp_dom';
+  const cdpLocatorActionable = cdpAxActionable || cdpDomActionable;
+  const cdpNetworkQuiet =
+    input.cdpSensing?.available === true &&
+    (input.cdpSensing.likelyLoading === false ||
+      input.cdpSensing.readiness === 'interactive' ||
+      input.cdpSensing.readiness === 'complete') &&
+    input.cdpSensing.networkActivity?.inFlightCount === 0 &&
+    (input.cdpSensing.networkResources?.resourceInFlightCount ?? 0) === 0;
   const effectivePageStability: BrowserPageStability = cdpSignalsSpaNavigation
     ? 'changing'
     : input.pageStability;
@@ -87,6 +145,13 @@ export function buildLoadReadiness(input: {
     effectivePageStability === 'loading' ||
     effectivePageStability === 'changing' ||
     input.settleResult?.timedOut === true;
+  const cdpProvisionalActionable =
+    loading &&
+    !cdpHardFailure &&
+    !cdpSignalsSpaNavigation &&
+    cdpNetworkQuiet &&
+    cdpLocatorActionable;
+  const provisionalCandidateSource = cdpDomActionable ? 'cdp_dom' : 'cdp_ax';
 
   if (stableAfterWait || stableWithoutWait) {
     return {
@@ -100,9 +165,11 @@ export function buildLoadReadiness(input: {
       settleReason: input.settleResult?.reason ?? null,
       waitedMs: input.settleResult?.waitedMs ?? null,
       readyState: input.settleResult?.readyState ?? null,
-      canUseSnapshotForBusinessAction: true,
+      canUseSnapshotForBusinessAction: !cdpHardFailure,
       nextStepAction: cdpHardFailure ? 'block' : 'proceed',
-      nextStepHint: 'safe_to_use_structured_refs_with_postcondition_verification',
+      nextStepHint: cdpHardFailure
+        ? 'inspect_errors_then_reread_after_recovery_before_structured_actions'
+        : 'safe_to_use_structured_refs_with_postcondition_verification',
       claimBoundary: cdpHardFailure
         ? 'browser_tab_reports_stable_but_cdp_errors_are_high; inspect failures before business action'
         : 'browser_tab_reports_stable; still verify the business postcondition after any action',
@@ -133,7 +200,13 @@ export function buildLoadReadiness(input: {
 
   if (loading) {
     return {
-      status: input.waitedForPendingDocument ? 'loading_after_wait' : 'unknown',
+      status: cdpProvisionalActionable
+        ? provisionalCandidateSource === 'cdp_dom'
+          ? 'cdp_dom_actionable_after_wait'
+          : 'cdp_ax_actionable_after_wait'
+        : input.waitedForPendingDocument
+          ? 'loading_after_wait'
+          : 'unknown',
       pageStability: effectivePageStability,
       initialTabStatus: input.initialTabStatus,
       finalTabStatus: input.finalTabStatus,
@@ -143,16 +216,24 @@ export function buildLoadReadiness(input: {
       settleReason: input.settleResult?.reason ?? null,
       waitedMs: input.settleResult?.waitedMs ?? null,
       readyState: input.settleResult?.readyState ?? null,
-      canUseSnapshotForBusinessAction: false,
-      nextStepAction: cdpHardFailure ? 'block' : 'wait',
-      nextStepHint: cdpSignalsSpaNavigation
-        ? 'spa_navigation_detected; wait_then_force_fresh_read_page_before_business_actions'
-        : 'wait_then_force_fresh_read_page_before_business_actions',
-      claimBoundary: cdpHardFailure
-        ? 'document_is_not_stable_and_cdp_errors_are_high; do not continue business actions without recovery'
+      canUseSnapshotForBusinessAction: cdpProvisionalActionable,
+      nextStepAction: cdpProvisionalActionable ? 'proceed' : cdpHardFailure ? 'block' : 'wait',
+      nextStepHint: cdpProvisionalActionable
+        ? provisionalCandidateSource === 'cdp_dom'
+          ? 'use_current_cdp_dom_candidate_then_immediately_force_fresh_same_tab_read'
+          : 'use_current_cdp_ax_candidate_then_immediately_force_fresh_same_tab_read'
         : cdpSignalsSpaNavigation
-          ? 'cdp_detected_post_ready_spa_navigation; treat candidate objects as provisional until a fresh stable read'
-          : 'document_may_still_be_changing; treat candidate objects as provisional until a fresh stable read',
+          ? 'spa_navigation_detected; wait_then_force_fresh_read_page_before_business_actions'
+          : 'wait_then_force_fresh_read_page_before_business_actions',
+      claimBoundary: cdpProvisionalActionable
+        ? provisionalCandidateSource === 'cdp_dom'
+          ? 'chrome_tab_still_reports_loading; only the current locator-backed CDP DOM candidate is provisionally actionable, and action success plus business success require an immediate fresh same-tab read'
+          : 'chrome_tab_still_reports_loading; only the current locator-backed CDP+AX candidate is provisionally actionable, and action success plus business success require an immediate fresh same-tab read'
+        : cdpHardFailure
+          ? 'document_is_not_stable_and_cdp_errors_are_high; do not continue business actions without recovery'
+          : cdpSignalsSpaNavigation
+            ? 'cdp_detected_post_ready_spa_navigation; treat candidate objects as provisional until a fresh stable read'
+            : 'document_may_still_be_changing; treat candidate objects as provisional until a fresh stable read',
       ...(input.cdpSensing ? { cdpSensing: input.cdpSensing } : {}),
     };
   }

@@ -186,6 +186,171 @@ describe('read_page render=markdown projection', () => {
     expect(bulletCount).toBeLessThanOrEqual(8 + 16);
   });
 
+  it('keeps same-name interactive links that point at different hrefs', () => {
+    const md = buildMarkdownProjection({
+      url: 'https://example.com/items',
+      title: 'Items',
+      pageRole: 'web_page',
+      primaryRegion: null,
+      highValueObjects: [],
+      interactiveElements: [
+        { ref: 'ref_alpha', role: 'link', name: 'Details', href: '/items/alpha' },
+        { ref: 'ref_beta', role: 'link', name: 'Details', href: '/items/beta' },
+      ],
+    });
+
+    // Defect regression: dedup used to be keyed on role+name only, so the
+    // second "Details" link (different address) was silently dropped.
+    expect(md).toContain('- link "Details" → /items/alpha');
+    expect(md).toContain('- link "Details" → /items/beta');
+  });
+
+  it('still dedupes same-name links pointing at the exact same href', () => {
+    const md = buildMarkdownProjection({
+      url: 'https://example.com/items',
+      title: 'Items',
+      pageRole: 'web_page',
+      primaryRegion: null,
+      highValueObjects: [],
+      interactiveElements: [
+        { ref: 'ref_1', role: 'link', name: 'Details', href: '/items/alpha' },
+        { ref: 'ref_2', role: 'link', name: 'Details', href: '/items/alpha' },
+      ],
+    });
+
+    const alphaLines = md.match(/- link "Details" → \/items\/alpha/g) || [];
+    expect(alphaLines).toHaveLength(1);
+  });
+
+  it('keeps href case, query and fragment differences verbatim without normalization', () => {
+    const md = buildMarkdownProjection({
+      url: 'https://example.com/items',
+      title: 'Items',
+      pageRole: 'web_page',
+      primaryRegion: null,
+      highValueObjects: [],
+      interactiveElements: [
+        { ref: 'ref_1', role: 'link', name: 'Details', href: '/items/Alpha?tab=1#top' },
+        { ref: 'ref_2', role: 'link', name: 'Details', href: '/items/alpha?tab=1#top' },
+        { ref: 'ref_3', role: 'link', name: 'Details', href: '/items/Alpha?tab=2#top' },
+      ],
+    });
+
+    // No case folding, no query/fragment rewriting — addresses render as given.
+    expect(md).toContain('- link "Details" → /items/Alpha?tab=1#top');
+    expect(md).toContain('- link "Details" → /items/alpha?tab=1#top');
+    expect(md).toContain('- link "Details" → /items/Alpha?tab=2#top');
+  });
+
+  it('keeps existing behaviour for links without an href', () => {
+    const md = buildMarkdownProjection({
+      url: 'https://example.com/form',
+      title: 'Form',
+      pageRole: 'web_page',
+      primaryRegion: null,
+      highValueObjects: [],
+      interactiveElements: [
+        { ref: 'ref_1', role: 'button', name: 'Save' },
+        { ref: 'ref_2', role: 'button', name: 'Save' },
+        { ref: 'ref_3', role: 'button', name: 'Save', href: '/save' },
+      ],
+    });
+
+    // Missing href still renders without an arrow, and two href-less
+    // duplicates still collapse to one line (pre-existing behaviour).
+    const noHrefLines = md.match(/- button "Save"$/gm) || [];
+    expect(noHrefLines).toHaveLength(1);
+    expect(md).toContain('- button "Save" → /save');
+  });
+
+  it('keeps same-name links that differ only by fragment (both rows preserved)', () => {
+    const md = buildMarkdownProjection({
+      url: 'https://example.com/items',
+      title: 'Items',
+      pageRole: 'web_page',
+      primaryRegion: null,
+      highValueObjects: [],
+      interactiveElements: [
+        { ref: 'ref_top', role: 'link', name: 'Details', href: '/items/alpha#top' },
+        { ref: 'ref_bottom', role: 'link', name: 'Details', href: '/items/alpha#bottom' },
+      ],
+    });
+
+    // Fragment is part of the address: #top vs #bottom must both survive
+    // dedup and render verbatim (no fragment stripping/normalization).
+    expect(md).toContain('- link "Details" → /items/alpha#top');
+    expect(md).toContain('- link "Details" → /items/alpha#bottom');
+    const detailLines = md.split('\n').filter((line) => line.startsWith('- link "Details"'));
+    expect(detailLines).toEqual([
+      '- link "Details" → /items/alpha#top',
+      '- link "Details" → /items/alpha#bottom',
+    ]);
+  });
+
+  it('keeps missing-address dedup unchanged for undefined, null and empty-string hrefs', () => {
+    const missingHrefKinds = ['undefined', 'null', 'empty'] as const;
+
+    for (const kind of missingHrefKinds) {
+      const saveElement = (ref: string) => {
+        if (kind === 'undefined') return { ref, role: 'button', name: 'Save' };
+        const href = kind === 'null' ? (null as unknown as string) : '';
+        return { ref, role: 'button', name: 'Save', href };
+      };
+
+      const md = buildMarkdownProjection({
+        url: 'https://example.com/form',
+        title: 'Form',
+        pageRole: 'web_page',
+        primaryRegion: null,
+        highValueObjects: [],
+        interactiveElements: [
+          saveElement('ref_1'),
+          saveElement('ref_2'),
+          { ref: 'ref_3', role: 'button', name: 'Save', href: '/save' },
+        ],
+      });
+
+      // All three missing-address states behave like the old role+name
+      // dedup: same-name href-less duplicates collapse to one line, while
+      // the addressed row is unaffected.
+      const noHrefLines = md.match(/- button "Save"$/gm) || [];
+      expect(noHrefLines, `case ${kind}`).toHaveLength(1);
+      const saveWithHrefLines = md.match(/- button "Save" → \/save/g) || [];
+      expect(saveWithHrefLines, `case ${kind}`).toHaveLength(1);
+    }
+  });
+
+  it('does not mutate its inputs', () => {
+    const interactiveElements = [
+      { ref: 'ref_1', role: 'link', name: 'Details', href: '/items/alpha' },
+      { ref: 'ref_2', role: 'link', name: 'Details', href: '/items/beta' },
+    ];
+    const highValueObjects = [
+      {
+        id: 'hvo_1',
+        kind: 'interactive_element',
+        label: 'Details',
+        role: 'link',
+        reason: 'entry',
+        href: '/items/alpha',
+      },
+    ];
+    const interactiveSnapshot = structuredClone(interactiveElements);
+    const hvoSnapshot = structuredClone(highValueObjects);
+
+    buildMarkdownProjection({
+      url: 'https://example.com/items',
+      title: 'Items',
+      pageRole: 'web_page',
+      primaryRegion: null,
+      highValueObjects,
+      interactiveElements,
+    });
+
+    expect(interactiveElements).toEqual(interactiveSnapshot);
+    expect(highValueObjects).toEqual(hvoSnapshot);
+  });
+
   it('builds a deterministic markdown artifact ref so the click bridge can distinguish it from DOM snapshots', () => {
     expect(MARKDOWN_ARTIFACT_KIND).toBe('dom_markdown');
     expect(buildMarkdownArtifactRef(7)).toBe('artifact://read_page/tab-7/markdown');

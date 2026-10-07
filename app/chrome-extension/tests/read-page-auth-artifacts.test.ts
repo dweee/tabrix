@@ -1007,6 +1007,110 @@ describe('read_page auth artifacts', () => {
     });
   });
 
+  it.each(['single_snapshot', 'compared_snapshot'])(
+    'does not require login for readable public content with an optional account entry (%s)',
+    (snapshotStatus) => {
+      const collaboration = buildAuthCollaborationState({
+        pageRole: 'multi_region_page',
+        tabId: 9,
+        pageRegions: [
+          {
+            ...authQrRegions()[0],
+            objects: [
+              {
+                objectId: 'optional_signin',
+                objectType: 'control',
+                label: 'Sign in',
+                role: 'link',
+                actionTypes: ['click'],
+                targetability: 'target_ref',
+                targetRef: 'ref_signin',
+                confidence: 0.8,
+                reason: 'candidate_action_auth_trigger_signal',
+              },
+            ],
+          },
+          {
+            regionId: 'region_content',
+            regionType: 'content',
+            state: 'content_available_candidate',
+            objects: [
+              {
+                objectId: 'public_document',
+                label: 'Public documentation',
+                objectType: 'doc_block',
+                actionTypes: [],
+                targetability: 'not_clickable',
+                confidence: 0.9,
+                reason: 'readable content',
+              },
+            ],
+            candidateActionIds: [],
+            targetability: 'not_clickable',
+            claimBoundary: 'readable public content',
+          },
+        ],
+        browserPageObject: browserPageObject(['auth_required_candidate'], snapshotStatus),
+        browserWorldTab: aiOwnedTab(),
+        authArtifactStatus: buildNotRequestedAuthArtifactStatus(),
+        artifactRefs: [],
+      });
+
+      expect(collaboration).toMatchObject({
+        status: 'not_required',
+        userAction: { required: false },
+        evidence: { resumeVerification: { status: 'not_required', forceRefreshRequired: false } },
+      });
+    },
+  );
+
+  it.each(['modal', 'qr_code', 'form'] as const)(
+    'keeps auth collaboration required when readable content also has a concrete %s challenge',
+    (regionType) => {
+      const collaboration = buildAuthCollaborationState({
+        pageRole: 'multi_region_page',
+        tabId: 9,
+        pageRegions: [
+          authQrRegions()[0],
+          {
+            ...authQrRegions()[1],
+            regionType: 'content',
+            state: 'content_available_candidate',
+          },
+          {
+            ...otpAuthRegions()[0],
+            regionType,
+            objects:
+              regionType === 'form'
+                ? [
+                    {
+                      objectId: 'password_input',
+                      label: 'Password',
+                      role: 'textbox',
+                      actionTypes: ['fill'],
+                      targetability: 'target_ref',
+                      targetRef: 'ref_password',
+                      confidence: 0.9,
+                      reason: 'credential input',
+                    },
+                  ]
+                : [],
+          },
+        ],
+        browserPageObject: browserPageObject(['auth_required_candidate']),
+        browserWorldTab: aiOwnedTab(),
+        authArtifactStatus: buildNotRequestedAuthArtifactStatus(),
+        artifactRefs: [],
+      });
+
+      expect(collaboration).toMatchObject({
+        status: 'required',
+        userAction: { required: true },
+        evidence: { resumeVerification: { status: 'required_after_user_action' } },
+      });
+    },
+  );
+
   it('marks expired QR collaboration as not_proven instead of waiting', () => {
     const collaboration = buildAuthCollaborationState({
       pageRole: 'login_required',

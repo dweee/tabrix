@@ -1,6 +1,7 @@
 import { type Tool } from '@modelcontextprotocol/sdk/types.js';
 import { MAX_TABRIX_SITE_ID_CHARS, TABRIX_SITE_ID_PATTERN } from '../site';
 import { TOOL_NAMES } from './names';
+import { TASK_SESSION_ID_PROPERTY } from './schemas-browser';
 
 export const CONTEXT_SCHEMAS: Tool[] = [
   {
@@ -14,6 +15,7 @@ export const CONTEXT_SCHEMAS: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {
+        taskSessionId: TASK_SESSION_ID_PROPERTY,
         intent: {
           type: 'string',
           description:

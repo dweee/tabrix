@@ -69,10 +69,8 @@ export function extractRequestedLayer(args: unknown): ReadPageRequestedLayer | n
 export const READ_PAGE_DEFAULT_LAYER: ReadPageRequestedLayer = 'L0+L1';
 
 /**
- * Make the read-budget task key visible to schema-following MCP clients
- * that DO NOT (and cannot) pass `taskSessionId / taskId / clientTaskId`,
- * since those fields are not part of the public `chrome_read_page`
- * schema (a strict client may even strip unknown fields).
+ * Keep the read-budget task key useful for schema-following MCP clients
+ * that omit `taskSessionId / taskId / clientTaskId`.
  *
  * Only `chrome_read_page` (the gated tool), `chrome_navigate` (the
  * tool that invalidates the gate's lastReadLayer / targetRefsSeen
@@ -87,11 +85,9 @@ export const READ_PAGE_DEFAULT_LAYER: ReadPageRequestedLayer = 'L0+L1';
  * mint phantom external task contexts or pollute the LRU map.
  *
  * `tabrix_choose_context` joins the auto set so a chooser → reader pair
- * issued back-to-back without an explicit `taskSessionId` lands on the
- * SAME `TaskSessionContext`. This is the only way the orchestrator can
- * read what the chooser wrote without the test having to spy on
- * `getTaskContext`. The chooser's public schema does not advertise
- * `tabId` either, so the auto fallback (primary tab →
+ * issued back-to-back without an explicit `taskSessionId` can land on the
+ * SAME `TaskSessionContext`. The chooser's public schema does not advertise
+ * `tabId`, so the auto fallback (primary tab →
  * `mcp:auto:tab:default`) is what makes the pairing work in the
  * schema-strict path.
  *
@@ -205,6 +201,7 @@ export function extractTabIdFromCallToolResult(data: unknown): number | null {
             }
           } catch {
             // Not JSON — skip.
+            continue;
           }
         }
       }
@@ -272,6 +269,7 @@ function extractObjectPayloadsFromCallToolResult(data: unknown): Array<Record<st
           }
         } catch {
           // Not JSON — skip.
+          continue;
         }
       }
     }

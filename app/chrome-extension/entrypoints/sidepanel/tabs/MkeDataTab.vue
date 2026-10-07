@@ -190,6 +190,12 @@ import {
   type MkeObjectWebPageView,
 } from './mke-object-library-view';
 import { resolveInitialMkeDataTabFromLocation, type MkeDataTabId } from './mke-data-tab-url';
+import {
+  formatMkeAiFeedback,
+  formatMkeAiFeedbackDetail,
+  formatMkeAiFeedbackStatus,
+  formatMkeAiFeedbackStatusTone,
+} from './mke-ai-feedback-display';
 
 const MKE_AUTO_REFRESH_MS = 5000;
 
@@ -346,6 +352,7 @@ function syncMkeDataTabUrl(tab: ActiveTab): void {
     history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
   } catch {
     // URL state is a test/deep-link convenience; UI tab state remains authoritative.
+    return;
   }
 }
 
@@ -656,7 +663,7 @@ function formatJsonDetail(value: unknown): string {
 }
 
 function formatMemoryTraceJson(trace: MkeMemoryTraceSummary): string {
-  const feedback = trace.aiFeedback;
+  const aiEvaluation = formatMkeAiFeedbackDetail(trace);
   return formatJsonDetail({
     title: trace.display?.title || formatTraceTitle(trace),
     method: trace.toolName,
@@ -665,12 +672,7 @@ function formatMemoryTraceJson(trace: MkeMemoryTraceSummary): string {
     requestAt: trace.requestAt,
     responseAt: trace.responseAt,
     durationMs: trace.durationMs,
-    aiEvaluation: feedback
-      ? {
-          status: formatAiBusinessStatusValue(feedback.businessStatus),
-          summary: feedback.summary ?? null,
-        }
-      : null,
+    aiEvaluation,
     page: {
       siteFamily: trace.siteFamily,
       pageUrlPattern: trace.pageUrlPattern,
@@ -750,25 +752,11 @@ function formatDate(value: string | null | undefined): string {
 }
 
 function formatAiBusinessStatus(trace: MkeMemoryTraceSummary): string {
-  const value = trace.aiFeedback?.businessStatus;
-  const feedbackStatus = formatAiBusinessStatusValue(value);
-  if (feedbackStatus) return feedbackStatus;
-  if (trace.aiFeedbackState === 'pending' || trace.aiFeedbackRequired === true) return '待AI评价';
-  return '无需AI评价';
-}
-
-function formatAiBusinessStatusValue(value: string | null | undefined): string | null {
-  if (value === 'achieved' || value === 'true') return 'AI通过';
-  if (value === 'partial') return 'AI部分完成';
-  if (value === 'not_achieved' || value === 'false') return 'AI未通过';
-  return null;
+  return formatMkeAiFeedbackStatus(trace);
 }
 
 function formatAiBusinessStatusTone(trace: MkeMemoryTraceSummary): StatusTone {
-  const businessValue = trace.aiFeedback?.businessStatus;
-  if (businessValue === 'achieved' || businessValue === 'true') return 'good';
-  if (businessValue === 'not_achieved' || businessValue === 'false') return 'warn';
-  return 'neutral';
+  return formatMkeAiFeedbackStatusTone(trace);
 }
 
 function formatDuration(value: number | null | undefined): string | null {
@@ -778,24 +766,7 @@ function formatDuration(value: number | null | undefined): string | null {
 }
 
 function formatAiFeedbackLine(trace: MkeMemoryTraceSummary): string {
-  const feedback = trace.aiFeedback;
-  if (feedback?.summary) {
-    return `AI评价：${compactText(formatReadableFeedbackLine(feedback.summary), 88)}`;
-  }
-  return trace.aiFeedbackState === 'pending' || trace.aiFeedbackRequired === true
-    ? 'AI评价：待AI评价'
-    : '';
-}
-
-function formatReadableFeedbackLine(value: string): string {
-  return value
-    .replace(/DOM变化/g, '页面变化')
-    .replace(/被浏览器接受/g, '已执行')
-    .replace(/targetRef/g, '可点击目标')
-    .replace(/post_action_delta|page_projection_delta|data=markdown/gi, '')
-    .replace(/\s+/g, ' ')
-    .replace(/[，,。；;]\s*$/u, '')
-    .trim();
+  return formatMkeAiFeedback(trace).line;
 }
 
 function formatTraceLocationFact(trace: MkeMemoryTraceSummary): [string, string | null] {

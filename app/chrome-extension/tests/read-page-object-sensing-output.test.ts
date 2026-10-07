@@ -6,6 +6,7 @@ import {
   buildAndRememberReadPageObjectSensingOutput,
 } from '../entrypoints/background/tools/browser/read-page-object-sensing-output';
 import {
+  peekPendingActionBinding,
   recordPendingActionBinding,
   resetObjectLifecycleCacheForTests,
 } from '../entrypoints/background/tools/browser/read-page-object-delta';
@@ -193,5 +194,135 @@ describe('read_page object sensing output', () => {
       actionId: 'filter-action',
       postActionWatchId: 'watch:filter-action',
     });
+  });
+
+  it('retains a filter action across an obscured read and hover recovery', () => {
+    const previousObservedAtMs = Date.now() - 1_000;
+    buildAndRememberReadPageObjectSensingOutput(
+      buildInput({
+        searchResultDelta: {
+          status: 'baseline',
+          attribution: 'observation_only',
+          actionId: null,
+          beforeResultCount: 0,
+          afterResultCount: 1,
+          retainedCount: 0,
+          addedCount: 1,
+          removedCount: 0,
+          reorderedCount: 0,
+          overlapRate: null,
+          changedEnough: false,
+          sampleAddedResultKeys: ['card-1'],
+          sampleRemovedResultKeys: [],
+          observation: {
+            documentEpoch: 'epoch:1',
+            sequence: 1,
+            previousSequence: null,
+            observedAt: new Date(previousObservedAtMs).toISOString(),
+            previousObservedAt: null,
+            snapshotTtlMs: 30_000,
+          },
+          reason: 'baseline',
+          claimBoundary: 'test fixture',
+        } as any,
+      }),
+    );
+    recordPendingActionBinding(44, {
+      actionId: 'filter-action',
+      targetRef: 'ref_floating_option_sort',
+      actionIntent: 'search.apply_filter.sort',
+    });
+
+    buildAndRememberReadPageObjectSensingOutput(
+      buildInput({
+        searchResultDelta: {
+          status: 'not_available',
+          attribution: 'observation_only',
+          actionId: null,
+          beforeResultCount: 1,
+          afterResultCount: 0,
+          retainedCount: 0,
+          addedCount: 0,
+          removedCount: 1,
+          reorderedCount: 0,
+          overlapRate: null,
+          changedEnough: false,
+          sampleAddedResultKeys: [],
+          sampleRemovedResultKeys: ['card-1'],
+          reason: 'floating panel obscures result cards',
+          claimBoundary: 'test fixture',
+        } as any,
+      }),
+    );
+    recordPendingActionBinding(
+      44,
+      {
+        actionId: 'hover-action',
+        targetRef: 'ref_outside_panel',
+        actionIntent: 'navigation.open',
+      },
+      { preserveResultChangingAction: true },
+    );
+
+    expect(peekPendingActionBinding(44)?.actionId).toBe('filter-action');
+
+    const output = buildAndRememberReadPageObjectSensingOutput(
+      buildInput({
+        currentTitle: 'Search Updated',
+        pageRegions: [
+          region([
+            {
+              objectId: 'card_2',
+              objectType: 'result_card',
+              label: 'Second result card',
+              parentObjectId: 'results',
+              sourceProvenance: ['dom'],
+              targetRef: 'ref_result_2',
+              actionTypes: ['click'],
+              freshness: 'fresh',
+            },
+          ]),
+        ],
+        candidateActions: [
+          action({
+            id: 'ca_open_second_result',
+            label: 'Open second result',
+            targetRef: 'ref_result_2',
+            locatorChain: [{ type: 'ref', value: 'ref_result_2' }],
+          }),
+        ],
+        searchResultDelta: {
+          status: 'changed',
+          attribution: 'observation_only',
+          actionId: null,
+          beforeResultCount: 1,
+          afterResultCount: 1,
+          retainedCount: 0,
+          addedCount: 1,
+          removedCount: 1,
+          reorderedCount: 0,
+          overlapRate: 0,
+          changedEnough: true,
+          sampleAddedResultKeys: ['card-2'],
+          sampleRemovedResultKeys: ['card-1'],
+          observation: {
+            documentEpoch: 'epoch:1',
+            sequence: 3,
+            previousSequence: 1,
+            observedAt: new Date(Date.now() + 1_000).toISOString(),
+            previousObservedAt: new Date(previousObservedAtMs).toISOString(),
+            snapshotTtlMs: 30_000,
+          },
+          reason: 'result list changed',
+          claimBoundary: 'test fixture',
+        } as any,
+      }),
+    );
+
+    expect(output.searchResultDelta).toMatchObject({
+      attribution: 'action_bound',
+      actionId: 'filter-action',
+    });
+    expect(peekPendingActionBinding(44)).toBeNull();
   });
 });

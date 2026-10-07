@@ -628,6 +628,37 @@ describe('MKE core repositories', () => {
       expect(validated?.successfulUseCount).toBe(1);
       expect(validated?.confidenceScore).toBe(0.7);
 
+      knowledgeRepo.markValidated({
+        knowledgeId: 'knowledge-1',
+        successful: false,
+        confidenceScore: 0.5,
+        nowIso: '2026-06-06T10:05:30.000Z',
+      });
+
+      const reprojected = knowledgeRepo.upsert({
+        knowledgeId: 'replacement-id-must-not-win',
+        siteFamily: 'generic-content-platform',
+        pageUrlPattern: '/creator/publish?fresh=1',
+        pageRole: 'creator_publish',
+        pageModelKey: 'creator-publish',
+        pageStateModel: { states: ['submitted'] },
+        objectGraph: { regions: ['editor', 'toolbar', 'result'] },
+        actionSurface: { actions: ['submit'] },
+        sourceTraceIds: ['trace-2'],
+        observationCount: 2,
+        successfulUseCount: 0,
+        failedUseCount: 0,
+        confidenceScore: 0.1,
+        createdAt: '2026-06-06T10:06:00.000Z',
+        updatedAt: '2026-06-06T10:06:00.000Z',
+      });
+      expect(reprojected.knowledgeId).toBe('knowledge-1');
+      expect(reprojected.successfulUseCount).toBe(1);
+      expect(reprojected.failedUseCount).toBe(1);
+      expect(reprojected.confidenceScore).toBe(0.5);
+      expect(reprojected.lastValidatedAt).toBe('2026-06-06T10:05:30.000Z');
+      expect(reprojected.objectGraph).toEqual({ regions: ['editor', 'toolbar', 'result'] });
+
       knowledgeRepo.archive({
         knowledgeId: 'knowledge-1',
         archivedAt: '2026-06-06T10:06:00.000Z',
@@ -661,6 +692,19 @@ describe('MKE core repositories', () => {
       expect(used?.successCount).toBe(1);
       expect(used?.adoptionCount).toBe(1);
       expect(used?.lastUsedAt).toBe('2026-06-06T10:10:00.000Z');
+
+      experienceRepo.recordUseOutcome({
+        experienceId: recipe.experienceId,
+        successful: false,
+        adopted: false,
+        nowIso: '2026-06-06T10:11:00.000Z',
+      });
+      const failedReuse = experienceRepo.get(recipe.experienceId);
+      expect(failedReuse?.successCount).toBe(1);
+      expect(failedReuse?.failureCount).toBe(1);
+      expect(failedReuse?.reliabilityScore).toBe(0.5);
+      expect(failedReuse?.driftState).toBe('needs_revalidation');
+      expect(failedReuse?.lastVerifiedAt).toBeNull();
 
       const exported = experienceRepo.exportRecipe(recipe.experienceId);
       expect(exported).toBeDefined();
@@ -704,6 +748,108 @@ describe('MKE core repositories', () => {
       expect(second.linkedKnowledgeIds).toEqual(['knowledge-1', 'knowledge-2']);
       expect(second.successCount).toBe(2);
       expect(experienceRepo.findByScenario('content_publish')).toHaveLength(1);
+    } finally {
+      close();
+    }
+  });
+
+  it('does not count later steps from the same evidence sequence as another success', () => {
+    const { experienceRepo, close } = bootstrap();
+    try {
+      const first = experienceRepo.save(
+        templateRecipe({
+          sourceTraceIds: ['trace-run-1-read', 'trace-run-1-click'],
+          successCount: 1,
+        }),
+      );
+      const expandedSameRun = experienceRepo.save(
+        templateRecipe({
+          sourceTraceIds: ['trace-run-1-read', 'trace-run-1-click', 'trace-run-1-verify'],
+          successCount: 1,
+          updatedAt: '2026-06-06T10:01:00.000Z',
+        }),
+      );
+      const independentRun = experienceRepo.save(
+        templateRecipe({
+          sourceTraceIds: ['trace-run-2-read', 'trace-run-2-click', 'trace-run-2-verify'],
+          successCount: 1,
+          updatedAt: '2026-06-06T10:02:00.000Z',
+        }),
+      );
+
+      expect(expandedSameRun.experienceId).toBe(first.experienceId);
+      expect(expandedSameRun.successCount).toBe(1);
+      expect(expandedSameRun.sourceTraceIds).toEqual([
+        'trace-run-1-read',
+        'trace-run-1-click',
+        'trace-run-1-verify',
+      ]);
+      expect(independentRun.successCount).toBe(2);
+      expect(independentRun.driftState).toBe('verified_once');
+    } finally {
+      close();
+    }
+  });
+
+  it('counts and removes Experience evidence once per Memory task', () => {
+    const { traceRepo, experienceRepo, close } = bootstrap();
+    try {
+      const appendTrace = (traceId: string, taskId: string, sequenceIndex: number) =>
+        traceRepo.append({
+          traceId,
+          taskId,
+          toolName: 'chrome_read_page',
+          toolCallId: `${traceId}-call`,
+          sequenceIndex,
+          requestParams: {},
+          requestAt: NOW,
+          response: { ok: true },
+          responseAt: NOW,
+          durationMs: 0,
+          toolSuccess: true,
+          businessSuccess: 'achieved',
+          redactionState: 'redacted',
+          createdAt: NOW,
+        });
+      appendTrace('trace-task-a-read', 'task-a', 1);
+      appendTrace('trace-task-a-click', 'task-a', 2);
+      appendTrace('trace-task-b-read', 'task-b', 1);
+
+      const recipe = experienceRepo.save(
+        templateRecipe({
+          sourceTraceIds: ['trace-task-a-read'],
+          successCount: 1,
+        }),
+      );
+      const sameTask = experienceRepo.save(
+        templateRecipe({
+          sourceTraceIds: ['trace-task-a-click'],
+          successCount: 1,
+          updatedAt: '2026-06-06T10:01:00.000Z',
+        }),
+      );
+      const secondTask = experienceRepo.save(
+        templateRecipe({
+          sourceTraceIds: ['trace-task-b-read'],
+          successCount: 1,
+          updatedAt: '2026-06-06T10:02:00.000Z',
+        }),
+      );
+
+      expect(sameTask.successCount).toBe(1);
+      expect(secondTask.successCount).toBe(2);
+
+      experienceRepo.removeSourceTrace({
+        traceId: 'trace-task-a-read',
+        nowIso: '2026-06-06T10:03:00.000Z',
+      });
+      expect(experienceRepo.get(recipe.experienceId)?.successCount).toBe(2);
+
+      experienceRepo.removeSourceTrace({
+        traceId: 'trace-task-a-click',
+        nowIso: '2026-06-06T10:04:00.000Z',
+      });
+      expect(experienceRepo.get(recipe.experienceId)?.successCount).toBe(1);
     } finally {
       close();
     }
@@ -831,6 +977,93 @@ describe('MKE core repositories', () => {
           limit: 5,
         }),
       ).toHaveLength(0);
+    } finally {
+      close();
+    }
+  });
+
+  it('requires revalidation after a failed source is removed from an unverified recipe', () => {
+    const { experienceRepo, close } = bootstrap();
+    try {
+      const recipe = experienceRepo.save(
+        templateRecipe({
+          sourceTraceIds: ['trace-success', 'trace-failed'],
+          successCount: 1,
+          failureCount: 0,
+          reliabilityScore: 1,
+          driftState: 'unverified_template',
+        }),
+      );
+
+      experienceRepo.removeSourceTrace({
+        traceId: 'trace-failed',
+        nowIso: '2026-06-06T10:05:00.000Z',
+      });
+      const result = experienceRepo.requireScenarioRevalidation({
+        scenarioKey: 'content_publish',
+        nowIso: '2026-06-06T10:05:01.000Z',
+      });
+      const updated = experienceRepo.get(recipe.experienceId);
+
+      expect(result.affectedExperienceIds).toEqual([recipe.experienceId]);
+      expect(updated?.driftState).toBe('needs_revalidation');
+      expect(updated?.failureCount).toBe(1);
+      expect(
+        experienceRepo.findReusableByContext({
+          siteFamily: 'generic-content-platform',
+          pageRole: 'creator_publish',
+        }),
+      ).toHaveLength(0);
+    } finally {
+      close();
+    }
+  });
+
+  it('does not punish a direct-source Experience twice during explicit scenario revalidation', () => {
+    const { experienceRepo, close } = bootstrap();
+    try {
+      const directSource = experienceRepo.save(
+        templateRecipe({
+          recipeFingerprint: 'direct-source-recipe',
+          sourceTraceIds: ['trace-direct', 'trace-direct-backup'],
+          successCount: 2,
+          failureCount: 0,
+          reliabilityScore: 1,
+          driftState: 'verified_once',
+        }),
+      );
+      const sameScenarioSibling = experienceRepo.save(
+        templateRecipe({
+          recipeFingerprint: 'same-scenario-sibling-recipe',
+          sourceTraceIds: ['trace-sibling-1', 'trace-sibling-2'],
+          successCount: 2,
+          failureCount: 0,
+          reliabilityScore: 1,
+          driftState: 'verified_once',
+        }),
+      );
+
+      const sourceResult = experienceRepo.removeSourceTrace({
+        traceId: 'trace-direct',
+        nowIso: '2026-06-06T10:06:00.000Z',
+      });
+      const scenarioResult = experienceRepo.requireScenarioRevalidation({
+        scenarioKey: 'content_publish',
+        nowIso: '2026-06-06T10:06:01.000Z',
+        excludeExperienceIds: sourceResult.affectedExperienceIds,
+      });
+
+      expect(sourceResult.affectedExperienceIds).toEqual([directSource.experienceId]);
+      expect(scenarioResult.affectedExperienceIds).toEqual([sameScenarioSibling.experienceId]);
+      expect(experienceRepo.get(directSource.experienceId)).toMatchObject({
+        successCount: 1,
+        failureCount: 0,
+      });
+      expect(experienceRepo.get(sameScenarioSibling.experienceId)).toMatchObject({
+        successCount: 2,
+        failureCount: 1,
+        driftState: 'needs_revalidation',
+      });
     } finally {
       close();
     }

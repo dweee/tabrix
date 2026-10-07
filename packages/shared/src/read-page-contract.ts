@@ -945,7 +945,7 @@ export interface ReadPageCDPSensingSummary {
       role: string;
       label?: string;
       locator?: {
-        source: 'cdp_ax';
+        source: 'cdp_ax' | 'cdp_dom';
         axNodeId?: string;
         backendDOMNodeId?: number;
         cssSelector?: string;
@@ -969,6 +969,7 @@ export interface ReadPageCDPSensingSummary {
         inViewport: boolean;
         centerHitTarget: boolean | null;
         occluded: boolean;
+        valueState?: 'empty' | 'non_empty' | 'unknown';
         reason: string;
       };
     }[];
@@ -981,6 +982,13 @@ export interface ReadPageCDPSensingSummary {
   console?: {
     errorCount: number;
     warningCount: number;
+  };
+  domControlScan?: {
+    queriedCount: number;
+    uniqueSelectorCount: number;
+    visibleInViewportCount: number;
+    candidateCount: number;
+    parsedCandidateCount: number;
   };
   partialErrors?: string[];
   claimBoundary: string;

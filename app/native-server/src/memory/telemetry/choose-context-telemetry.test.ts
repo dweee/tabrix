@@ -204,6 +204,167 @@ describe('ChooseContextTelemetryRepository', () => {
     }
   });
 
+  it('projects a first retried outcome as failed usage and ignores later outcomes', () => {
+    const { repo, close } = fresh();
+    try {
+      repo.recordDecision(
+        decision({
+          decisionId: 'dc-artifact-use',
+          strategy: 'experience_reuse',
+          selectedArtifacts: [
+            { kind: 'experience_recipe', ref: 'experience-1' },
+            { kind: 'knowledge_page_model', ref: 'knowledge-1' },
+          ],
+        }),
+      );
+
+      const applyArtifactUsage = jest.fn();
+      const retried = repo.recordOutcome(
+        outcome({ decisionId: 'dc-artifact-use', outcome: 'retried' }),
+        applyArtifactUsage,
+      );
+      expect(retried).toMatchObject({
+        status: 'ok',
+        artifactUsage: {
+          successful: false,
+          adopted: false,
+          selectedArtifacts: [
+            { kind: 'experience_recipe', ref: 'experience-1' },
+            { kind: 'knowledge_page_model', ref: 'knowledge-1' },
+          ],
+        },
+      });
+      expect(applyArtifactUsage).toHaveBeenCalledTimes(1);
+      expect(applyArtifactUsage).toHaveBeenCalledWith({
+        successful: false,
+        adopted: false,
+        selectedArtifacts: [
+          { kind: 'experience_recipe', ref: 'experience-1' },
+          { kind: 'knowledge_page_model', ref: 'knowledge-1' },
+        ],
+      });
+
+      const completed = repo.recordOutcome(
+        outcome({
+          decisionId: 'dc-artifact-use',
+          outcome: 'completed',
+          recordedAt: '2026-04-22T11:01:00.000Z',
+        }),
+        applyArtifactUsage,
+      );
+      expect(completed).toMatchObject({ status: 'ok' });
+      if (completed.status === 'ok') {
+        expect(completed.artifactUsage).toBeUndefined();
+      }
+
+      const duplicate = repo.recordOutcome(
+        outcome({
+          decisionId: 'dc-artifact-use',
+          outcome: 'reuse',
+          recordedAt: '2026-04-22T11:02:00.000Z',
+        }),
+        applyArtifactUsage,
+      );
+      expect(duplicate).toMatchObject({ status: 'ok' });
+      if (duplicate.status === 'ok') {
+        expect(duplicate.artifactUsage).toBeUndefined();
+      }
+      expect(applyArtifactUsage).toHaveBeenCalledTimes(1);
+    } finally {
+      close();
+    }
+  });
+
+  it('does not project retried after another definitive outcome', () => {
+    const { repo, close } = fresh();
+    try {
+      repo.recordDecision(
+        decision({
+          decisionId: 'dc-artifact-completed-first',
+          selectedArtifacts: [{ kind: 'experience_recipe', ref: 'experience-2' }],
+        }),
+      );
+
+      const completed = repo.recordOutcome(
+        outcome({ decisionId: 'dc-artifact-completed-first', outcome: 'completed' }),
+      );
+      expect(completed).toMatchObject({
+        status: 'ok',
+        artifactUsage: {
+          successful: true,
+          adopted: true,
+          selectedArtifacts: [{ kind: 'experience_recipe', ref: 'experience-2' }],
+        },
+      });
+
+      const retried = repo.recordOutcome(
+        outcome({
+          decisionId: 'dc-artifact-completed-first',
+          outcome: 'retried',
+          recordedAt: '2026-04-22T11:01:00.000Z',
+        }),
+      );
+      expect(retried).toMatchObject({ status: 'ok' });
+      if (retried.status === 'ok') {
+        expect(retried.artifactUsage).toBeUndefined();
+      }
+    } finally {
+      close();
+    }
+  });
+
+  it('maps a first fallback outcome to an unsuccessful artifact-use signal', () => {
+    const { repo, close } = fresh();
+    try {
+      repo.recordDecision(
+        decision({
+          decisionId: 'dc-artifact-fallback',
+          selectedArtifacts: [{ kind: 'knowledge_page_model', ref: 'knowledge-2' }],
+        }),
+      );
+      const result = repo.recordOutcome(
+        outcome({ decisionId: 'dc-artifact-fallback', outcome: 'fallback' }),
+      );
+      expect(result).toMatchObject({
+        status: 'ok',
+        artifactUsage: {
+          successful: false,
+          adopted: false,
+          selectedArtifacts: [{ kind: 'knowledge_page_model', ref: 'knowledge-2' }],
+        },
+      });
+    } finally {
+      close();
+    }
+  });
+
+  it('rolls back the outcome when the atomic artifact-use writer fails', () => {
+    const { repo, close } = fresh();
+    try {
+      repo.recordDecision(
+        decision({
+          decisionId: 'dc-artifact-write-failed',
+          selectedArtifacts: [{ kind: 'experience_recipe', ref: 'experience-3' }],
+        }),
+      );
+      expect(() =>
+        repo.recordOutcome(
+          outcome({ decisionId: 'dc-artifact-write-failed', outcome: 'completed' }),
+          () => {
+            throw new Error('library write failed');
+          },
+        ),
+      ).toThrow('library write failed');
+
+      const aggregate = repo
+        .aggregateStrategies()
+        .find((row) => row.strategy === 'knowledge_light');
+      expect(aggregate?.outcomes.completed).toBe(0);
+    } finally {
+      close();
+    }
+  });
+
   it('respects the optional `since` filter on aggregateStrategies', () => {
     const { repo, close } = fresh();
     try {

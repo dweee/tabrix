@@ -2,6 +2,7 @@ import { TOOL_NAMES } from '@tabrix/shared';
 import {
   buildPostActionDeltaSignalsFromEvidence,
   shouldInvalidateReadAfterInteraction,
+  shouldInvalidateReadForRequiredReadback,
 } from './browser-action-readback';
 
 describe('browser action readback interaction gating', () => {
@@ -32,6 +33,57 @@ describe('browser action readback interaction gating', () => {
     ).toBe(false);
     expect(shouldInvalidateReadAfterInteraction(TOOL_NAMES.BROWSER.NAVIGATE, {})).toBe(false);
     expect(shouldInvalidateReadAfterInteraction(TOOL_NAMES.BROWSER.NAVIGATE, null)).toBe(false);
+  });
+
+  it('invalidates cached reads when an uncertain action requires same-tab readback', () => {
+    expect(
+      shouldInvalidateReadForRequiredReadback(
+        TOOL_NAMES.BROWSER.CLICK,
+        { tabId: 42, ref: 'ref_filter_option' },
+        {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                success: false,
+                dispatchSucceeded: false,
+                error: 'click_helper_response_timeout',
+                postActionReadback: {
+                  freshReadRequired: true,
+                  sameTabVerificationRequired: true,
+                },
+              }),
+            },
+          ],
+          isError: false,
+        },
+      ),
+    ).toBe(true);
+  });
+
+  it('does not invalidate cached reads for a failed action with no readback requirement', () => {
+    expect(
+      shouldInvalidateReadForRequiredReadback(
+        TOOL_NAMES.BROWSER.CLICK,
+        { tabId: 42, ref: 'ref_missing' },
+        {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                success: false,
+                dispatchSucceeded: false,
+                postActionReadback: {
+                  freshReadRequired: false,
+                  sameTabVerificationRequired: true,
+                },
+              }),
+            },
+          ],
+          isError: false,
+        },
+      ),
+    ).toBe(false);
   });
 });
 

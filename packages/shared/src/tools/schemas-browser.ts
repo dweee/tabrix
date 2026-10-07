@@ -1,10 +1,10 @@
 import { type Tool } from '@modelcontextprotocol/sdk/types.js';
 import { TOOL_NAMES } from './names';
 
-const TASK_SESSION_ID_PROPERTY = {
+export const TASK_SESSION_ID_PROPERTY = {
   type: 'string',
   description:
-    'Optional caller-provided task session key. Reuse the same value across navigate/read/switch/fetch/click/fill/keyboard/close_tabs so Tabrix can keep run-owned tabs, read budgets, action verification, and cleanup tied to one AI task.',
+    'Optional caller-provided task session key. Reuse the same value across choose_context/navigate/read/switch/fetch/click/fill/keyboard/close_tabs so Tabrix can keep current-page validation, run-owned tabs, read budgets, action verification, and cleanup tied to one AI task.',
 };
 
 const RUNTIME_POLICY_PROPERTY = {

@@ -177,13 +177,16 @@ export const handleMemoryRecordAiFeedback: NativeToolHandler = async (args, deps
     ? deps.sessionManager.revokeMkeExperienceForTrace({
         traceId,
         nowIso: new Date().toISOString(),
+        revalidateScenario: false,
       })
     : null;
   const projection = eligibleForExperienceProjection
-    ? await deps.sessionManager.flushAndProjectMkeAfterAiFeedback().catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : String(error);
-        return { error: message };
-      })
+    ? await deps.sessionManager
+        .flushAndProjectMkeAfterAiFeedback(traceId)
+        .catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : String(error);
+          return { error: message };
+        })
     : null;
 
   return jsonResult(

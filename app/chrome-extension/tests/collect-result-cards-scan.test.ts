@@ -164,6 +164,11 @@ describe('collect result cards DOM scan', () => {
       ]),
     );
     expect(scan.filterState.contentType).toBe('图文');
+    expect(
+      scan.candidateActions.find((action) => action.intent === 'search.open_filters'),
+    ).toMatchObject({
+      matchReason: 'visible_filter_trigger.related_floating_surface',
+    });
     const oneWeekAction = scan.candidateActions.find(
       (action) => action.label === '一周内' && action.intent === 'search.apply_filter.time_range',
     );
@@ -171,6 +176,190 @@ describe('collect result cards DOM scan', () => {
     expect(xpathLocators).toHaveLength(1);
     expect(xpathLocators?.[0]?.value).toMatch(/^\/html|^\/\/\*\[@id=/);
     expect(xpathLocators?.some((locator) => locator.value.includes('normalize-space'))).toBe(false);
+  });
+
+  it('objectizes a visible semantic filter surface as a snapshot-local hover target', () => {
+    setViewport();
+    document.body.innerHTML = `
+      <section role="toolbar" data-testid="toolbar" data-rect="20,80,760,48">
+        <form role="search" data-testid="search-form" data-rect="24,84,560,40">
+          <input type="search" data-testid="search-input" data-rect="32,88,520,32" />
+        </form>
+        <div
+          class="filter-entry active"
+          data-testid="filter-trigger"
+          data-rect="640,84,112,40"
+          style="cursor: pointer"
+        >
+          <span data-testid="filter-label" data-rect="656,94,56,20">Filtered</span>
+          <svg data-testid="filter-icon" data-rect="720,96,16,16"></svg>
+        </div>
+      </section>
+      <main role="list" data-testid="list" data-rect="0,140,900,520">
+        <article role="listitem" data-testid="card-alpha" data-rect="20,160,260,180">
+          <a data-testid="link-alpha" data-rect="28,168,240,112" href="https://example.test/note/alpha">AI 图片创作提示词合集</a>
+          <span>作者 1</span>
+          <span>1 天前</span>
+          <span>收藏 100</span>
+        </article>
+        <article role="listitem" data-testid="card-beta" data-rect="300,160,260,180">
+          <a data-testid="link-beta" data-rect="308,168,240,112" href="https://example.test/note/beta">AI 绘图工具推荐</a>
+          <span>作者 2</span>
+          <span>2 天前</span>
+          <span>收藏 101</span>
+        </article>
+        <article role="listitem" data-testid="card-gamma" data-rect="580,160,260,180">
+          <a data-testid="link-gamma" data-rect="588,168,240,112" href="https://example.test/note/gamma">AI 生图高级感关键词</a>
+          <span>作者 3</span>
+          <span>3 天前</span>
+          <span>收藏 102</span>
+        </article>
+      </main>
+    `;
+    installRects();
+
+    const scan = scanVisibleResultCardsInPage();
+    const trigger = scan.candidateActions.find(
+      (action) => action.label === 'Filtered' && action.intent === 'search.open_filters',
+    );
+
+    expect(trigger).toMatchObject({
+      actionType: 'click',
+      executionTargetKind: 'snapshot_locator',
+      actionability: true,
+      matchReason: 'visible_filter_trigger.search_toolbar',
+    });
+    expect(trigger?.locatorChain).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'css',
+          value: expect.stringContaining('div[data-testid="filter-trigger"]'),
+        }),
+      ]),
+    );
+  });
+
+  it('does not objectize a semantic filter label without an interaction signal', () => {
+    setViewport();
+    document.body.innerHTML = `
+      <aside data-testid="help-panel" data-rect="920,80,300,240">
+        <span data-testid="help-filter-label" data-rect="940,100,56,24">Filter</span>
+      </aside>
+      <main role="list" data-testid="list" data-rect="0,140,900,520">
+        <article role="listitem" data-testid="card-alpha" data-rect="20,160,260,180">
+          <a data-testid="link-alpha" data-rect="28,168,240,112" href="https://example.test/note/alpha">Image creation guide</a>
+        </article>
+      </main>
+    `;
+    installRects();
+
+    const scan = scanVisibleResultCardsInPage();
+
+    expect(
+      scan.candidateActions.find(
+        (action) => action.label === 'Filter' && action.intent === 'search.open_filters',
+      ),
+    ).toBeUndefined();
+  });
+
+  it('objectizes an exact visible query suggestion from the current search surface', () => {
+    setViewport();
+    document.body.innerHTML = `
+      <header data-testid="search-header" data-rect="0,0,980,160">
+        <form role="search" data-testid="search-form" data-rect="24,16,900,40">
+          <input type="search" value="Image creation" data-testid="search-input" data-rect="32,20,640,32" />
+          <ul role="listbox" data-testid="suggestions" data-rect="32,60,640,88">
+            <li role="option" data-testid="query-suggestion" data-rect="48,72,360,32">Image creation</li>
+          </ul>
+        </form>
+      </header>
+      <main role="list" data-testid="list" data-rect="0,180,880,500">
+        <article role="listitem" data-testid="card-alpha" data-rect="20,220,260,180">
+          <a data-testid="link-alpha" data-rect="28,228,240,112" href="https://example.test/note/alpha">Image creation</a>
+        </article>
+      </main>
+    `;
+    installRects();
+    expect((document.querySelector('[data-testid="search-input"]') as HTMLInputElement).value).toBe(
+      'Image creation',
+    );
+
+    const scan = scanVisibleResultCardsInPage();
+    const suggestions = scan.candidateActions.filter(
+      (action) => action.intent === 'search.select_suggestion',
+    );
+
+    expect(suggestions).toEqual([
+      expect.objectContaining({
+        label: 'Image creation',
+        actionability: true,
+        executionTargetKind: 'snapshot_locator',
+        matchReason: 'visible_search_suggestion.exact_current_query',
+        locatorChain: expect.arrayContaining([
+          expect.objectContaining({
+            type: 'css',
+            value: expect.stringContaining('li[data-testid="query-suggestion"]'),
+          }),
+        ]),
+      }),
+    ]);
+  });
+
+  it('does not promote a same-label complementary control without search-surface ownership', () => {
+    setViewport();
+    document.body.innerHTML = `
+      <header data-testid="search-header" data-rect="0,0,900,72">
+        <form role="search" data-testid="search-form" data-rect="24,16,640,40">
+          <input type="search" data-testid="search-input" data-rect="32,20,480,32" />
+        </form>
+      </header>
+      <aside role="complementary" data-testid="support-panel" data-rect="940,80,280,360">
+        <button class="filter" data-testid="support-filter" data-rect="1000,100,96,36">Filter</button>
+      </aside>
+      <main role="list" data-testid="list" data-rect="0,100,880,520">
+        <article role="listitem" data-testid="card-alpha" data-rect="20,140,260,180">
+          <a data-testid="link-alpha" data-rect="28,148,240,112" href="https://example.test/note/alpha">Image workflow</a>
+        </article>
+      </main>
+    `;
+    installRects();
+
+    const scan = scanVisibleResultCardsInPage();
+
+    expect(
+      scan.candidateActions.find(
+        (action) => action.label === 'Filter' && action.intent === 'search.open_filters',
+      ),
+    ).toBeUndefined();
+  });
+
+  it('objectizes a toolbar-owned filter control without a pre-opened panel', () => {
+    setViewport();
+    document.body.innerHTML = `
+      <header data-testid="search-header" data-rect="0,0,980,72">
+        <form role="search" data-testid="search-form" data-rect="24,16,900,40">
+          <input type="search" data-testid="search-input" data-rect="32,20,640,32" />
+          <button data-testid="toolbar-filter" data-rect="700,20,96,32">Filter</button>
+        </form>
+      </header>
+      <main role="list" data-testid="list" data-rect="0,100,880,520">
+        <article role="listitem" data-testid="card-alpha" data-rect="20,140,260,180">
+          <a data-testid="link-alpha" data-rect="28,148,240,112" href="https://example.test/note/alpha">Image workflow</a>
+        </article>
+      </main>
+    `;
+    installRects();
+
+    const scan = scanVisibleResultCardsInPage();
+
+    expect(
+      scan.candidateActions.find(
+        (action) => action.label === 'Filter' && action.intent === 'search.open_filters',
+      ),
+    ).toMatchObject({
+      matchReason: 'visible_filter_trigger.search_toolbar',
+      targetRef: expect.stringMatching(/^ref_filter_trigger_[0-9a-f]{8}$/),
+    });
   });
 
   it('objectizes grouped options from a generic hover-revealed floating panel', () => {
@@ -229,6 +418,18 @@ describe('collect result cards DOM scan', () => {
           matchReason: 'visible_filter_option',
           executionTargetKind: 'snapshot_locator',
           actionability: true,
+          snapshotRect: expect.objectContaining({
+            width: expect.any(Number),
+            height: expect.any(Number),
+          }),
+          visibility: {
+            source: 'dom',
+            domVisible: true,
+            inViewport: true,
+            centerHitTarget: expect.any(Boolean),
+            occluded: expect.any(Boolean),
+            reason: expect.any(String),
+          },
           provenance: expect.objectContaining({
             surfaceType: 'floating_surface',
             panelRef: expect.stringMatching(/^ref_floating_surface_[0-9a-f]{8}$/),
@@ -837,6 +1038,29 @@ describe('collect result cards DOM scan', () => {
         }),
       ]),
     );
+  });
+
+  it('does not promote a conversational side-surface control into a search filter trigger', () => {
+    setViewport();
+    document.body.innerHTML = `
+      <main role="list" data-testid="list" data-rect="0,100,820,580">
+        <article role="listitem" data-testid="card-alpha" data-rect="20,140,260,180">
+          <a data-testid="link-alpha" data-rect="28,148,240,112" href="https://example.test/note/alpha">AI image workflow</a>
+        </article>
+      </main>
+      <aside class="assistant-chat" aria-label="Assistant conversation" data-testid="assistant-panel" data-rect="960,80,280,580">
+        <button class="filter" data-testid="assistant-filter" data-rect="1120,96,72,36">筛选</button>
+      </aside>
+    `;
+    installRects();
+
+    const scan = scanVisibleResultCardsInPage();
+
+    expect(
+      scan.candidateActions.find(
+        (action) => action.label === '筛选' && action.intent === 'search.open_filters',
+      ),
+    ).toBeUndefined();
   });
 
   it('strips sensitive and opaque query parameters from result-card URLs', () => {

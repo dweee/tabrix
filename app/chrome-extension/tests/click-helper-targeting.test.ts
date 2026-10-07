@@ -167,6 +167,36 @@ describe('click-helper targeting', () => {
     expect(clickCount).toBe(1);
   });
 
+  it('bounds dynamic filter verification instead of consuming the caller timeout', async () => {
+    document.body.innerHTML = '<div id="filter">Most saved</div>';
+    const filter = document.getElementById('filter') as HTMLDivElement;
+    setRect(filter, { left: 20, top: 30, width: 120, height: 32 });
+    document.elementFromPoint = vi.fn(() => filter);
+
+    let clickCount = 0;
+    filter.addEventListener('click', () => {
+      clickCount += 1;
+    });
+
+    const startedAt = performance.now();
+    const result = await sendClickRequest({
+      action: 'clickElement',
+      selector: '#filter',
+      waitForNavigation: false,
+      timeout: 13000,
+      intent: 'search.apply_filter.sort',
+    });
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(result.dispatchSucceeded).toBe(true);
+    expect(clickCount).toBe(1);
+    expect(result.signals.waitDiagnostics.verification).toMatchObject({
+      reason: 'timeout',
+    });
+    expect(result.signals.waitDiagnostics.verification.waitedMs).toBeLessThan(1000);
+    expect(elapsedMs).toBeLessThan(2000);
+  });
+
   it('returns promptly after dispatch when the page document is hidden', async () => {
     document.body.innerHTML = '<div id="filter">Unread</div>';
     const filter = document.getElementById('filter') as HTMLDivElement;

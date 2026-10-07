@@ -376,6 +376,11 @@ CREATE TABLE IF NOT EXISTS knowledge_api_endpoints (
   source_lineage_blob      TEXT,
   schema_version           INTEGER,
   last_failure_reason      TEXT,
+  -- Reuse outcomes for this exact endpoint_id. These counters are
+  -- operational metadata only; they contain no request/response data.
+  successful_use_count     INTEGER NOT NULL DEFAULT 0,
+  failed_use_count         INTEGER NOT NULL DEFAULT 0,
+  last_validated_at        TEXT,
   UNIQUE (site, endpoint_signature)
 );
 

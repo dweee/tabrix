@@ -215,6 +215,135 @@ describe('read_page candidate action intents', () => {
     ]);
   });
 
+  it('builds a current-snapshot search fill action from a CDP DOM candidate', () => {
+    const actions = buildCandidateActions([], [], {
+      viewport: { width: 1280, height: 720, dpr: 1 },
+      cdpAccessibilityCandidates: [
+        {
+          role: 'searchbox',
+          label: 'Search',
+          locator: {
+            source: 'cdp_dom',
+            cssSelector: '#global-search',
+            nodeName: 'input',
+            visualBounds: { x: 240, y: 12, width: 420, height: 40 },
+          },
+          actionTypes: ['focus', 'setvalue'],
+          state: { disabled: false },
+          visibilityProbe: {
+            domVisible: true,
+            inViewport: true,
+            centerHitTarget: true,
+            occluded: false,
+            valueState: 'empty',
+            reason: 'visible_unobstructed',
+          },
+        },
+      ],
+    });
+
+    expect(actions).toEqual([
+      expect.objectContaining({
+        id: 'ca_fill_ref_fallback_cdp_dom_searchbox_0',
+        actionType: 'fill',
+        targetRef: 'ref_fallback_cdp_dom_searchbox_0',
+        intent: 'search.enter_query',
+        actionability: 'actionable',
+        locatorChain: [
+          { type: 'ref', value: 'ref_fallback_cdp_dom_searchbox_0' },
+          { type: 'css', value: '#global-search' },
+        ],
+      }),
+    ]);
+    expect(actions[0]?.matchReason).toContain('target_provenance=cdp_dom');
+  });
+
+  it('builds a current-snapshot search submit action from an associated CDP DOM control', () => {
+    const actions = buildCandidateActions([], [], {
+      viewport: { width: 1280, height: 720, dpr: 1 },
+      cdpAccessibilityCandidates: [
+        {
+          role: 'button',
+          label: 'search submit',
+          locator: {
+            source: 'cdp_dom',
+            cssSelector: 'div.search-submit',
+            nodeName: 'div',
+            visualBounds: { x: 620, y: 12, width: 40, height: 40 },
+          },
+          actionTypes: ['click'],
+          state: { disabled: false },
+          visibilityProbe: {
+            domVisible: true,
+            inViewport: true,
+            centerHitTarget: true,
+            occluded: false,
+            valueState: 'unknown',
+            reason: 'visible_unobstructed',
+          },
+        },
+      ],
+    });
+
+    expect(actions).toEqual([
+      expect.objectContaining({
+        id: 'ca_click_ref_fallback_cdp_dom_button_0',
+        actionType: 'click',
+        targetRef: 'ref_fallback_cdp_dom_button_0',
+        intent: 'search.submit',
+        actionability: 'actionable',
+        locatorChain: [
+          { type: 'ref', value: 'ref_fallback_cdp_dom_button_0' },
+          { type: 'aria', value: 'search submit' },
+          { type: 'css', value: 'div.search-submit' },
+        ],
+      }),
+    ]);
+    expect(actions[0]?.matchReason).toContain('target_provenance=cdp_dom');
+  });
+
+  it('promotes a visible CDP control scoped by a stable relational selector', () => {
+    const actions = buildCandidateActions([], [], {
+      viewport: { width: 1440, height: 900, dpr: 1 },
+      cdpAccessibilityCandidates: [
+        {
+          role: 'button',
+          label: 'search submit',
+          locator: {
+            source: 'cdp_dom',
+            cssSelector: 'div.textarea-container:has(#search-input) div.submit-button-wrapper',
+            visualBounds: { x: 1320, y: 96, width: 32, height: 32 },
+          },
+          actionTypes: ['click'],
+          state: { disabled: false },
+          visibilityProbe: {
+            domVisible: true,
+            inViewport: true,
+            centerHitTarget: true,
+            occluded: false,
+            valueState: 'unknown',
+            reason: 'visible_unobstructed',
+          },
+        },
+      ],
+    });
+
+    expect(actions).toEqual([
+      expect.objectContaining({
+        actionType: 'click',
+        intent: 'search.submit',
+        locatorChain: [
+          expect.objectContaining({ type: 'ref' }),
+          { type: 'aria', value: 'search submit' },
+          {
+            type: 'css',
+            value: 'div.textarea-container:has(#search-input) div.submit-button-wrapper',
+          },
+        ],
+      }),
+    ]);
+  });
+
   it('does not promote unsafe CDP AX candidates without a stable selector or actionability', () => {
     const actions = buildCandidateActions([], [], {
       viewport: { width: 1280, height: 720, dpr: 1 },

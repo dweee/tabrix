@@ -83,6 +83,8 @@ export interface PageContextProvider {
 
 export interface PageSnapshotLike {
   contextSource?: Exclude<DispatcherInputSource, 'fallback_zero'>;
+  /** True only for a successful read bound to the current task and page identity. */
+  currentPageValidated?: boolean;
   fullReadByteLength?: number | null;
   protocolL0Blob?: string | null;
   protocolL1Blob?: string | null;
@@ -155,7 +157,8 @@ function projectSnapshot(
   source: Exclude<DispatcherInputSource, 'fallback_zero'>,
 ): PageContextLookupResult {
   const fullReadByteLength = estimateFullReadByteLength(snap);
-  const isFreshCurrentPageSnapshot = source === 'live_snapshot' && fullReadByteLength > 0;
+  const isFreshCurrentPageSnapshot =
+    source === 'live_snapshot' && (snap.currentPageValidated === true || fullReadByteLength > 0);
   return {
     source,
     candidateActionsCount:

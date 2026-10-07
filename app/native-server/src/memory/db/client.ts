@@ -226,6 +226,20 @@ function ensureKnowledgeApiEndpointsLineageColumns(db: SqliteDatabase): void {
   }
 }
 
+/** Additive reuse-outcome migration for pre-existing Knowledge API rows. */
+function ensureKnowledgeApiEndpointsUsageColumns(db: SqliteDatabase): void {
+  const additions: Array<[string, string]> = [
+    ['successful_use_count', 'INTEGER NOT NULL DEFAULT 0'],
+    ['failed_use_count', 'INTEGER NOT NULL DEFAULT 0'],
+    ['last_validated_at', 'TEXT'],
+  ];
+  for (const [name, type] of additions) {
+    if (!hasColumn(db, 'knowledge_api_endpoints', name)) {
+      db.exec(`ALTER TABLE knowledge_api_endpoints ADD COLUMN ${name} ${type}`);
+    }
+  }
+}
+
 function ensureChooseContextDecisionLayerColumns(db: SqliteDatabase): void {
   const additions: Array<[string, string]> = [
     ['chosen_layer', 'TEXT'],
@@ -316,6 +330,7 @@ export function openMemoryDb(options?: MemoryDbOptions): OpenMemoryDbResult {
   // source_lineage_blob / schema_version). Same idempotent guarded-
   // ALTER contract as the classifier helper above.
   ensureKnowledgeApiEndpointsLineageColumns(db);
+  ensureKnowledgeApiEndpointsUsageColumns(db);
   // Telemetry tables for the chooser. Same idempotent
   // CREATE IF NOT EXISTS pattern; old DBs from before the telemetry tables pick up the
   // tables on next open without a migration. Writers respect the same

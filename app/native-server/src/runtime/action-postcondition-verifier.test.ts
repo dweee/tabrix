@@ -105,6 +105,25 @@ function visibleResultListCollection(...rows: ReturnType<typeof resultRow>[]): R
   ];
 }
 
+function activeFilterState(suffix: string): ReadPageRegion {
+  return region('filter_panel', 'active_filter_state_observed', {
+    objects: [
+      {
+        objectId: `search_filter_${suffix}`,
+        label: `filter:${suffix}`,
+        objectType: 'control',
+        targetRef: `ref_filter_${suffix}`,
+        actionTypes: ['click'],
+        targetability: 'target_ref',
+        confidence: 0.82,
+        reason: 'deterministic filter state fixture',
+        state: 'selected',
+      } as ReadPageRegion['objects'][number],
+    ],
+    candidateActionIds: [`ca_filter_${suffix}`],
+  });
+}
+
 function otpRequestObject(state: string): ReadPageRegion['objects'][number] {
   return {
     objectId: 'auth_request_otp',
@@ -516,6 +535,12 @@ describe('action-postcondition-verifier — R4A region-state postconditions', ()
     ).toBe('search_results_updated');
     expect(
       inferRegionStatePostconditionKindForIntent({
+        intent: 'search.select_suggestion',
+        actionKind: 'click',
+      }),
+    ).toBe('search_results_updated');
+    expect(
+      inferRegionStatePostconditionKindForIntent({
         intent: 'search.apply_filter.time_range',
         actionKind: 'click',
       }),
@@ -644,40 +669,28 @@ describe('action-postcondition-verifier — R4A region-state postconditions', ()
     expect(result.reason).toBe('result_collection_changed_after_action');
   });
 
-  it('passes search filter postconditions when active filter state changes without result-list regions', () => {
+  it('keeps search filter postconditions unknown when only the active filter state changes', () => {
+    const result = verifyRegionStatePostcondition({
+      kind: 'search_results_updated',
+      actionId: 'act-filter',
+      candidateActionIntent: 'search.apply_filter.sort',
+      beforeRegions: [activeFilterState('sort_most_saved')],
+      afterRegions: [activeFilterState('sort_latest')],
+      now: () => PRODUCED_AT,
+    });
+
+    expect(result.verdict).toBe('unknown');
+    expect(result.reason).toBe('active_filter_state_changed_but_attributable_delta_missing');
+  });
+
+  it('passes search filter postconditions when active state and structured results both change', () => {
     const before = [
-      region('filter_panel', 'active_filter_state_observed', {
-        objects: [
-          {
-            objectId: 'search_filter_sort_most_saved',
-            label: 'sort:最多收藏',
-            objectType: 'control',
-            actionTypes: ['click'],
-            targetability: 'target_ref',
-            confidence: 0.82,
-            reason: 'deterministic filter state fixture',
-            state: 'selected',
-          } as ReadPageRegion['objects'][number],
-        ],
-        candidateActionIds: ['ca_filter_sort_most_saved'],
-      }),
+      activeFilterState('sort_most_saved'),
+      ...resultCollection(resultRow('before_a'), resultRow('before_b')),
     ];
     const after = [
-      region('filter_panel', 'active_filter_state_observed', {
-        objects: [
-          {
-            objectId: 'search_filter_sort_latest',
-            label: 'sort:最新',
-            objectType: 'control',
-            actionTypes: ['click'],
-            targetability: 'target_ref',
-            confidence: 0.82,
-            reason: 'deterministic filter state fixture',
-            state: 'selected',
-          } as ReadPageRegion['objects'][number],
-        ],
-        candidateActionIds: ['ca_filter_sort_latest'],
-      }),
+      activeFilterState('sort_latest'),
+      ...resultCollection(resultRow('after_c'), resultRow('after_d')),
     ];
 
     const result = verifyRegionStatePostcondition({
@@ -690,7 +703,49 @@ describe('action-postcondition-verifier — R4A region-state postconditions', ()
     });
 
     expect(result.verdict).toBe('passed');
-    expect(result.reason).toBe('active_filter_state_changed_after_action');
+    expect(result.reason).toBe(
+      'active_filter_state_changed_with_result_collection_changed_after_action',
+    );
+  });
+
+  it.each(['url_changed', 'spa_route_change', 'list_refreshed'] as const)(
+    'passes search filter postconditions when active state changes with attributable %s',
+    (deltaKind) => {
+      const result = verifyRegionStatePostcondition({
+        kind: 'search_results_updated',
+        actionId: 'act-filter',
+        candidateActionIntent: 'search.apply_filter.sort',
+        beforeRegions: [activeFilterState('sort_most_saved')],
+        afterRegions: [activeFilterState('sort_latest')],
+        attributableDeltaKinds: [deltaKind],
+        now: () => PRODUCED_AT,
+      });
+
+      expect(result.verdict).toBe('passed');
+      expect(result.reason).toBe(`active_filter_state_changed_with_${deltaKind}`);
+    },
+  );
+
+  it('does not pass a filter result delta without the expected active-state change', () => {
+    const unchangedFilter = activeFilterState('sort_most_saved');
+
+    const result = verifyRegionStatePostcondition({
+      kind: 'search_results_updated',
+      actionId: 'act-filter',
+      candidateActionIntent: 'search.apply_filter.sort',
+      beforeRegions: [
+        unchangedFilter,
+        ...resultCollection(resultRow('before_a'), resultRow('before_b')),
+      ],
+      afterRegions: [
+        unchangedFilter,
+        ...resultCollection(resultRow('after_c'), resultRow('after_d')),
+      ],
+      now: () => PRODUCED_AT,
+    });
+
+    expect(result.verdict).toBe('unknown');
+    expect(result.reason).toBe('expected_active_filter_state_change_not_proven');
   });
 
   it('does not use active filter state as search-submit proof without result-list regions', () => {

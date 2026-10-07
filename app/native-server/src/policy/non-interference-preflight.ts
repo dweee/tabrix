@@ -13,6 +13,7 @@ export type NonInterferenceVerdictReason =
   | 'not_impact_tool'
   | 'new_run_owned_tab'
   | 'run_owned_tab'
+  | 'pointer_move_only'
   | 'legacy_explicit_tab_allowed'
   | 'user_confirmed'
   | 'auth_resume_completion_action'
@@ -70,6 +71,15 @@ export function evaluateNonInterferencePreflight(input: {
 
   if (!IMPACT_TOOL_NAMES.has(input.toolName)) {
     return allow(input, mode, 'not_impact_tool', targetTabId, targetTabIds, runOwnedTabIds);
+  }
+
+  if (
+    input.toolName === TOOL_NAMES.BROWSER.CLICK &&
+    readString(input.args, 'interaction') === 'hover' &&
+    targetTabId !== null &&
+    (mode === 'default' || input.taskContext?.isRunOwnedTab(targetTabId))
+  ) {
+    return allow(input, mode, 'pointer_move_only', targetTabId, targetTabIds, runOwnedTabIds);
   }
 
   if (input.toolName === TOOL_NAMES.BROWSER.NAVIGATE) {

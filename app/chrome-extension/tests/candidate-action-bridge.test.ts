@@ -13,6 +13,7 @@ import {
   recordStableTargetRefSnapshot,
 } from '@/entrypoints/background/tools/browser/stable-target-ref-registry';
 import { consumePendingActionBinding } from '@/entrypoints/background/tools/browser/read-page-object-delta';
+import { cdpSessionManager } from '@/utils/cdp-session-manager';
 
 describe('candidateAction bridge', () => {
   beforeEach(() => {
@@ -169,6 +170,175 @@ describe('candidateAction bridge', () => {
     });
   });
 
+  it('moves the real pointer with CDP from the live top-frame DOM ref center', async () => {
+    vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
+      id: 4107,
+      title: 'App',
+      url: 'https://example.com/app',
+    });
+    vi.spyOn(clickTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(clickTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      center: { x: 122.4, y: 168.6 },
+      target: { tagName: 'BUTTON', text: 'Sort' },
+    });
+    const sendCommand = vi
+      .spyOn(cdpSessionManager, 'sendCommand')
+      .mockImplementation(async (_tabId, method) =>
+        method === 'Runtime.evaluate'
+          ? {
+              result: {
+                value: { visibilityState: 'visible', hasFocus: true, hidden: false },
+              },
+            }
+          : {},
+      );
+    const withSession = vi
+      .spyOn(cdpSessionManager, 'withSession')
+      .mockImplementation(async (_tabId, _owner, fn) => await fn());
+
+    const result = await clickTool.execute({
+      interaction: 'hover',
+      candidateAction: {
+        targetRef: 'ref_sort',
+        intent: 'search.open_filters',
+      },
+    } as any);
+
+    expect(result.isError).toBe(false);
+    expect(withSession).toHaveBeenCalledWith(
+      4107,
+      'click-element-safe-hover',
+      expect.any(Function),
+    );
+    expect(sendCommand).toHaveBeenCalledWith(4107, 'Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      x: 122,
+      y: 169,
+      button: 'none',
+      buttons: 0,
+      pointerType: 'mouse',
+    });
+    const payload = JSON.parse(String((result.content?.[0] as any)?.text || '{}'));
+    expect(payload.foregroundActivation).toMatchObject({
+      verdict: 'already_foreground',
+      before: {
+        visibilityState: 'visible',
+        hasFocus: true,
+        hidden: false,
+      },
+      methodsAttempted: [],
+    });
+    expect(payload.pointerDispatch).toEqual({
+      transport: 'cdp_mouse_moved',
+      coordinateSource: 'live_dom_ref_center',
+      coordinatePersisted: false,
+      cdpAttempted: true,
+      cdpSucceeded: true,
+      fallbackReason: null,
+    });
+  });
+
+  it('recovers a hidden page before moving the real pointer for safe hover', async () => {
+    vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
+      id: 41071,
+      windowId: 9,
+      title: 'App',
+      url: 'https://example.com/app',
+    });
+    vi.spyOn(clickTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(clickTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      center: { x: 200, y: 120 },
+      target: { tagName: 'BUTTON', text: 'Filters' },
+    });
+    vi.mocked(chrome.tabs.get).mockResolvedValue({
+      id: 41071,
+      windowId: 9,
+      active: false,
+      url: 'https://example.com/app',
+    } as chrome.tabs.Tab);
+    vi.mocked(chrome.windows.update).mockResolvedValue({
+      id: 9,
+      focused: true,
+    } as chrome.windows.Window);
+    vi.mocked(chrome.tabs.update).mockResolvedValue({
+      id: 41071,
+      windowId: 9,
+      active: true,
+      url: 'https://example.com/app',
+    } as chrome.tabs.Tab);
+    let foregroundProbeCount = 0;
+    const sendCommand = vi
+      .spyOn(cdpSessionManager, 'sendCommand')
+      .mockImplementation(async (_tabId, method) => {
+        if (method === 'Runtime.evaluate') {
+          foregroundProbeCount += 1;
+          return {
+            result: {
+              value:
+                foregroundProbeCount === 1
+                  ? { visibilityState: 'hidden', hasFocus: false, hidden: true }
+                  : { visibilityState: 'visible', hasFocus: true, hidden: false },
+            },
+          };
+        }
+        return {};
+      });
+    vi.spyOn(cdpSessionManager, 'withSession').mockImplementation(
+      async (_tabId, _owner, callback) => await callback(),
+    );
+
+    const result = await clickTool.execute({
+      interaction: 'hover',
+      candidateAction: {
+        targetRef: 'ref_filters',
+        intent: 'search.open_filters',
+      },
+    } as any);
+
+    expect(result.isError).toBe(false);
+    expect(chrome.windows.update).toHaveBeenCalledWith(9, { focused: true });
+    expect(chrome.tabs.update).toHaveBeenCalledWith(41071, { active: true });
+    expect(sendCommand).toHaveBeenCalledWith(41071, 'Page.bringToFront', undefined);
+    expect(sendCommand).toHaveBeenCalledWith(41071, 'Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      x: 200,
+      y: 120,
+      button: 'none',
+      buttons: 0,
+      pointerType: 'mouse',
+    });
+    const payload = JSON.parse(String((result.content?.[0] as any)?.text || '{}'));
+    expect(payload.foregroundActivation).toMatchObject({
+      verdict: 'recovered_foreground',
+      before: {
+        visibilityState: 'hidden',
+        hasFocus: false,
+        hidden: true,
+      },
+      after: {
+        visibilityState: 'visible',
+        hasFocus: true,
+        hidden: false,
+      },
+      methodsSucceeded: [
+        'chrome.windows.update.focus',
+        'chrome.tabs.update.active',
+        'Page.bringToFront',
+        'Emulation.setFocusEmulationEnabled',
+        'Page.setWebLifecycleState',
+      ],
+      errors: [],
+    });
+    expect(payload.pointerDispatch).toMatchObject({
+      transport: 'cdp_mouse_moved',
+      coordinateSource: 'live_dom_ref_center',
+      coordinatePersisted: false,
+      cdpSucceeded: true,
+    });
+  });
+
   it('resolves safe hover from candidateAction locator css with duplicate-safe selector lookup', async () => {
     vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
       id: 4108,
@@ -266,6 +436,7 @@ describe('candidateAction bridge', () => {
         tagName: '',
         allowMultiple: true,
       }),
+      { frameId: 0 },
     );
     expect(sendSpy).toHaveBeenCalledWith(
       4109,
@@ -333,6 +504,7 @@ describe('candidateAction bridge', () => {
         tagName: '',
         allowMultiple: true,
       }),
+      { frameId: 0 },
     );
     expect(sendSpy).toHaveBeenCalledWith(
       4110,
@@ -775,6 +947,10 @@ describe('candidateAction bridge', () => {
       timeout: 1,
     });
     expect(clickMessage.ref).toBeUndefined();
+    expect(consumePendingActionBinding(4114)).toMatchObject({
+      targetRef: 'ref_text_search_toolbar_4',
+      actionIntent: 'search.category_select',
+    });
   });
 
   it('routes recovered filter panel targetRef through candidateAction locator css', async () => {
@@ -864,6 +1040,274 @@ describe('candidateAction bridge', () => {
     expect(clickMessage.ref).toBeUndefined();
   });
 
+  it('uses a trusted CDP pointer click for a visible current-snapshot DOM object', async () => {
+    recordCandidateActionTargetLocatorsSnapshot(41241, [
+      {
+        targetRef: 'ref_fallback_cdp_dom_button_1',
+        selector: 'main:has(#query) button[type="submit"]',
+      },
+    ]);
+    vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
+      id: 41241,
+      windowId: 7,
+      title: 'Search',
+      url: 'https://example.com/search',
+    });
+    vi.spyOn(clickTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    const sendSpy = vi.spyOn(clickTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      dispatchSucceeded: true,
+      signals: { domChanged: true },
+    });
+    const sendCommand = vi
+      .spyOn(cdpSessionManager, 'sendCommand')
+      .mockImplementation(async (_tabId, method) => {
+        if (method === 'Runtime.evaluate') {
+          return {
+            result: {
+              value: {
+                visibilityState: 'visible',
+                hasFocus: true,
+                hidden: false,
+              },
+            },
+          };
+        }
+        if (method === 'DOM.getDocument') return { root: { nodeId: 1 } };
+        if (method === 'DOM.querySelectorAll') return { nodeIds: [27] };
+        if (method === 'DOM.resolveNode') return { object: { objectId: 'object-27' } };
+        if (method === 'Runtime.callFunctionOn') {
+          return {
+            result: {
+              value: {
+                success: true,
+                center: { x: 1340.4, y: 143.2 },
+                elementInfo: { tagName: 'BUTTON' },
+                targetConsistency: {
+                  verdict: 'matched',
+                  clickMethod: 'cdp_snapshot_locator',
+                },
+              },
+            },
+          };
+        }
+        return {};
+      });
+    vi.spyOn(cdpSessionManager, 'withSession').mockImplementation(
+      async (_tabId, _owner, callback) => await callback(),
+    );
+
+    const result = await clickTool.execute({
+      tabId: 41241,
+      candidateAction: {
+        targetRef: 'ref_fallback_cdp_dom_button_1',
+        executionTargetKind: 'snapshot_locator',
+        intent: 'search.submit',
+        visibility: {
+          source: 'cdp',
+          domVisible: true,
+          inViewport: true,
+          centerHitTarget: true,
+          occluded: false,
+          reason: 'visible_unobstructed',
+        },
+        snapshotRect: { x: 1324, y: 127, width: 32, height: 32 },
+        locatorChain: [
+          { type: 'ref', value: 'ref_fallback_cdp_dom_button_1' },
+          { type: 'css', value: 'main:has(#query) button[type="submit"]' },
+        ],
+      },
+    });
+
+    expect(result.isError).toBe(false);
+    const payload = JSON.parse(String((result.content?.[0] as any)?.text || '{}'));
+    expect(payload).toMatchObject({
+      dispatchSucceeded: true,
+      clickMethod: 'cdp_trusted_pointer',
+      pointerDispatch: {
+        transport: 'cdp_mouse_click',
+        coordinateSource: 'live_cdp_dom_object_center',
+        coordinatePersisted: false,
+        cdpSucceeded: true,
+      },
+      foregroundActivation: {
+        verdict: 'already_foreground',
+        before: {
+          visibilityState: 'visible',
+          hasFocus: true,
+          hidden: false,
+        },
+        methodsAttempted: [],
+      },
+      targetBinding: {
+        resolutionSource: 'candidate_snapshot_locator_css',
+        dispatchTarget: 'selector',
+      },
+    });
+    expect(sendCommand).toHaveBeenCalledWith(41241, 'Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      x: 1340,
+      y: 143,
+      button: 'none',
+      buttons: 0,
+      pointerType: 'mouse',
+    });
+    expect(sendCommand).toHaveBeenCalledWith(41241, 'Input.dispatchMouseEvent', {
+      type: 'mousePressed',
+      x: 1340,
+      y: 143,
+      button: 'left',
+      buttons: 1,
+      clickCount: 1,
+      pointerType: 'mouse',
+    });
+    expect(sendCommand).toHaveBeenCalledWith(41241, 'Input.dispatchMouseEvent', {
+      type: 'mouseReleased',
+      x: 1340,
+      y: 143,
+      button: 'left',
+      buttons: 0,
+      clickCount: 1,
+      pointerType: 'mouse',
+    });
+    expect(
+      sendSpy.mock.calls.some(
+        ([, message]) => (message as any)?.action === TOOL_MESSAGE_TYPES.CLICK_ELEMENT,
+      ),
+    ).toBe(false);
+  });
+
+  it('recovers a hidden current-snapshot page before dispatching a trusted pointer click', async () => {
+    recordCandidateActionTargetLocatorsSnapshot(41242, [
+      {
+        targetRef: 'ref_fallback_cdp_dom_button_2',
+        selector: 'main:has(#query) button[type="submit"]',
+      },
+    ]);
+    vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
+      id: 41242,
+      windowId: 7,
+      title: 'Search',
+      url: 'https://example.com/search',
+    });
+    vi.spyOn(clickTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(clickTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      dispatchSucceeded: true,
+    });
+    vi.mocked(chrome.tabs.get).mockResolvedValue({
+      id: 41242,
+      windowId: 7,
+      active: false,
+      url: 'https://example.com/search',
+    } as chrome.tabs.Tab);
+    vi.mocked(chrome.windows.update).mockResolvedValue({
+      id: 7,
+      focused: true,
+    } as chrome.windows.Window);
+    vi.mocked(chrome.tabs.update).mockResolvedValue({
+      id: 41242,
+      windowId: 7,
+      active: true,
+      url: 'https://example.com/search',
+    } as chrome.tabs.Tab);
+    let foregroundProbeCount = 0;
+    const sendCommand = vi
+      .spyOn(cdpSessionManager, 'sendCommand')
+      .mockImplementation(async (_tabId, method) => {
+        if (method === 'Runtime.evaluate') {
+          foregroundProbeCount += 1;
+          return {
+            result: {
+              value:
+                foregroundProbeCount === 1
+                  ? { visibilityState: 'hidden', hasFocus: false, hidden: true }
+                  : { visibilityState: 'visible', hasFocus: true, hidden: false },
+            },
+          };
+        }
+        if (method === 'DOM.getDocument') return { root: { nodeId: 1 } };
+        if (method === 'DOM.querySelectorAll') return { nodeIds: [28] };
+        if (method === 'DOM.resolveNode') return { object: { objectId: 'object-28' } };
+        if (method === 'Runtime.callFunctionOn') {
+          return {
+            result: {
+              value: {
+                success: true,
+                center: { x: 320, y: 140 },
+                elementInfo: { tagName: 'BUTTON' },
+                targetConsistency: { verdict: 'matched' },
+              },
+            },
+          };
+        }
+        return {};
+      });
+    vi.spyOn(cdpSessionManager, 'withSession').mockImplementation(
+      async (_tabId, _owner, callback) => await callback(),
+    );
+
+    const result = await clickTool.execute({
+      tabId: 41242,
+      candidateAction: {
+        targetRef: 'ref_fallback_cdp_dom_button_2',
+        executionTargetKind: 'snapshot_locator',
+        intent: 'search.submit',
+        visibility: {
+          source: 'cdp',
+          domVisible: true,
+          inViewport: true,
+          centerHitTarget: true,
+          occluded: false,
+          reason: 'visible_unobstructed',
+        },
+        snapshotRect: { x: 1324, y: 127, width: 32, height: 32 },
+        locatorChain: [
+          { type: 'ref', value: 'ref_fallback_cdp_dom_button_2' },
+          { type: 'css', value: 'main:has(#query) button[type="submit"]' },
+        ],
+      },
+    });
+
+    expect(result.isError).toBe(false);
+    expect(sendCommand).toHaveBeenCalledWith(41242, 'Page.bringToFront', undefined);
+    expect(sendCommand).toHaveBeenCalledWith(41242, 'Emulation.setFocusEmulationEnabled', {
+      enabled: true,
+    });
+    expect(sendCommand).toHaveBeenCalledWith(41242, 'Page.setWebLifecycleState', {
+      state: 'active',
+    });
+    const payload = JSON.parse(String((result.content?.[0] as any)?.text || '{}'));
+    expect(payload.foregroundActivation).toMatchObject({
+      verdict: 'recovered_foreground',
+      before: {
+        visibilityState: 'hidden',
+        hasFocus: false,
+        hidden: true,
+      },
+      after: {
+        visibilityState: 'visible',
+        hasFocus: true,
+        hidden: false,
+      },
+      methodsSucceeded: [
+        'chrome.windows.update.focus',
+        'chrome.tabs.update.active',
+        'Page.bringToFront',
+        'Emulation.setFocusEmulationEnabled',
+        'Page.setWebLifecycleState',
+      ],
+      errors: [],
+    });
+    expect(chrome.windows.update).toHaveBeenCalledWith(7, { focused: true });
+    expect(chrome.tabs.update).toHaveBeenCalledWith(41242, { active: true });
+    expect(sendCommand).toHaveBeenCalledWith(
+      41242,
+      'Input.dispatchMouseEvent',
+      expect.objectContaining({ type: 'mousePressed', buttons: 1 }),
+    );
+  });
+
   it('routes visible filter control targetRef through candidateAction locator css', async () => {
     vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
       id: 4118,
@@ -942,6 +1386,97 @@ describe('candidateAction bridge', () => {
       selector: '[role="listbox"] [role="option"]:nth-of-type(2)',
     });
     expect(clickMessage.ref).toBeUndefined();
+  });
+
+  it('clicks a visible current-snapshot floating option with a trusted CDP pointer', async () => {
+    vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
+      id: 41182,
+      title: 'Search',
+      url: 'https://example.com/search?q=neutral',
+    });
+    vi.spyOn(clickTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    const sendSpy = vi.spyOn(clickTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      dispatchSucceeded: true,
+    });
+    const sendCommand = vi
+      .spyOn(cdpSessionManager, 'sendCommand')
+      .mockImplementation(async (_tabId, method) => {
+        if (method === 'Runtime.evaluate') {
+          return {
+            result: {
+              value: { visibilityState: 'visible', hasFocus: true, hidden: false },
+            },
+          };
+        }
+        if (method === 'DOM.getDocument') return { root: { nodeId: 1 } };
+        if (method === 'DOM.querySelectorAll') return { nodeIds: [82] };
+        if (method === 'DOM.resolveNode') return { object: { objectId: 'floating-option-82' } };
+        if (method === 'Runtime.callFunctionOn') {
+          return {
+            result: {
+              value: {
+                success: true,
+                center: { x: 480, y: 220 },
+                elementInfo: { tagName: 'DIV', text: 'Most comments' },
+                targetConsistency: { verdict: 'matched' },
+              },
+            },
+          };
+        }
+        return {};
+      });
+    vi.spyOn(cdpSessionManager, 'withSession').mockImplementation(
+      async (_tabId, _owner, callback) => await callback(),
+    );
+
+    const result = await clickTool.execute({
+      candidateAction: {
+        targetRef: 'ref_floating_option_82',
+        executionTargetKind: 'snapshot_locator',
+        intent: 'search.apply_filter.sort',
+        snapshotRect: { x: 440, y: 200, width: 80, height: 40 },
+        visibility: {
+          source: 'dom',
+          domVisible: true,
+          inViewport: true,
+          centerHitTarget: true,
+          occluded: false,
+          reason: 'visible_unobstructed',
+        },
+        locatorChain: [
+          { type: 'ref', value: 'ref_floating_option_82' },
+          { type: 'xpath', value: "//*[@role='option'][2]" },
+          { type: 'css', value: '[role="listbox"] [role="option"]:nth-of-type(2)' },
+        ],
+      },
+    });
+
+    expect(result.isError).toBe(false);
+    const payload = JSON.parse(String((result.content?.[0] as any)?.text || '{}'));
+    expect(payload).toMatchObject({
+      clickMethod: 'cdp_trusted_pointer',
+      targetBinding: {
+        resolutionSource: 'candidate_locator_css',
+        dispatchTarget: 'selector',
+      },
+      pointerDispatch: {
+        transport: 'cdp_mouse_click',
+        coordinateSource: 'live_cdp_dom_object_center',
+        coordinatePersisted: false,
+        cdpSucceeded: true,
+      },
+    });
+    expect(sendCommand).toHaveBeenCalledWith(
+      41182,
+      'Input.dispatchMouseEvent',
+      expect.objectContaining({ type: 'mousePressed', x: 480, y: 220, buttons: 1 }),
+    );
+    expect(
+      sendSpy.mock.calls.some(
+        ([, message]) => (message as any)?.action === TOOL_MESSAGE_TYPES.CLICK_ELEMENT,
+      ),
+    ).toBe(false);
   });
 
   it('routes visible filter option targetRef through candidateAction locator xpath before css', async () => {
@@ -1378,6 +1913,541 @@ describe('candidateAction bridge', () => {
       }),
       undefined,
     );
+  });
+
+  it('fills a current snapshot locator through CDP when the page content script is unavailable', async () => {
+    recordCandidateActionTargetLocatorsSnapshot(4103, [
+      {
+        targetRef: 'ref_fallback_cdp_ax_backend_27',
+        selector: '#search-input',
+      },
+    ]);
+    vi.spyOn(fillTool as any, 'tryGetTab').mockResolvedValue({
+      id: 4103,
+      title: 'Search',
+      url: 'https://example.com/search',
+      status: 'loading',
+    });
+    const settleSpy = vi.spyOn(fillTool as any, 'waitForTabSettled');
+    const injectSpy = vi.spyOn(fillTool as any, 'injectContentScript');
+    const messageSpy = vi.spyOn(fillTool as any, 'sendMessageToTab');
+    let runtimeCallCount = 0;
+    const sendCommand = vi
+      .spyOn(cdpSessionManager, 'sendCommand')
+      .mockImplementation(async (_tabId, method) => {
+        if (method === 'DOM.getDocument') return { root: { nodeId: 1 } } as any;
+        if (method === 'DOM.querySelectorAll') return { nodeIds: [27] } as any;
+        if (method === 'DOM.resolveNode') return { object: { objectId: 'search-input-27' } } as any;
+        if (method === 'Runtime.callFunctionOn') {
+          runtimeCallCount += 1;
+          return {
+            result: {
+              value:
+                runtimeCallCount === 1
+                  ? {
+                      success: true,
+                      tagName: 'INPUT',
+                      type: 'search',
+                      requiresTrustedTextEntry: true,
+                    }
+                  : runtimeCallCount === 2
+                    ? {
+                        success: true,
+                        focusConfirmed: true,
+                        selectionPreparedBeforeDispatch: true,
+                      }
+                    : {
+                        success: true,
+                        tagName: 'INPUT',
+                        type: 'search',
+                        valueState: 'non_empty',
+                        valueMatchesRequested: true,
+                        elementInfo: {
+                          tagName: 'INPUT',
+                          type: 'search',
+                          valueState: 'non_empty',
+                          focusConfirmed: true,
+                          selectionPreparedBeforeDispatch: true,
+                          trustedInputObserved: true,
+                          exactValueMatch: true,
+                        },
+                      },
+            },
+          } as any;
+        }
+        return {} as any;
+      });
+    const withSession = vi
+      .spyOn(cdpSessionManager, 'withSession')
+      .mockImplementation(async (_tabId, _owner, fn) => await fn());
+
+    const result = await fillTool.execute({
+      tabId: 4103,
+      value: 'generic query',
+      candidateAction: {
+        targetRef: 'ref_fallback_cdp_ax_backend_27',
+        locatorChain: [
+          { type: 'ref', value: 'ref_fallback_cdp_ax_backend_27' },
+          { type: 'css', value: '#search-input' },
+        ],
+        intent: 'search.enter_query',
+      },
+    });
+
+    expect(result.isError).toBe(false);
+    expect(settleSpy).not.toHaveBeenCalled();
+    expect(injectSpy).not.toHaveBeenCalled();
+    expect(messageSpy).not.toHaveBeenCalled();
+    expect(withSession).toHaveBeenCalledWith(
+      4103,
+      'fill-current-snapshot-locator',
+      expect.any(Function),
+    );
+    expect(sendCommand).toHaveBeenCalledWith(4103, 'Input.insertText', {
+      text: 'generic query',
+    });
+    const setupCall = sendCommand.mock.calls.find(
+      ([, method]) => method === 'Runtime.callFunctionOn',
+    );
+    const setupFunction = String((setupCall?.[2] as any)?.functionDeclaration || '');
+    expect(setupFunction).toContain("document?.addEventListener('beforeinput'");
+    expect(setupFunction).toContain('wrongTargetBlocked');
+    expect(setupFunction).toContain('event.preventDefault()');
+    expect(setupFunction).not.toContain('once: true');
+    const setupTrustedProbe = new Function(`return (${setupFunction});`)() as (
+      this: HTMLInputElement,
+      nextValue: string,
+      probeKey: string,
+    ) => { success: boolean };
+    const guardedInput = document.createElement('input');
+    const competingInput = document.createElement('input');
+    guardedInput.value = 'old';
+    vi.spyOn(guardedInput, 'getBoundingClientRect').mockReturnValue({
+      x: 10,
+      y: 10,
+      top: 10,
+      left: 10,
+      right: 210,
+      bottom: 42,
+      width: 200,
+      height: 32,
+      toJSON: () => ({}),
+    });
+    document.body.append(guardedInput, competingInput);
+    let wrongTargetGuard: EventListener | undefined;
+    let trustedInputListener: EventListener | undefined;
+    const documentAddEventListener = vi
+      .spyOn(document, 'addEventListener')
+      .mockImplementation((type, listener) => {
+        if (type === 'beforeinput') wrongTargetGuard = listener as EventListener;
+      });
+    const elementAddEventListener = vi
+      .spyOn(guardedInput, 'addEventListener')
+      .mockImplementation((type, listener) => {
+        if (type === 'input') trustedInputListener = listener as EventListener;
+      });
+    guardedInput.focus();
+    expect(setupTrustedProbe.call(guardedInput, 'next', '__probe')).toMatchObject({
+      success: true,
+    });
+    competingInput.focus();
+    const preventDefault = vi.fn();
+    wrongTargetGuard?.({
+      isTrusted: true,
+      cancelable: true,
+      preventDefault,
+    } as unknown as Event);
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect((guardedInput as any).__probe.wrongTargetBlocked).toBe(true);
+    trustedInputListener?.({ isTrusted: false } as Event);
+    expect((guardedInput as any).__probe.input).toBe(false);
+    trustedInputListener?.({ isTrusted: true } as Event);
+    expect((guardedInput as any).__probe.input).toBe(true);
+    (guardedInput as any).__probe.cleanup();
+    documentAddEventListener.mockRestore();
+    elementAddEventListener.mockRestore();
+    guardedInput.remove();
+    competingInput.remove();
+    const readbackCall = sendCommand.mock.calls
+      .filter(([, method]) => method === 'Runtime.callFunctionOn')
+      .at(-1);
+    expect(readbackCall?.[2]).toMatchObject({
+      awaitPromise: true,
+      functionDeclaration: expect.stringContaining('await new Promise'),
+    });
+    const readbackFunction = String((readbackCall?.[2] as any)?.functionDeclaration || '');
+    expect(readbackFunction).toContain('trustedInputObserved');
+    expect(readbackFunction).not.toContain('dispatchEvent(');
+    expect(sendCommand.mock.calls.map(([, method]) => method)).not.toContain(
+      'Input.dispatchKeyEvent',
+    );
+    expect(sendCommand.mock.calls.at(-1)?.[1]).toBe('Runtime.callFunctionOn');
+    const payload = JSON.parse(String((result.content?.[0] as any)?.text || '{}'));
+    expect(payload).toMatchObject({
+      success: true,
+      executionLane: 'tabrix_cdp_snapshot_locator',
+      targetBinding: {
+        resolutionSource: 'candidate_snapshot_locator_css',
+        dispatchTarget: 'selector',
+      },
+      inputWriteEvidence: {
+        valueState: 'non_empty',
+        proofStatus: 'input_state_observed',
+        focusConfirmed: true,
+        selectionPreparedBeforeDispatch: true,
+        trustedInputObserved: true,
+        exactValueMatch: true,
+      },
+      businessVerification: {
+        status: 'fresh_read_required',
+        businessSuccessProven: false,
+      },
+    });
+  });
+
+  it('rejects a current snapshot CDP fill when the target cannot confirm focus', async () => {
+    recordCandidateActionTargetLocatorsSnapshot(41031, [
+      {
+        targetRef: 'ref_fallback_cdp_dom_searchbox_focus',
+        selector: '#search-input',
+      },
+    ]);
+    vi.spyOn(fillTool as any, 'tryGetTab').mockResolvedValue({
+      id: 41031,
+      title: 'Search',
+      url: 'https://example.com/search',
+      status: 'complete',
+    });
+    const sendCommand = vi
+      .spyOn(cdpSessionManager, 'sendCommand')
+      .mockImplementation(async (_tabId, method) => {
+        if (method === 'DOM.getDocument') return { root: { nodeId: 1 } } as any;
+        if (method === 'DOM.querySelectorAll') return { nodeIds: [31] } as any;
+        if (method === 'DOM.resolveNode') return { object: { objectId: 'search-input-31' } } as any;
+        if (method === 'Runtime.callFunctionOn') {
+          return {
+            result: {
+              value: {
+                success: false,
+                error: 'target_focus_not_confirmed',
+              },
+            },
+          } as any;
+        }
+        return {} as any;
+      });
+    vi.spyOn(cdpSessionManager, 'withSession').mockImplementation(
+      async (_tabId, _owner, fn) => await fn(),
+    );
+
+    const result = await fillTool.execute({
+      tabId: 41031,
+      value: 'generic query',
+      candidateAction: {
+        targetRef: 'ref_fallback_cdp_dom_searchbox_focus',
+        locatorChain: [
+          { type: 'ref', value: 'ref_fallback_cdp_dom_searchbox_focus' },
+          { type: 'css', value: '#search-input' },
+        ],
+        intent: 'search.enter_query',
+      },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(String((result.content?.[0] as any)?.text || '')).toContain(
+      'target_focus_not_confirmed',
+    );
+    expect(sendCommand.mock.calls.map(([, method]) => method)).not.toContain(
+      'Input.dispatchKeyEvent',
+    );
+  });
+
+  it('rejects trusted text entry when focus moves after the snapshot target is prepared', async () => {
+    recordCandidateActionTargetLocatorsSnapshot(41033, [
+      {
+        targetRef: 'ref_fallback_cdp_dom_searchbox_focus_lost',
+        selector: '#search-input',
+      },
+    ]);
+    vi.spyOn(fillTool as any, 'tryGetTab').mockResolvedValue({
+      id: 41033,
+      title: 'Search',
+      url: 'https://example.com/search',
+      status: 'complete',
+    });
+    let runtimeCallCount = 0;
+    const sendCommand = vi
+      .spyOn(cdpSessionManager, 'sendCommand')
+      .mockImplementation(async (_tabId, method) => {
+        if (method === 'DOM.getDocument') return { root: { nodeId: 1 } } as any;
+        if (method === 'DOM.querySelectorAll') return { nodeIds: [33] } as any;
+        if (method === 'DOM.resolveNode') {
+          return { object: { objectId: 'search-input-33' } } as any;
+        }
+        if (method === 'Runtime.callFunctionOn') {
+          runtimeCallCount += 1;
+          return {
+            result: {
+              value:
+                runtimeCallCount === 1
+                  ? {
+                      success: true,
+                      tagName: 'INPUT',
+                      type: 'search',
+                      requiresTrustedTextEntry: true,
+                    }
+                  : {
+                      success: false,
+                      error: 'target_focus_lost_before_trusted_input',
+                      focusConfirmed: false,
+                      selectionPreparedBeforeDispatch: false,
+                    },
+            },
+          } as any;
+        }
+        return {} as any;
+      });
+    vi.spyOn(cdpSessionManager, 'withSession').mockImplementation(
+      async (_tabId, _owner, fn) => await fn(),
+    );
+
+    const result = await fillTool.execute({
+      tabId: 41033,
+      value: 'generic query',
+      candidateAction: {
+        targetRef: 'ref_fallback_cdp_dom_searchbox_focus_lost',
+        locatorChain: [
+          { type: 'ref', value: 'ref_fallback_cdp_dom_searchbox_focus_lost' },
+          { type: 'css', value: '#search-input' },
+        ],
+        intent: 'search.enter_query',
+      },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(String((result.content?.[0] as any)?.text || '')).toContain(
+      'target_focus_lost_before_trusted_input',
+    );
+    expect(sendCommand.mock.calls.map(([, method]) => method)).not.toContain('Input.insertText');
+  });
+
+  it('rejects a current snapshot CDP fill when non-empty text reads back empty', async () => {
+    recordCandidateActionTargetLocatorsSnapshot(41032, [
+      {
+        targetRef: 'ref_fallback_cdp_dom_searchbox_empty',
+        selector: '#search-input',
+      },
+    ]);
+    vi.spyOn(fillTool as any, 'tryGetTab').mockResolvedValue({
+      id: 41032,
+      title: 'Search',
+      url: 'https://example.com/search',
+      status: 'complete',
+    });
+    let runtimeCallCount = 0;
+    const sendCommand = vi
+      .spyOn(cdpSessionManager, 'sendCommand')
+      .mockImplementation(async (_tabId, method) => {
+        if (method === 'DOM.getDocument') return { root: { nodeId: 1 } } as any;
+        if (method === 'DOM.querySelectorAll') return { nodeIds: [32] } as any;
+        if (method === 'DOM.resolveNode') return { object: { objectId: 'search-input-32' } } as any;
+        if (method === 'Runtime.callFunctionOn') {
+          runtimeCallCount += 1;
+          return {
+            result: {
+              value:
+                runtimeCallCount === 1
+                  ? {
+                      success: true,
+                      tagName: 'TEXTAREA',
+                      type: '',
+                      requiresTrustedTextEntry: true,
+                    }
+                  : runtimeCallCount === 2
+                    ? {
+                        success: true,
+                        focusConfirmed: true,
+                        selectionPreparedBeforeDispatch: true,
+                      }
+                    : {
+                        success: true,
+                        tagName: 'TEXTAREA',
+                        type: '',
+                        valueState: 'empty',
+                        valueMatchesRequested: false,
+                        elementInfo: {
+                          tagName: 'TEXTAREA',
+                          type: '',
+                          valueState: 'empty',
+                          focusConfirmed: true,
+                          selectionPreparedBeforeDispatch: true,
+                          trustedInputObserved: true,
+                          exactValueMatch: false,
+                        },
+                      },
+            },
+          } as any;
+        }
+        return {} as any;
+      });
+    vi.spyOn(cdpSessionManager, 'withSession').mockImplementation(
+      async (_tabId, _owner, fn) => await fn(),
+    );
+
+    const result = await fillTool.execute({
+      tabId: 41032,
+      value: 'generic query',
+      candidateAction: {
+        targetRef: 'ref_fallback_cdp_dom_searchbox_empty',
+        locatorChain: [
+          { type: 'ref', value: 'ref_fallback_cdp_dom_searchbox_empty' },
+          { type: 'css', value: '#search-input' },
+        ],
+        intent: 'search.enter_query',
+      },
+    });
+
+    expect(result.isError).toBe(false);
+    expect(JSON.parse(String((result.content?.[0] as any)?.text || '{}'))).toMatchObject({
+      success: false,
+      reason: 'trusted_input_readback_unconfirmed',
+      error: 'trusted_input_dispatch_or_readback_unconfirmed',
+      dispatchMaybeApplied: true,
+      freshReadRequired: true,
+      doNotRetryBeforeRead: true,
+      targetBinding: {
+        resolutionSource: 'candidate_snapshot_locator_css',
+        dispatchTarget: 'selector',
+      },
+      postActionReadback: {
+        status: 'fresh_read_required',
+        businessSuccessProven: false,
+      },
+    });
+    const partialPayload = JSON.parse(String((result.content?.[0] as any)?.text || '{}'));
+    expect(partialPayload.actionId).toMatch(/^fill-41032-\d+$/);
+    expect(partialPayload.postActionDelta).toMatchObject({
+      actionId: partialPayload.actionId,
+      actionKind: 'fill',
+      tabId: 41032,
+      readbackStatus: 'fresh_read_required',
+      businessSuccessProven: false,
+    });
+    expect(consumePendingActionBinding(41032)).toMatchObject({
+      actionId: partialPayload.actionId,
+      targetRef: 'ref_fallback_cdp_dom_searchbox_empty',
+      actionIntent: 'search.enter_query',
+    });
+    expect(JSON.stringify(partialPayload)).not.toContain('generic query');
+    expect(sendCommand).toHaveBeenCalledWith(41032, 'Input.insertText', {
+      text: 'generic query',
+    });
+  });
+
+  it('dispatches Enter through a current CDP snapshot locator when the content bridge is unavailable', async () => {
+    recordCandidateActionTargetLocatorsSnapshot(4104, [
+      {
+        targetRef: 'ref_fallback_cdp_dom_searchbox_0',
+        selector: '#search-input',
+      },
+    ]);
+    vi.spyOn(keyboardTool as any, 'tryGetTab').mockResolvedValue({
+      id: 4104,
+      title: 'Search',
+      url: 'https://example.com/search',
+      status: 'loading',
+    });
+    const injectSpy = vi.spyOn(keyboardTool as any, 'injectContentScript');
+    const messageSpy = vi.spyOn(keyboardTool as any, 'sendMessageToTab');
+    const sendCommand = vi
+      .spyOn(cdpSessionManager, 'sendCommand')
+      .mockImplementation(async (_tabId, method) => {
+        if (method === 'DOM.getDocument') return { root: { nodeId: 1 } } as any;
+        if (method === 'DOM.querySelectorAll') return { nodeIds: [27] } as any;
+        if (method === 'DOM.resolveNode') return { object: { objectId: 'search-input-27' } } as any;
+        if (method === 'Runtime.callFunctionOn') {
+          return {
+            result: {
+              value: {
+                success: true,
+                tagName: 'TEXTAREA',
+                type: '',
+                focused: true,
+              },
+            },
+          } as any;
+        }
+        return {} as any;
+      });
+    const withSession = vi
+      .spyOn(cdpSessionManager, 'withSession')
+      .mockImplementation(async (_tabId, _owner, fn) => await fn());
+
+    const result = await keyboardTool.execute({
+      tabId: 4104,
+      key: 'Enter',
+      candidateAction: {
+        targetRef: 'ref_fallback_cdp_dom_searchbox_0',
+        locatorChain: [
+          { type: 'ref', value: 'ref_fallback_cdp_dom_searchbox_0' },
+          { type: 'css', value: '#search-input' },
+        ],
+        intent: 'search.submit',
+      },
+    });
+
+    expect(result.isError).toBe(false);
+    expect(injectSpy).not.toHaveBeenCalled();
+    expect(messageSpy).not.toHaveBeenCalled();
+    expect(withSession).toHaveBeenCalledWith(
+      4104,
+      'keyboard-current-snapshot-locator',
+      expect.any(Function),
+    );
+    expect(sendCommand.mock.calls.map(([, method]) => method)).toEqual([
+      'DOM.getDocument',
+      'DOM.querySelectorAll',
+      'DOM.resolveNode',
+      'Runtime.callFunctionOn',
+      'Input.dispatchKeyEvent',
+      'Input.dispatchKeyEvent',
+    ]);
+    expect(sendCommand).toHaveBeenNthCalledWith(
+      5,
+      4104,
+      'Input.dispatchKeyEvent',
+      expect.objectContaining({
+        type: 'keyDown',
+        key: 'Enter',
+        code: 'Enter',
+        text: '\r',
+        unmodifiedText: '\r',
+        windowsVirtualKeyCode: 13,
+      }),
+    );
+    expect(sendCommand).toHaveBeenNthCalledWith(
+      6,
+      4104,
+      'Input.dispatchKeyEvent',
+      expect.objectContaining({
+        type: 'keyUp',
+        key: 'Enter',
+        code: 'Enter',
+        windowsVirtualKeyCode: 13,
+      }),
+    );
+    const payload = JSON.parse(String((result.content?.[0] as any)?.text || '{}'));
+    expect(payload).toMatchObject({
+      success: true,
+      executionLane: 'tabrix_cdp_snapshot_locator',
+      targetBinding: {
+        targetRef: 'ref_fallback_cdp_dom_searchbox_0',
+        selector: '#search-input',
+        resolutionSource: 'candidate_snapshot_locator_css',
+      },
+      postconditionVerdict: 'unknown',
+      postconditionReason: 'form_submit_or_search_results_not_proven_by_tool_closeout',
+    });
   });
 
   it('marks Enter keyboard dispatch as postcondition-unproven until a fresh read observes state', async () => {
@@ -2068,6 +3138,58 @@ describe('candidateAction bridge', () => {
     expect(clickMessage).toMatchObject({
       selector: '.filters [data-sort="collections"]',
       intent: 'search.apply_filter.sort',
+    });
+    expect(clickMessage.ref).toBeUndefined();
+  });
+
+  it('retains filter intent when a floating option is invoked by copied targetRef', async () => {
+    recordCandidateActionTargetLocatorsSnapshot(4215, [
+      {
+        targetRef: 'ref_floating_option_a1b2c3d4',
+        selector: '.floating-panel [data-option="latest"]',
+      },
+    ]);
+    vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
+      id: 4215,
+      title: 'Search',
+      url: 'https://example.com/search?q=neutral',
+    });
+    vi.spyOn(clickTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    const sendSpy = vi.spyOn(clickTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      dispatchSucceeded: true,
+      signals: { domChanged: true },
+    });
+
+    const result = await clickTool.execute({
+      ref: 'ref_floating_option_a1b2c3d4',
+      allowDownloadClick: true,
+    });
+
+    expect(result.isError).toBe(false);
+    const payload = JSON.parse(String((result.content?.[0] as any)?.text || '{}'));
+    expect(payload.businessVerification).toMatchObject({
+      status: 'fresh_read_required',
+      candidateActionIntent: 'filter.option_select',
+      expectedEvidence: 'search_results_or_url_query_changed',
+      requiredNextAction: 'chrome_read_page_force_refresh_same_tab',
+      businessSuccessProven: false,
+    });
+    expect(payload.postActionReadback).toMatchObject({
+      candidateActionIntent: 'filter.option_select',
+      expectedEvidence: 'search_results_or_url_query_changed',
+      freshReadRequired: true,
+    });
+    expect(payload.targetBinding).toMatchObject({
+      resolutionSource: 'candidate_snapshot_locator_css',
+      dispatchTarget: 'selector',
+    });
+    const clickMessage = sendSpy.mock.calls.find(
+      ([, message]) => (message as any)?.action === TOOL_MESSAGE_TYPES.CLICK_ELEMENT,
+    )?.[1] as any;
+    expect(clickMessage).toMatchObject({
+      selector: '.floating-panel [data-option="latest"]',
+      intent: 'filter.option_select',
     });
     expect(clickMessage.ref).toBeUndefined();
   });

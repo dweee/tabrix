@@ -370,7 +370,13 @@ describe('MkeKnowledgeProjector', () => {
       sourceRoute: 'visible_dom_cards_bounded_scroll',
       sourceFreshness: 'fresh',
       sourceTraceIds: ['trace-current-cards'],
-      facts: { observedResultCount: 10 },
+      facts: {
+        observedResultCount: 10,
+        observedOutcome: 'verification_required',
+        verification: { freshReadRequired: true },
+        claimBoundary:
+          'Current object evidence is planning guidance; verify the expected postcondition after the action.',
+      },
       updatedAt: '2026-06-06T05:30:01.000Z',
     });
     objects.upsert({

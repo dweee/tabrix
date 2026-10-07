@@ -13,6 +13,7 @@ import type {
   PostconditionResult,
   PostconditionVerdict,
   ReadPageCandidateActionIntent,
+  ReadPagePageDeltaKind,
   ReadPageRegion,
 } from '@tabrix/shared';
 
@@ -179,6 +180,11 @@ export interface RegionStatePostconditionInput {
   afterRegions: readonly ReadPageRegion[];
   candidateActionIntent?: ReadPageCandidateActionIntent | string | null;
   targetRefs?: readonly string[] | null;
+  /**
+   * Action-bound page deltas from the same interaction/readback pair.
+   * Unbound lifecycle or network activity must not be supplied here.
+   */
+  attributableDeltaKinds?: readonly ReadPagePageDeltaKind[] | null;
   now?: () => number;
 }
 
@@ -278,6 +284,7 @@ export function verifyRegionStatePostcondition(
     input.afterRegions,
     input.candidateActionIntent,
     input.targetRefs,
+    input.attributableDeltaKinds,
   );
 
   return {
@@ -289,7 +296,7 @@ export function verifyRegionStatePostcondition(
     afterSummary,
     producedAtMs,
     claimBoundary:
-      'region-state postconditions require before/after page-region evidence; click success, timeout, or QR presence alone is not business success; OTP requests require countdown, disabled/sent, or waiting-user evidence',
+      'region-state postconditions require before/after page-region evidence; filter success requires expected active-state change plus an attributable result, route, or list-refresh delta; click success, timeout, or QR presence alone is not business success; OTP requests require countdown, disabled/sent, or waiting-user evidence',
     ...(result.detailFieldReadbackEvidence
       ? { detailFieldReadbackEvidence: result.detailFieldReadbackEvidence }
       : {}),
@@ -303,6 +310,7 @@ export function inferRegionStatePostconditionKindForIntent(input: {
   const intent = String(input.intent ?? '').trim();
   if (input.actionKind === 'fill' && intent === 'search.enter_query') return null;
   if (intent === 'search.submit') return 'search_results_updated';
+  if (intent === 'search.select_suggestion') return 'search_results_updated';
   if (intent.startsWith('search.apply_filter.')) return 'search_results_updated';
   if (intent === 'content.open_detail') return 'detail_opened';
   if (intent === 'auth.submit_login') return 'login_completed';
@@ -321,6 +329,7 @@ function verdictForRegionState(
   afterRegions: readonly ReadPageRegion[],
   candidateActionIntent?: ReadPageCandidateActionIntent | string | null,
   targetRefs?: readonly string[] | null,
+  attributableDeltaKinds?: readonly ReadPagePageDeltaKind[] | null,
 ): {
   verdict: PostconditionVerdict;
   reason: string;
@@ -336,7 +345,12 @@ function verdictForRegionState(
     case 'menu_closed':
       return verdictForMenuClosed(beforeRegions, afterRegions);
     case 'search_results_updated':
-      return verdictForSearchResultsUpdated(beforeRegions, afterRegions, candidateActionIntent);
+      return verdictForSearchResultsUpdated(
+        beforeRegions,
+        afterRegions,
+        candidateActionIntent,
+        attributableDeltaKinds,
+      );
     case 'detail_opened':
       return verdictForDetailOpened(beforeRegions, afterRegions, targetRefs);
     case 'login_completed':
@@ -393,16 +407,24 @@ function verdictForSearchResultsUpdated(
   beforeRegions: readonly ReadPageRegion[],
   afterRegions: readonly ReadPageRegion[],
   candidateActionIntent?: ReadPageCandidateActionIntent | string | null,
+  attributableDeltaKinds?: readonly ReadPagePageDeltaKind[] | null,
 ): { verdict: PostconditionVerdict; reason: string } {
-  if (isSearchApplyFilterIntent(candidateActionIntent)) {
+  const isFilterIntent = isSearchApplyFilterIntent(candidateActionIntent);
+  if (isFilterIntent) {
     const beforeFilterSignature = filterStateSignature(beforeRegions);
     const afterFilterSignature = filterStateSignature(afterRegions);
-    if (afterFilterSignature && beforeFilterSignature !== afterFilterSignature) {
+    if (!afterFilterSignature || beforeFilterSignature === afterFilterSignature) {
+      return {
+        verdict: 'unknown',
+        reason: 'expected_active_filter_state_change_not_proven',
+      };
+    }
+
+    const attributableDeltaKind = attributableFilterDeltaKind(attributableDeltaKinds);
+    if (attributableDeltaKind) {
       return {
         verdict: 'passed',
-        reason: beforeFilterSignature
-          ? 'active_filter_state_changed_after_action'
-          : 'active_filter_state_appeared_after_action',
+        reason: `active_filter_state_changed_with_${attributableDeltaKind}`,
       };
     }
   }
@@ -410,32 +432,73 @@ function verdictForSearchResultsUpdated(
   const beforeCollections = contentCollectionRegions(beforeRegions);
   const afterCollections = contentCollectionRegions(afterRegions);
   if (afterCollections.length === 0) {
+    if (isFilterIntent) {
+      return {
+        verdict: 'unknown',
+        reason: 'active_filter_state_changed_but_attributable_delta_missing',
+      };
+    }
     return { verdict: 'failed', reason: 'result_collection_not_visible_after' };
   }
 
   const beforeStructuredCollections = beforeCollections.filter(hasStructuredSearchResultEvidence);
   const afterStructuredCollections = afterCollections.filter(hasStructuredSearchResultEvidence);
   if (afterStructuredCollections.length === 0) {
-    return { verdict: 'unknown', reason: 'structured_result_evidence_missing_after_action' };
+    return {
+      verdict: 'unknown',
+      reason: isFilterIntent
+        ? 'active_filter_state_changed_but_structured_result_delta_missing'
+        : 'structured_result_evidence_missing_after_action',
+    };
   }
 
   if (beforeStructuredCollections.length === 0) {
-    return { verdict: 'passed', reason: 'result_collection_appeared_after_action' };
+    return {
+      verdict: 'passed',
+      reason: isFilterIntent
+        ? 'active_filter_state_changed_with_result_collection_appeared_after_action'
+        : 'result_collection_appeared_after_action',
+    };
   }
 
   const beforeSignature = collectionSignature(beforeStructuredCollections);
   const afterSignature = collectionSignature(afterStructuredCollections);
   if (beforeSignature !== afterSignature) {
-    return { verdict: 'passed', reason: 'result_collection_changed_after_action' };
+    return {
+      verdict: 'passed',
+      reason: isFilterIntent
+        ? 'active_filter_state_changed_with_result_collection_changed_after_action'
+        : 'result_collection_changed_after_action',
+    };
   }
 
-  return { verdict: 'failed', reason: 'result_collection_unchanged_after_action' };
+  return {
+    verdict: 'failed',
+    reason: isFilterIntent
+      ? 'active_filter_state_changed_but_result_collection_unchanged_after_action'
+      : 'result_collection_unchanged_after_action',
+  };
 }
 
 function isSearchApplyFilterIntent(
   intent: ReadPageCandidateActionIntent | string | null | undefined,
 ): boolean {
   return typeof intent === 'string' && intent.startsWith('search.apply_filter.');
+}
+
+function attributableFilterDeltaKind(
+  deltaKinds: readonly ReadPagePageDeltaKind[] | null | undefined,
+): 'url_changed' | 'spa_route_change' | 'list_refreshed' | null {
+  for (const deltaKind of deltaKinds ?? []) {
+    if (
+      deltaKind === 'url_changed' ||
+      deltaKind === 'spa_route_change' ||
+      deltaKind === 'list_refreshed'
+    ) {
+      return deltaKind;
+    }
+  }
+  return null;
 }
 
 function verdictForDetailOpened(

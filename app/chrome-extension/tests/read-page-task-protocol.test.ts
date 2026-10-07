@@ -160,6 +160,7 @@ describe('read_page task protocol', () => {
                       inViewport: true,
                       centerHitTarget: true,
                       occluded: false,
+                      valueState: 'non_empty',
                       reason: 'cdp_ax_box_model',
                     },
                   },
@@ -202,6 +203,7 @@ describe('read_page task protocol', () => {
           targetability: 'locator_chain',
           reason: 'cdp_ax_accessibility_candidate',
           sourceProvenance: ['cdp', 'ax'],
+          valueState: 'non_empty',
           visualBounds: { x: 10, y: 20, width: 200, height: 40 },
           visibility: {
             source: 'cdp',
@@ -989,6 +991,78 @@ describe('read_page task protocol', () => {
         }),
       ]),
     });
+  });
+
+  it('routes grouped floating filter options only to the filter panel beyond four items', () => {
+    const optionLabels = ['Relevant', 'Recent', 'Popular', 'Any time', 'Today', 'This week'];
+    const optionRefs = optionLabels.map((_, index) =>
+      index === 0 ? 'ref_snapshot_option_1' : `ref_floating_option_${index + 1}`,
+    );
+    const interactiveElements = [
+      {
+        ref: 'ref_search_input',
+        role: 'searchbox',
+        name: 'Search catalog',
+        valueState: 'non_empty',
+      },
+      ...optionLabels.map((label, index) => ({
+        ref: optionRefs[index],
+        role: 'button',
+        name: label,
+      })),
+    ];
+    const candidateActions = [
+      {
+        id: 'ca_fill_ref_search_input',
+        actionType: 'fill',
+        targetRef: 'ref_search_input',
+        confidence: 0.93,
+        matchReason: 'visible search input',
+        locatorChain: [{ type: 'ref', value: 'ref_search_input' }],
+        intent: 'search.enter_query',
+      },
+      ...optionLabels.map((label, index) => ({
+        id: `ca_filter_${index + 1}`,
+        actionType: 'click',
+        targetRef: optionRefs[index],
+        label,
+        confidence: 0.9,
+        matchReason: 'visible filter option',
+        locatorChain: [{ type: 'ref', value: optionRefs[index] }],
+        intent:
+          index === optionLabels.length - 1
+            ? 'control.select'
+            : index < 3
+              ? 'search.apply_filter.sort'
+              : 'search.apply_filter.time_range',
+        provenance: {
+          surfaceType: 'floating_surface',
+          panelRef: 'ref_floating_panel_1',
+          groupId: index < 3 ? 'sort' : 'time_range',
+          optionRef: optionRefs[index],
+        },
+      })),
+    ];
+
+    const protocol = buildTaskProtocol(
+      createBaseParams({
+        currentUrl: 'https://example.com/search?q=design',
+        currentTitle: 'Catalog search',
+        interactiveElements,
+        candidateActions,
+      }) as any,
+    );
+
+    const searchArea = protocol.pageRegions.find((region) => region.regionType === 'search_area');
+    const filterPanel = protocol.pageRegions.find((region) => region.regionType === 'filter_panel');
+
+    expect(searchArea?.objects.some((object) => optionRefs.includes(object.objectId))).toBe(false);
+    expect(filterPanel?.objects.map((object) => object.objectId)).toEqual(
+      expect.arrayContaining(optionRefs),
+    );
+    expect(
+      filterPanel?.objects.filter((object) => optionRefs.includes(object.objectId)),
+    ).toHaveLength(6);
   });
 
   it('keeps neutral read pages idle instead of treating read mode as long_content', () => {

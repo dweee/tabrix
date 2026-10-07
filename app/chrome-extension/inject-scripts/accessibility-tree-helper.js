@@ -1302,8 +1302,23 @@
     if (!ref) return { success: false, error: 'ref is required' };
     const el = resolveRef(ref);
     if (el) {
+      const rect = el.getBoundingClientRect();
+      const center = {
+        x: Math.round(rect.left + rect.width / 2),
+        y: Math.round(rect.top + rect.height / 2),
+      };
       dispatchHoverEvents(el);
-      return { success: true, target: summarizeElement(el) };
+      return {
+        success: true,
+        target: summarizeElement(el),
+        center,
+        coordinateSpace: window === window.top ? 'top_viewport' : 'current_viewport',
+        frameDepth: 0,
+        viewport: {
+          width: window.innerWidth,
+          height: window.innerHeight,
+        },
+      };
     }
     return await forwardHoverRefToChildren(ref);
   }
@@ -1380,16 +1395,37 @@
         return;
       }
       const reqId = `hover_ref_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const frameByWindow = new Map();
+      frames.forEach((frame) => {
+        if (frame.contentWindow) frameByWindow.set(frame.contentWindow, frame);
+      });
+      const pendingWindows = new Set(frameByWindow.keys());
+      let settled = false;
+      let timeoutId = null;
+      const finish = (result) => {
+        if (settled) return;
+        settled = true;
+        window.removeEventListener('message', listener, true);
+        if (timeoutId !== null) clearTimeout(timeoutId);
+        resolve(result);
+      };
       const listener = (ev) => {
         const data = ev?.data;
         if (!data || data.type !== 'tabrix-bridge-hover-ref-result' || data.reqId !== reqId) return;
-        window.removeEventListener('message', listener, true);
-        resolve(data.result);
+        const sourceFrame = frameByWindow.get(ev.source);
+        if (!sourceFrame || !pendingWindows.has(ev.source)) return;
+        pendingWindows.delete(ev.source);
+        if (data.result?.success) {
+          finish(translateChildHoverResult(data.result, sourceFrame));
+          return;
+        }
+        if (pendingWindows.size === 0) {
+          finish({ success: false, error: `ref "${ref}" not found in child frames` });
+        }
       };
       window.addEventListener('message', listener, true);
-      setTimeout(() => {
-        window.removeEventListener('message', listener, true);
-        resolve({ success: false, error: `ref "${ref}" not found in child frames` });
+      timeoutId = setTimeout(() => {
+        finish({ success: false, error: `ref "${ref}" not found in child frames` });
       }, 1500);
       for (const frame of frames) {
         try {
@@ -1399,6 +1435,37 @@
         }
       }
     });
+  }
+
+  function translateChildHoverResult(result, frame) {
+    const childCenter = result?.center;
+    if (
+      typeof childCenter?.x !== 'number' ||
+      !Number.isFinite(childCenter.x) ||
+      typeof childCenter?.y !== 'number' ||
+      !Number.isFinite(childCenter.y)
+    ) {
+      return result;
+    }
+    const rect = frame.getBoundingClientRect();
+    const frameWidth = frame.offsetWidth || rect.width;
+    const frameHeight = frame.offsetHeight || rect.height;
+    const scaleX = frameWidth > 0 ? rect.width / frameWidth : 1;
+    const scaleY = frameHeight > 0 ? rect.height / frameHeight : 1;
+    const borderLeft = Number.isFinite(frame.clientLeft) ? frame.clientLeft : 0;
+    const borderTop = Number.isFinite(frame.clientTop) ? frame.clientTop : 0;
+    return {
+      ...result,
+      center: {
+        x: Math.round(rect.left + borderLeft * scaleX + childCenter.x * scaleX),
+        y: Math.round(rect.top + borderTop * scaleY + childCenter.y * scaleY),
+      },
+      coordinateSpace: window === window.top ? 'top_viewport' : 'current_viewport',
+      frameDepth:
+        typeof result.frameDepth === 'number' && Number.isFinite(result.frameDepth)
+          ? Math.max(0, Math.trunc(result.frameDepth)) + 1
+          : 1,
+    };
   }
 
   // Chrome message bridge for ping and tree generation

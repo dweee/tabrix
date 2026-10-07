@@ -845,6 +845,68 @@ describe('accessibility-tree auth control map', () => {
     );
   });
 
+  it('waits for the child frame that owns a hover ref and translates its center', async () => {
+    document.body.innerHTML = `
+      <iframe id="empty-frame"></iframe>
+      <iframe id="target-frame"></iframe>
+    `;
+    const emptyFrame = document.getElementById('empty-frame') as HTMLIFrameElement;
+    const targetFrame = document.getElementById('target-frame') as HTMLIFrameElement;
+    makeVisible(emptyFrame, { left: 40, top: 50, width: 200, height: 120 });
+    makeVisible(targetFrame, { left: 400, top: 100, width: 300, height: 150 });
+
+    Object.defineProperty(emptyFrame.contentWindow, 'postMessage', {
+      configurable: true,
+      value: vi.fn((message: { reqId: string }) => {
+        window.dispatchEvent(
+          new MessageEvent('message', {
+            data: {
+              type: 'tabrix-bridge-hover-ref-result',
+              reqId: message.reqId,
+              result: { success: false, error: 'ref not found' },
+            },
+            source: emptyFrame.contentWindow,
+          }),
+        );
+      }),
+    });
+    Object.defineProperty(targetFrame.contentWindow, 'postMessage', {
+      configurable: true,
+      value: vi.fn((message: { reqId: string }) => {
+        setTimeout(() => {
+          window.dispatchEvent(
+            new MessageEvent('message', {
+              data: {
+                type: 'tabrix-bridge-hover-ref-result',
+                reqId: message.reqId,
+                result: {
+                  success: true,
+                  center: { x: 24, y: 16 },
+                  viewport: { width: 300, height: 150 },
+                  target: { tagName: 'BUTTON' },
+                },
+              },
+              source: targetFrame.contentWindow,
+            }),
+          );
+        }, 0);
+      }),
+    });
+
+    const hoverResult = await sendRequest({
+      action: 'dispatchHoverForRef',
+      ref: 'ref_owned_by_target_frame',
+    });
+
+    expect(hoverResult).toMatchObject({
+      success: true,
+      center: { x: 424, y: 116 },
+      coordinateSpace: 'top_viewport',
+      frameDepth: 1,
+      target: { tagName: 'BUTTON' },
+    });
+  });
+
   it('ensures refs for visible text from accessible names without a selector', async () => {
     document.body.innerHTML = `
       <main>

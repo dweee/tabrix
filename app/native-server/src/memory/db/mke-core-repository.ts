@@ -354,6 +354,7 @@ export class MemoryTraceRepository {
   private readonly getStmt;
   private readonly listRecentStmt;
   private readonly listByTaskStmt;
+  private readonly listByBrowserContextKeyStmt;
   private readonly listByPageStmt;
   private readonly listAfterStmt;
   private readonly countStmt;
@@ -423,6 +424,11 @@ export class MemoryTraceRepository {
     );
     this.listByTaskStmt = db.prepare(
       'SELECT * FROM tabrix_memory_traces WHERE task_id = ? ORDER BY created_at ASC, sequence_index ASC',
+    );
+    this.listByBrowserContextKeyStmt = db.prepare(
+      `SELECT * FROM tabrix_memory_traces
+        WHERE browser_context_key = ?
+        ORDER BY created_at ASC, sequence_index ASC`,
     );
     this.listByPageStmt = db.prepare(
       `SELECT * FROM tabrix_memory_traces
@@ -576,6 +582,12 @@ export class MemoryTraceRepository {
 
   public listByTask(taskId: string): MemoryTrace[] {
     return (this.listByTaskStmt.all(taskId) as MemoryTraceRow[]).map(rowToMemoryTrace);
+  }
+
+  public listByBrowserContextKey(browserContextKey: string): MemoryTrace[] {
+    return (this.listByBrowserContextKeyStmt.all(browserContextKey) as MemoryTraceRow[]).map(
+      rowToMemoryTrace,
+    );
   }
 
   public listByPage(input: {
@@ -879,13 +891,15 @@ export class KnowledgeModelRepository {
   }
 
   public upsert(input: KnowledgeModelInput): KnowledgeModel {
+    const modelVersion = input.modelVersion ?? 1;
+    const existing = this.getByIdentity(input.siteFamily, input.pageModelKey, modelVersion);
     const row = {
-      knowledge_id: input.knowledgeId ?? randomUUID(),
+      knowledge_id: existing?.knowledgeId ?? input.knowledgeId ?? randomUUID(),
       site_family: input.siteFamily,
       page_url_pattern: input.pageUrlPattern ?? null,
       page_role: input.pageRole,
       page_model_key: input.pageModelKey,
-      model_version: input.modelVersion ?? 1,
+      model_version: modelVersion,
       page_state_model_blob: requiredBlob(input.pageStateModel),
       object_graph_blob: requiredBlob(input.objectGraph),
       action_surface_blob: requiredBlob(input.actionSurface),
@@ -895,14 +909,18 @@ export class KnowledgeModelRepository {
       source_trace_ids_blob: requiredBlob(input.sourceTraceIds ?? []),
       source_experience_ids_blob: requiredBlob(input.sourceExperienceIds ?? []),
       observation_count: optionalInteger(input.observationCount) ?? 0,
-      successful_use_count: optionalInteger(input.successfulUseCount) ?? 0,
-      failed_use_count: optionalInteger(input.failedUseCount) ?? 0,
-      confidence_score: optionalNumber(input.confidenceScore) ?? 0,
+      successful_use_count:
+        existing?.successfulUseCount ?? optionalInteger(input.successfulUseCount) ?? 0,
+      failed_use_count: existing?.failedUseCount ?? optionalInteger(input.failedUseCount) ?? 0,
+      confidence_score:
+        existing?.lastValidatedAt !== null && existing?.lastValidatedAt !== undefined
+          ? existing.confidenceScore
+          : (optionalNumber(input.confidenceScore) ?? existing?.confidenceScore ?? 0),
       drift_score: optionalNumber(input.driftScore),
       archived_at: input.archivedAt ?? null,
       last_observed_at: input.lastObservedAt ?? null,
-      last_validated_at: input.lastValidatedAt ?? null,
-      created_at: input.createdAt,
+      last_validated_at: existing?.lastValidatedAt ?? input.lastValidatedAt ?? null,
+      created_at: existing?.createdAt ?? input.createdAt,
       updated_at: input.updatedAt,
     };
     this.upsertStmt.run(row);
@@ -1169,6 +1187,7 @@ export class ExperienceRecipeRepository {
   private readonly countStmt;
   private readonly archiveStmt;
   private readonly listBySourceTraceHintStmt;
+  private readonly listTraceTaskIdsStmt;
   private readonly updateSourceTraceIdsStmt;
   private readonly requireScenarioRevalidationStmt;
   private readonly clearStmt;
@@ -1222,6 +1241,19 @@ export class ExperienceRecipeRepository {
         SET success_count = success_count + @success_delta,
             failure_count = failure_count + @failure_delta,
             adoption_count = adoption_count + @adoption_delta,
+            reliability_score = ROUND(
+              CAST(success_count + @success_delta AS REAL) /
+              (success_count + failure_count + 1),
+              4
+            ),
+            drift_state = CASE
+              WHEN @failure_delta > 0 THEN 'needs_revalidation'
+              ELSE drift_state
+            END,
+            last_verified_at = CASE
+              WHEN @failure_delta > 0 THEN NULL
+              ELSE last_verified_at
+            END,
             last_used_at = @last_used_at,
             updated_at = @updated_at
         WHERE experience_id = @experience_id`,
@@ -1262,6 +1294,11 @@ export class ExperienceRecipeRepository {
         WHERE archived_at IS NULL
           AND source_trace_ids_blob LIKE ?`,
     );
+    this.listTraceTaskIdsStmt = db.prepare(
+      `SELECT DISTINCT task_id
+         FROM tabrix_memory_traces
+        WHERE trace_id IN (SELECT value FROM json_each(?))`,
+    );
     this.updateSourceTraceIdsStmt = db.prepare(
       `UPDATE tabrix_experience_recipes
         SET source_trace_ids_blob = @source_trace_ids_blob,
@@ -1299,8 +1336,18 @@ export class ExperienceRecipeRepository {
     const mergedSourceTraceIds = existing
       ? [...new Set([...existing.sourceTraceIds, ...inputSourceTraceIds])]
       : inputSourceTraceIds;
-    const hasNewSourceTrace = existing
-      ? inputSourceTraceIds.some((traceId) => !existing.sourceTraceIds.includes(traceId))
+    // A projection can grow as more steps in the same execution receive AI
+    // feedback. Count a new success only when both its trace ids and known
+    // Memory task ids are disjoint from prior sources.
+    const existingSourceTaskIds = this.readTraceTaskIds(existing?.sourceTraceIds ?? []);
+    const inputSourceTaskIds = this.readTraceTaskIds(inputSourceTraceIds);
+    const hasKnownTaskOverlap = [...inputSourceTaskIds].some((taskId) =>
+      existingSourceTaskIds.has(taskId),
+    );
+    const hasNewEvidenceSequence = existing
+      ? inputSourceTraceIds.length > 0 &&
+        inputSourceTraceIds.every((traceId) => !existing.sourceTraceIds.includes(traceId)) &&
+        !hasKnownTaskOverlap
       : true;
     const inputLinkedKnowledgeIds = input.linkedKnowledgeIds ?? [];
     const mergedLinkedKnowledgeIds = existing
@@ -1309,9 +1356,9 @@ export class ExperienceRecipeRepository {
     const inputSuccessCount = optionalInteger(input.successCount) ?? 0;
     const inputFailureCount = optionalInteger(input.failureCount) ?? 0;
     const nextSuccessCount =
-      (existing?.successCount ?? 0) + (hasNewSourceTrace ? inputSuccessCount : 0);
+      (existing?.successCount ?? 0) + (hasNewEvidenceSequence ? inputSuccessCount : 0);
     const nextFailureCount =
-      (existing?.failureCount ?? 0) + (hasNewSourceTrace ? inputFailureCount : 0);
+      (existing?.failureCount ?? 0) + (hasNewEvidenceSequence ? inputFailureCount : 0);
     const totalOutcomes = nextSuccessCount + nextFailureCount;
     const nextReliabilityScore =
       optionalNumber(input.reliabilityScore) ??
@@ -1320,7 +1367,7 @@ export class ExperienceRecipeRepository {
         : (existing?.reliabilityScore ?? null));
     const promotedToVerified =
       Boolean(existing) &&
-      hasNewSourceTrace &&
+      hasNewEvidenceSequence &&
       inputSuccessCount > 0 &&
       nextSuccessCount >= 2 &&
       nextFailureCount === 0;
@@ -1509,7 +1556,14 @@ export class ExperienceRecipeRepository {
       const remainingSourceTraceIds = recipe.sourceTraceIds.filter(
         (traceId) => traceId !== input.traceId,
       );
-      const nextSuccessCount = Math.max(0, recipe.successCount - 1);
+      const removedTraceTaskIds = this.readTraceTaskIds([input.traceId]);
+      const remainingTraceTaskIds = this.readTraceTaskIds(remainingSourceTraceIds);
+      const hasRemainingEvidenceFromSameTask = [...removedTraceTaskIds].some((taskId) =>
+        remainingTraceTaskIds.has(taskId),
+      );
+      const removesEvidenceSequence =
+        removedTraceTaskIds.size === 0 || !hasRemainingEvidenceFromSameTask;
+      const nextSuccessCount = Math.max(0, recipe.successCount - (removesEvidenceSequence ? 1 : 0));
       const totalOutcomes = nextSuccessCount + recipe.failureCount;
       const archivedAt = remainingSourceTraceIds.length === 0 ? input.nowIso : null;
       const driftState =
@@ -1542,6 +1596,14 @@ export class ExperienceRecipeRepository {
     };
   }
 
+  private readTraceTaskIds(traceIds: string[]): Set<string> {
+    if (traceIds.length === 0) return new Set();
+    const rows = this.listTraceTaskIdsStmt.all(JSON.stringify(traceIds)) as Array<{
+      task_id: string;
+    }>;
+    return new Set(rows.map((row) => row.task_id));
+  }
+
   public requireScenarioRevalidation(input: {
     scenarioKey: string;
     nowIso: string;
@@ -1549,7 +1611,7 @@ export class ExperienceRecipeRepository {
   }): RemoveExperienceSourceTraceResult {
     const excluded = new Set(input.excludeExperienceIds ?? []);
     const recipes = this.findByScenario(input.scenarioKey, 50).filter(
-      (recipe) => recipe.driftState === 'verified_once' && !excluded.has(recipe.experienceId),
+      (recipe) => recipe.driftState !== 'needs_revalidation' && !excluded.has(recipe.experienceId),
     );
     const affectedExperienceIds: string[] = [];
 

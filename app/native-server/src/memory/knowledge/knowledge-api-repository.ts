@@ -69,6 +69,10 @@ export interface KnowledgeApiEndpoint {
   sampleCount: number;
   firstSeenAt: string;
   lastSeenAt: string;
+  /** Outcome counters for chooser-selected reuse of this exact endpoint. */
+  successfulUseCount: number;
+  failedUseCount: number;
+  lastValidatedAt: string | null;
   /**
    * Generic classifier output, persisted alongside the original
    * `semanticTag`. `null` for rows written before the classifier
@@ -381,6 +385,9 @@ interface KnowledgeApiEndpointRow {
   source_lineage_blob: string | null;
   schema_version: number | null;
   last_failure_reason: string | null;
+  successful_use_count: number;
+  failed_use_count: number;
+  last_validated_at: string | null;
 }
 
 const PERSISTED_SEMANTIC_TYPE_VALUES: ReadonlySet<string> = new Set<EndpointSemanticType>([
@@ -548,6 +555,9 @@ function rowToEndpoint(row: KnowledgeApiEndpointRow): KnowledgeApiEndpoint {
     sampleCount: row.sample_count,
     firstSeenAt: row.first_seen_at,
     lastSeenAt: row.last_seen_at,
+    successfulUseCount: row.successful_use_count,
+    failedUseCount: row.failed_use_count,
+    lastValidatedAt: row.last_validated_at,
     semanticTypePersisted: coercePersistedSemanticType(row.semantic_type),
     queryParamsShape: row.query_params_shape,
     responseShapeSummary: row.response_shape_summary,
@@ -857,6 +867,26 @@ export class KnowledgeApiRepository {
       .prepare(`SELECT * FROM knowledge_api_endpoints WHERE site = ? AND endpoint_signature = ?`)
       .get(site, endpointSignature) as KnowledgeApiEndpointRow | undefined;
     return row ? rowToEndpoint(row) : null;
+  }
+
+  /**
+   * Record the result of reusing one chooser-selected endpoint.
+   *
+   * `endpointId` is the only accepted identity. Site/family refs are
+   * intentionally not resolved here because one site can expose many
+   * endpoints and broad attribution would train unrelated Knowledge.
+   */
+  recordUseOutcome(input: { endpointId: string; successful: boolean; nowIso: string }): boolean {
+    const result = this.db
+      .prepare(
+        `UPDATE knowledge_api_endpoints
+         SET successful_use_count = successful_use_count + ?,
+             failed_use_count = failed_use_count + ?,
+             last_validated_at = ?
+         WHERE endpoint_id = ?`,
+      )
+      .run(input.successful ? 1 : 0, input.successful ? 0 : 1, input.nowIso, input.endpointId);
+    return result.changes === 1;
   }
 
   listBySite(site: string, limit = 100): KnowledgeApiEndpoint[] {

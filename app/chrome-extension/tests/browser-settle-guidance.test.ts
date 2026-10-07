@@ -8,6 +8,7 @@ import {
   initBrowserWorldInventory,
   resetBrowserWorldInventoryForTests,
 } from '@/entrypoints/background/browser-world-inventory';
+import { cdpSessionManager } from '@/utils/cdp-session-manager';
 
 function makeStorageArea(store: Record<string, unknown>) {
   return {
@@ -882,6 +883,94 @@ describe('browser settle guidance', () => {
       chromeTabActive: true,
       documentVisibilityState: 'visible',
       documentHasFocus: true,
+    });
+  });
+
+  it('recovers a Chrome-active but document-hidden tab through CDP before proving foreground', async () => {
+    vi.mocked(chrome.tabs.get).mockResolvedValue({
+      id: 32,
+      windowId: 2,
+      active: false,
+      status: 'complete',
+      url: 'https://example.com/search',
+      title: 'Search',
+    } as chrome.tabs.Tab);
+    vi.spyOn(switchTabTool as any, 'waitForTabActivated').mockResolvedValue({
+      tab: {
+        id: 32,
+        windowId: 2,
+        active: true,
+        status: 'complete',
+        url: 'https://example.com/search',
+        title: 'Search',
+      },
+      activated: true,
+      timedOut: false,
+      waitedMs: 20,
+      windowFocused: true,
+    });
+    vi.spyOn(switchTabTool as any, 'waitForTabForegroundProof')
+      .mockResolvedValueOnce({
+        kind: 'tab_foreground_proof_v1',
+        verdict: 'not_proven',
+        tabId: 32,
+        chromeWindowFocused: true,
+        chromeTabActive: true,
+        documentVisibilityState: 'hidden',
+        documentHasFocus: true,
+        documentHidden: true,
+        waitedMs: 1500,
+        timedOut: true,
+        reason: 'document foreground proof did not reach visible+focused before timeout',
+      })
+      .mockResolvedValueOnce({
+        kind: 'tab_foreground_proof_v1',
+        verdict: 'proven_foreground',
+        tabId: 32,
+        chromeWindowFocused: true,
+        chromeTabActive: true,
+        documentVisibilityState: 'visible',
+        documentHasFocus: true,
+        documentHidden: false,
+        waitedMs: 40,
+        timedOut: false,
+        reason: 'document is visible and focused after tab/window activation',
+      });
+    const sendCommand = vi.spyOn(cdpSessionManager, 'sendCommand').mockResolvedValue({});
+    vi.spyOn(cdpSessionManager, 'withSession').mockImplementation(
+      async (_tabId, _owner, callback) => await callback(),
+    );
+
+    const result = await switchTabTool.execute({ tabId: 32 });
+
+    expect(result.isError).toBe(false);
+    expect(sendCommand).toHaveBeenCalledWith(32, 'Page.bringToFront', undefined);
+    expect(sendCommand).toHaveBeenCalledWith(32, 'Emulation.setFocusEmulationEnabled', {
+      enabled: true,
+    });
+    expect(sendCommand).toHaveBeenCalledWith(32, 'Page.setWebLifecycleState', {
+      state: 'active',
+    });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+    expect(payload).toMatchObject({
+      foregroundActivationVerdict: 'proven_foreground',
+      documentVisibilityState: 'visible',
+      documentHasFocus: true,
+      cdpForegroundRecovery: {
+        attempted: true,
+        succeeded: true,
+        methodsAttempted: [
+          'Page.bringToFront',
+          'Emulation.setFocusEmulationEnabled',
+          'Page.setWebLifecycleState',
+        ],
+        methodsSucceeded: [
+          'Page.bringToFront',
+          'Emulation.setFocusEmulationEnabled',
+          'Page.setWebLifecycleState',
+        ],
+        errors: [],
+      },
     });
   });
 
@@ -1813,11 +1902,117 @@ describe('browser settle guidance', () => {
       },
     });
     expect(payload.pageContext.loadReadiness).toMatchObject({
-      canUseSnapshotForBusinessAction: true,
+      canUseSnapshotForBusinessAction: false,
       nextStepAction: 'block',
+      nextStepHint: 'inspect_errors_then_reread_after_recovery_before_structured_actions',
     });
+    expect(payload.pageContext.loadReadiness.nextStepHint).not.toContain(
+      'safe_to_use_structured_refs_with_postcondition_verification',
+    );
     expect(payload.pageContext.loadReadiness.claimBoundary).toContain('cdp_errors_are_high');
     expect(JSON.stringify(payload.pageContext.loadReadiness.cdpSensing)).not.toContain('private');
+  });
+
+  it('returns bounded CDP and AX object evidence when DOM accessibility sensing hangs', async () => {
+    vi.spyOn(cdpPageSensing, 'captureCDPPageSensingSnapshot').mockResolvedValue({
+      tabId: 41,
+      capturedAt: Date.parse('2026-06-13T10:00:00.000Z'),
+      source: 'cdp',
+      available: true,
+      readiness: 'complete',
+      likelyLoading: false,
+      stabilityHint: 'stable',
+      accessibility: {
+        totalNodes: 3,
+        actionableNodeCount: 1,
+        actionableRoleTop: [{ role: 'searchbox', count: 1 }],
+        actionableSampleLabels: ['Search'],
+        stateSignals: {
+          checkedCount: 0,
+          selectedCount: 0,
+          expandedCount: 0,
+          disabledCount: 0,
+        },
+        locatorCoverage: {
+          locatorCandidateCount: 1,
+          axNodeIdCount: 1,
+          backendDOMNodeIdCount: 1,
+          locatorCoverageRate: 1,
+        },
+        objectCandidates: [
+          {
+            role: 'searchbox',
+            label: 'Search',
+            locator: {
+              source: 'cdp_ax',
+              axNodeId: 'ax-search',
+              backendDOMNodeId: 101,
+              cssSelector: 'input[aria-label="Search"]',
+              visualBounds: { x: 80, y: 24, width: 320, height: 40 },
+            },
+            actionTypes: ['focus', 'set_value'],
+            state: { disabled: false },
+          },
+        ],
+      },
+    } as any);
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 41,
+      windowId: 1,
+      active: true,
+      status: 'complete',
+      url: 'https://example.test/search?q=private',
+      title: 'Search',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(readPageTool as any, 'getDomSensingTimeoutMs').mockReturnValue(5);
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockImplementation(
+      () => new Promise(() => undefined),
+    );
+    (chrome.windows.get as any).mockResolvedValue({
+      id: 1,
+      focused: true,
+      state: 'normal',
+      tabs: [
+        {
+          id: 41,
+          windowId: 1,
+          active: true,
+          status: 'complete',
+          url: 'https://example.test/search?q=private',
+          title: 'Search',
+        },
+      ],
+    });
+
+    const result = await readPageTool.execute({ tabId: 41, mode: 'compact', depth: 2 });
+
+    expect(result.isError).toBe(false);
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+    expect(payload).toMatchObject({
+      pageContext: {
+        fallbackUsed: true,
+        fallbackSource: 'cdp_ax_dom_unavailable',
+      },
+    });
+    expect(payload.evidenceSource).toContain('cdp');
+    expect(payload.candidateActions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          actionType: 'fill',
+          targetRef: 'ref_fallback_cdp_ax_backend_101',
+          snapshotRect: { x: 80, y: 24, width: 320, height: 40 },
+        }),
+      ]),
+    );
+    expect(payload.pageContext.sensingDiagnostics).toMatchObject({
+      coverageStatus: 'partial',
+      partialErrors: [
+        expect.objectContaining({
+          source: 'read_page.dom_accessibility_timeout',
+        }),
+      ],
+    });
   });
 
   it('downgrades stable pages to changing when CDP detects SPA navigation', async () => {

@@ -4,6 +4,14 @@ import { TOOL_NAMES, type ReadPageCandidateAction } from '@tabrix/shared';
 import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
 import { TIMEOUTS, ERROR_MESSAGES } from '@/common/constants';
 import { markBrowserWorldTabAiOperated } from '../../browser-world-inventory';
+import {
+  hydrateStableTargetRefRegistryFromStorage,
+  lookupCandidateActionTargetLocatorEntry,
+} from './stable-target-ref-registry';
+import { cdpSessionManager } from '@/utils/cdp-session-manager';
+
+const TABRIX_OWNED_LANE = 'tabrix_owned';
+const TABRIX_CDP_SNAPSHOT_LOCATOR_LANE = 'tabrix_cdp_snapshot_locator';
 
 interface KeyboardToolParams {
   keys?: string; // Required: string representing keys or key combinations to simulate (e.g., "Enter", "Ctrl+C")
@@ -35,6 +43,161 @@ function isSubmitKeySequence(keys: string): boolean {
     .split(',')
     .map((part) => part.trim().toLowerCase())
     .some((part) => part.split('+').some((token) => token.trim() === 'enter'));
+}
+
+function isCurrentSnapshotEnterTarget(params: {
+  tabId: number;
+  keys: string;
+  candidateAction: ReadPageCandidateAction | undefined;
+  candidateCssSelector: string | undefined;
+  explicitSelector: string | undefined;
+  selectorType: 'css' | 'xpath';
+  frameId: number | undefined;
+}): boolean {
+  if (params.keys.trim().toLowerCase() !== 'enter') return false;
+  if (params.explicitSelector || params.selectorType !== 'css') return false;
+  if (params.frameId !== undefined && params.frameId !== 0) return false;
+  const targetRef = params.candidateAction?.targetRef?.trim();
+  if (!targetRef || !params.candidateCssSelector) return false;
+  const currentLocator = lookupCandidateActionTargetLocatorEntry(params.tabId, targetRef);
+  if (!currentLocator || currentLocator.selector !== params.candidateCssSelector) return false;
+  if ((currentLocator.selectorType ?? 'css') !== 'css') return false;
+  return currentLocator.frameId === undefined || currentLocator.frameId === 0;
+}
+
+interface CdpKeyboardDispatchResult {
+  success: true;
+  message: string;
+  targetElement: {
+    tagName?: string;
+    type?: string;
+    focused: true;
+  };
+}
+
+async function dispatchEnterToCurrentSnapshotLocatorWithCdp(
+  tabId: number,
+  selector: string,
+): Promise<CdpKeyboardDispatchResult> {
+  return await cdpSessionManager.withSession(
+    tabId,
+    'keyboard-current-snapshot-locator',
+    async () => {
+      const documentResult = await cdpSessionManager.sendCommand<{
+        root?: { nodeId?: number };
+      }>(tabId, 'DOM.getDocument', { depth: -1, pierce: true });
+      const rootNodeId = documentResult?.root?.nodeId;
+      if (typeof rootNodeId !== 'number') {
+        throw new Error('CDP snapshot keyboard target could not resolve the current document');
+      }
+
+      const queryResult = await cdpSessionManager.sendCommand<{ nodeIds?: number[] }>(
+        tabId,
+        'DOM.querySelectorAll',
+        {
+          nodeId: rootNodeId,
+          selector,
+        },
+      );
+      const nodeIds = Array.isArray(queryResult?.nodeIds)
+        ? queryResult.nodeIds.filter((nodeId) => Number.isFinite(nodeId))
+        : [];
+      if (nodeIds.length !== 1) {
+        throw new Error(
+          nodeIds.length === 0
+            ? 'CDP snapshot keyboard target is no longer present'
+            : 'CDP snapshot keyboard selector is ambiguous in the current document',
+        );
+      }
+
+      const resolvedNode = await cdpSessionManager.sendCommand<{
+        object?: { objectId?: string };
+      }>(tabId, 'DOM.resolveNode', { nodeId: nodeIds[0] });
+      const objectId = resolvedNode?.object?.objectId;
+      if (!objectId) {
+        throw new Error('CDP snapshot keyboard target could not bind the current DOM object');
+      }
+
+      const focusResult = await cdpSessionManager.sendCommand<{
+        result?: {
+          value?: {
+            success?: boolean;
+            error?: string;
+            tagName?: string;
+            type?: string;
+            focused?: boolean;
+          };
+        };
+        exceptionDetails?: unknown;
+      }>(tabId, 'Runtime.callFunctionOn', {
+        objectId,
+        functionDeclaration: `function() {
+          const element = this;
+          if (!element || !element.isConnected || typeof element.focus !== 'function') {
+            return { success: false, error: 'target_not_focusable' };
+          }
+          if (element.disabled === true) {
+            return { success: false, error: 'target_disabled' };
+          }
+          const rect = element.getBoundingClientRect();
+          const style = globalThis.getComputedStyle(element);
+          const visible = rect.width > 0 && rect.height > 0 &&
+            style.display !== 'none' && style.visibility !== 'hidden' &&
+            Number(style.opacity || 1) > 0;
+          if (!visible) return { success: false, error: 'target_not_visible' };
+          element.focus({ preventScroll: true });
+          const active = element.ownerDocument && element.ownerDocument.activeElement;
+          const focused = active === element || Boolean(element.contains && element.contains(active));
+          return {
+            success: focused,
+            error: focused ? undefined : 'target_focus_not_confirmed',
+            tagName: String(element.tagName || '').toUpperCase(),
+            type: String(element.type || '').toLowerCase(),
+            focused
+          };
+        }`,
+        returnByValue: true,
+        awaitPromise: true,
+        userGesture: true,
+      });
+      if (focusResult?.exceptionDetails) {
+        throw new Error('CDP snapshot keyboard focus raised a page execution exception');
+      }
+      const focusedTarget = focusResult?.result?.value;
+      if (!focusedTarget?.success || !focusedTarget.focused) {
+        throw new Error(
+          focusedTarget?.error || 'CDP snapshot keyboard target focus was not confirmed',
+        );
+      }
+
+      await cdpSessionManager.sendCommand(tabId, 'Input.dispatchKeyEvent', {
+        type: 'keyDown',
+        key: 'Enter',
+        code: 'Enter',
+        text: '\r',
+        unmodifiedText: '\r',
+        windowsVirtualKeyCode: 13,
+        nativeVirtualKeyCode: 13,
+      });
+      await cdpSessionManager.sendCommand(tabId, 'Input.dispatchKeyEvent', {
+        type: 'keyUp',
+        key: 'Enter',
+        code: 'Enter',
+        windowsVirtualKeyCode: 13,
+        nativeVirtualKeyCode: 13,
+      });
+
+      return {
+        success: true,
+        message: 'Keyboard operation dispatched through current CDP snapshot locator',
+        targetElement: {
+          tagName: focusedTarget.tagName,
+          type: focusedTarget.type,
+          focused: true,
+        },
+      };
+    },
+  );
 }
 
 /**
@@ -82,8 +245,11 @@ class KeyboardTool extends BaseBrowserToolExecutor {
         return createErrorResponse(ERROR_MESSAGES.TAB_NOT_FOUND + ': Active tab has no ID');
       }
 
+      await hydrateStableTargetRefRegistryFromStorage(tab.id);
       let finalSelector = selector || candidateCssSelector;
       let refForFocus: string | undefined = finalSelector ? undefined : targetRef;
+      let executionLane = TABRIX_OWNED_LANE;
+      let result: any;
 
       if (submitLikeKey && !finalSelector && !refForFocus) {
         return createErrorResponse(
@@ -91,78 +257,93 @@ class KeyboardTool extends BaseBrowserToolExecutor {
         );
       }
 
-      // Ensure helper is loaded for XPath or potential focus operations
-      await this.injectContentScript(tab.id, ['inject-scripts/accessibility-tree-helper.js']);
+      const useCurrentSnapshotCdpTarget = isCurrentSnapshotEnterTarget({
+        tabId: tab.id,
+        keys,
+        candidateAction,
+        candidateCssSelector,
+        explicitSelector: selector,
+        selectorType,
+        frameId: args.frameId,
+      });
 
-      // If selector is XPath, convert to ref then try to get CSS selector
-      if (selector && selectorType === 'xpath') {
-        try {
-          // First convert XPath to ref
-          const ensured = await this.sendMessageToTab(tab.id, {
-            action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
-            selector,
-            isXPath: true,
-          });
-          if (!ensured || !ensured.success || !ensured.ref) {
+      if (useCurrentSnapshotCdpTarget && candidateCssSelector) {
+        result = await dispatchEnterToCurrentSnapshotLocatorWithCdp(tab.id, candidateCssSelector);
+        executionLane = TABRIX_CDP_SNAPSHOT_LOCATOR_LANE;
+      } else {
+        // Ensure helper is loaded for XPath or potential focus operations
+        await this.injectContentScript(tab.id, ['inject-scripts/accessibility-tree-helper.js']);
+
+        // If selector is XPath, convert to ref then try to get CSS selector
+        if (selector && selectorType === 'xpath') {
+          try {
+            // First convert XPath to ref
+            const ensured = await this.sendMessageToTab(tab.id, {
+              action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
+              selector,
+              isXPath: true,
+            });
+            if (!ensured || !ensured.success || !ensured.ref) {
+              return createErrorResponse(
+                `Failed to resolve XPath selector: ${ensured?.error || 'unknown error'}`,
+              );
+            }
+            refForFocus = ensured.ref;
+            // Try to resolve ref to CSS selector
+            const resolved = await this.sendMessageToTab(tab.id, {
+              action: TOOL_MESSAGE_TYPES.RESOLVE_REF,
+              ref: ensured.ref,
+            });
+            if (resolved && resolved.success && resolved.selector) {
+              finalSelector = resolved.selector;
+              refForFocus = undefined; // Prefer CSS selector if available
+            }
+            // If no CSS selector available, we'll use ref to focus below
+          } catch (error) {
             return createErrorResponse(
-              `Failed to resolve XPath selector: ${ensured?.error || 'unknown error'}`,
+              `Error resolving XPath: ${error instanceof Error ? error.message : String(error)}`,
             );
           }
-          refForFocus = ensured.ref;
-          // Try to resolve ref to CSS selector
-          const resolved = await this.sendMessageToTab(tab.id, {
-            action: TOOL_MESSAGE_TYPES.RESOLVE_REF,
-            ref: ensured.ref,
+        }
+
+        // If we have a ref but no CSS selector, focus the element via helper
+        if (refForFocus) {
+          const focusResult = await this.sendMessageToTab(tab.id, {
+            action: 'focusByRef',
+            ref: refForFocus,
           });
-          if (resolved && resolved.success && resolved.selector) {
-            finalSelector = resolved.selector;
-            refForFocus = undefined; // Prefer CSS selector if available
+          if (focusResult && !focusResult.success) {
+            return createErrorResponse(
+              `Failed to focus element by ref: ${focusResult.error || 'unknown error'}`,
+            );
           }
-          // If no CSS selector available, we'll use ref to focus below
-        } catch (error) {
-          return createErrorResponse(
-            `Error resolving XPath: ${error instanceof Error ? error.message : String(error)}`,
-          );
+          // Clear selector so keyboard events go to the focused element
+          finalSelector = undefined;
         }
+
+        const frameIds = typeof args.frameId === 'number' ? [args.frameId] : undefined;
+        await this.injectContentScript(
+          tab.id,
+          ['inject-scripts/keyboard-helper.js'],
+          false,
+          'ISOLATED',
+          false,
+          frameIds,
+        );
+
+        // Send keyboard simulation message to content script
+        result = await this.sendMessageToTab(
+          tab.id,
+          {
+            action: TOOL_MESSAGE_TYPES.SIMULATE_KEYBOARD,
+            keys,
+            selector: finalSelector,
+            ref: finalSelector ? undefined : targetRef,
+            delay,
+          },
+          args.frameId,
+        );
       }
-
-      // If we have a ref but no CSS selector, focus the element via helper
-      if (refForFocus) {
-        const focusResult = await this.sendMessageToTab(tab.id, {
-          action: 'focusByRef',
-          ref: refForFocus,
-        });
-        if (focusResult && !focusResult.success) {
-          return createErrorResponse(
-            `Failed to focus element by ref: ${focusResult.error || 'unknown error'}`,
-          );
-        }
-        // Clear selector so keyboard events go to the focused element
-        finalSelector = undefined;
-      }
-
-      const frameIds = typeof args.frameId === 'number' ? [args.frameId] : undefined;
-      await this.injectContentScript(
-        tab.id,
-        ['inject-scripts/keyboard-helper.js'],
-        false,
-        'ISOLATED',
-        false,
-        frameIds,
-      );
-
-      // Send keyboard simulation message to content script
-      const result = await this.sendMessageToTab(
-        tab.id,
-        {
-          action: TOOL_MESSAGE_TYPES.SIMULATE_KEYBOARD,
-          keys,
-          selector: finalSelector,
-          ref: finalSelector ? undefined : targetRef,
-          delay,
-        },
-        args.frameId,
-      );
 
       if (result.error) {
         return createErrorResponse(result.error);
@@ -175,6 +356,16 @@ class KeyboardTool extends BaseBrowserToolExecutor {
             text: JSON.stringify({
               success: true,
               message: result.message || 'Keyboard operation successful',
+              executionLane,
+              ...(executionLane === TABRIX_CDP_SNAPSHOT_LOCATOR_LANE
+                ? {
+                    targetBinding: {
+                      targetRef: targetRef ?? null,
+                      selector: candidateCssSelector,
+                      resolutionSource: 'candidate_snapshot_locator_css',
+                    },
+                  }
+                : {}),
               targetElement: result.targetElement,
               results: result.results,
               scrollDiagnostics: result.targetElement?.scrollDiagnostics,

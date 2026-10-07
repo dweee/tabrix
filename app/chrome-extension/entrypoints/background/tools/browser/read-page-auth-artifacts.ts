@@ -87,9 +87,37 @@ function hasAuthRequiredEvidence(params: {
   browserPageObject: ReadPageBrowserPageObjectView | null | undefined;
 }): boolean {
   if (params.pageRole === 'login_required') return true;
+  const regions = Array.isArray(params.pageRegions) ? params.pageRegions : [];
   const eventTypes = (params.browserPageObject?.semanticEvents || []).map(
     (event) => event.eventType,
   );
+  // A logged-out account entry is not itself a login wall. Lifecycle events
+  // retain that observation, but readable content must remain operable unless
+  // a concrete auth surface/challenge is also present.
+  const optionalAccountEntry = regions.some(
+    (region) => region.regionType === 'account' && /logged_out/i.test(region.state),
+  );
+  const readableContent = regions.some(
+    (region) =>
+      ['content', 'detail_area', 'result_list'].includes(region.regionType) &&
+      region.objects.length > 0,
+  );
+  const explicitAuthSurface = regions.some(
+    (region) =>
+      ['modal', 'qr_code', 'credential_input', 'auth_submit_control'].includes(region.regionType) ||
+      (region.regionType === 'form' &&
+        region.objects.some((object) =>
+          /password|passcode|credential|\botp\b|密码|验证码/i.test(
+            `${object.label} ${object.objectType ?? ''} ${object.reason}`,
+          ),
+        )),
+  );
+  const qrChallenge = eventTypes.some((eventType) =>
+    ['qr_waiting', 'qr_expired_candidate', 'qr_refreshed'].includes(eventType),
+  );
+  if (optionalAccountEntry && readableContent && !explicitAuthSurface && !qrChallenge) {
+    return false;
+  }
   if (
     eventTypes.some((eventType) =>
       ['auth_required_candidate', 'qr_waiting', 'qr_expired_candidate', 'qr_refreshed'].includes(
@@ -99,7 +127,6 @@ function hasAuthRequiredEvidence(params: {
   ) {
     return true;
   }
-  const regions = Array.isArray(params.pageRegions) ? params.pageRegions : [];
   return regions.some((region) => {
     if (region.regionType === 'qr_code' && hasAuthScopedQrRegion(regions)) return true;
     if (region.regionType === 'modal' && /\bauth|login\b|登录|授权/i.test(region.state)) {

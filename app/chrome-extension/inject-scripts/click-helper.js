@@ -868,14 +868,16 @@ if (
       //     callers still get signal without long blocking.
       // `beforeunload` short-circuits the window (we already have the verdict).
       const VERIFY_FAST_WINDOW_MS = 400;
+      const VERIFY_DYNAMIC_POST_ACTION_WINDOW_MS = 600;
       const intent = typeof options.intent === 'string' ? options.intent : '';
       const needsDynamicPostActionWindow =
         intent.startsWith('filter.') ||
         intent === 'search.open_filters' ||
         intent.startsWith('search.apply_filter.');
-      const verifyWindowMs =
-        waitForNavigation || needsDynamicPostActionWindow
-          ? Math.max(0, Number(timeout) || VERIFY_FAST_WINDOW_MS)
+      const verifyWindowMs = waitForNavigation
+        ? Math.max(0, Number(timeout) || VERIFY_FAST_WINDOW_MS)
+        : needsDynamicPostActionWindow
+          ? VERIFY_DYNAMIC_POST_ACTION_WINDOW_MS
           : VERIFY_FAST_WINDOW_MS;
 
       // Page-local pre-click snapshot.

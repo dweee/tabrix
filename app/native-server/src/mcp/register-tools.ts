@@ -80,6 +80,7 @@ import {
   inferPageInteractionChangeCause,
   readCandidateActionMetadata,
   readInteractionTargetRefs,
+  shouldInvalidateReadForRequiredReadback,
   shouldInvalidateReadAfterWindowFocusChange,
   shouldRecordPageInteractionAfterResult,
 } from './browser-action-readback';
@@ -407,10 +408,8 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
     //
     // Resolve the gate's task key from a ladder that BOTH honours an
     // explicit caller-supplied key AND remains usable for
-    // schema-following MCP clients that cannot see `taskSessionId /
-    // taskId / clientTaskId` (those names are not in the public
-    // `chrome_read_page` schema, so a strict client may strip them on
-    // the wire). See `resolveTaskContextKey` above for the full ladder;
+    // schema-following MCP clients that omit `taskSessionId / taskId /
+    // clientTaskId`. See `resolveTaskContextKey` above for the full ladder;
     // the short version is: explicit > args.tabId > bridge.primaryTabId
     // > single-process `mcp:auto:tab:default`. Auto-keying fires only
     // for read/navigate and page-changing interaction tools, so the
@@ -984,19 +983,29 @@ export const handleToolCall = async (name: string, args: any): Promise<CallToolR
         });
       }
       const postProcessorRawResult = ensureStructuredLegacyActionResult(name, response.data, args);
-      if (
-        taskContext &&
-        shouldRecordPageInteractionAfterResult(name, args, postProcessorRawResult)
-      ) {
+      const interactionActionId =
+        extractPostActionIdFromCallToolResult(postProcessorRawResult) ?? name;
+      const shouldRecordPageInteraction =
+        taskContext && shouldRecordPageInteractionAfterResult(name, args, postProcessorRawResult);
+      if (taskContext && shouldRecordPageInteraction) {
         const candidateActionMetadata = readCandidateActionMetadata(args);
         taskContext.notePageInteraction({
-          action: name,
+          action: interactionActionId,
           tabId: readPositiveInteger(args, 'tabId'),
           changeCause: inferPageInteractionChangeCause(name, postProcessorRawResult),
           targetRefs: readInteractionTargetRefs(args),
           candidateActionId: candidateActionMetadata.candidateActionId,
           candidateActionIntent: candidateActionMetadata.candidateActionIntent,
           actionKind: inferActionKindForToolName(name),
+        });
+      } else if (
+        taskContext &&
+        shouldInvalidateReadForRequiredReadback(name, args, postProcessorRawResult)
+      ) {
+        taskContext.noteFreshReadRequiredAfterUncertainInteraction({
+          action: interactionActionId,
+          tabId: readPositiveInteger(args, 'tabId'),
+          targetRefs: readInteractionTargetRefs(args),
         });
       }
       const postResult = runPostProcessor({

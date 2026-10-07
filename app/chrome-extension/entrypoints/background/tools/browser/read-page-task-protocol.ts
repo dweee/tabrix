@@ -342,9 +342,13 @@ function locatorChainFromCdpAxCandidate(candidate: {
   };
 }): ReadPageCandidateActionLocator[] {
   const locator = candidate.locator;
-  if (!locator || locator.source !== 'cdp_ax') return [];
+  if (!locator || (locator.source !== 'cdp_ax' && locator.source !== 'cdp_dom')) return [];
   const chain: ReadPageCandidateActionLocator[] = [];
-  if (typeof locator.axNodeId === 'string' && locator.axNodeId.trim()) {
+  if (
+    locator.source === 'cdp_ax' &&
+    typeof locator.axNodeId === 'string' &&
+    locator.axNodeId.trim()
+  ) {
     chain.push({ type: 'cdp_ax_node', value: locator.axNodeId.trim() });
   }
   if (
@@ -417,7 +421,14 @@ function objectTypeFromCdpAxRole(role: string): string {
 
 function valueStateFromCdpAxCandidate(candidate: {
   state?: { checked?: unknown; selected?: unknown; expanded?: unknown; disabled?: unknown };
+  visibilityProbe?: { valueState?: unknown };
 }): ReadPageRegionObject['valueState'] {
+  if (
+    candidate.visibilityProbe?.valueState === 'empty' ||
+    candidate.visibilityProbe?.valueState === 'non_empty'
+  ) {
+    return candidate.visibilityProbe.valueState;
+  }
   if (candidate.state?.selected === true || candidate.state?.expanded === true) return 'non_empty';
   if (candidate.state?.selected === false || candidate.state?.expanded === false) return 'empty';
   return 'unknown';
@@ -448,6 +459,7 @@ function buildCdpAxRegionObjects(params: TaskProtocolParams): ReadPageRegionObje
         centerHitTarget?: unknown;
         occluded?: unknown;
         reason?: unknown;
+        valueState?: unknown;
       };
     };
     const role = normalizeCdpAxRole(candidate.role);
@@ -457,6 +469,7 @@ function buildCdpAxRegionObjects(params: TaskProtocolParams): ReadPageRegionObje
         ? candidate.label.trim()
         : role;
     const locatorChain = locatorChainFromCdpAxCandidate(candidate);
+    const source = candidate.locator?.source === 'cdp_dom' ? 'cdp_dom' : 'cdp_ax';
     const idPart =
       locatorChain.find((locator) => locator.type === 'backend_dom_node')?.value ??
       locatorChain.find((locator) => locator.type === 'cdp_ax_node')?.value ??
@@ -466,7 +479,7 @@ function buildCdpAxRegionObjects(params: TaskProtocolParams): ReadPageRegionObje
     const visibility = visibilityFromCdpAxCandidate(candidate);
     const visuallyBlocked = isVisuallyBlocked(visibility);
     objects.push({
-      objectId: `cdp_ax_${idPart}`,
+      objectId: `${source}_${idPart}`,
       label,
       objectType: objectTypeFromCdpAxRole(role),
       role,
@@ -480,10 +493,15 @@ function buildCdpAxRegionObjects(params: TaskProtocolParams): ReadPageRegionObje
             ? 'locator_chain'
             : 'not_clickable',
       confidence: visuallyBlocked ? 0.48 : locatorChain.length > 0 ? 0.74 : 0.58,
-      reason: visuallyBlocked
-        ? 'cdp_ax_accessibility_candidate_currently_not_visually_actionable'
-        : 'cdp_ax_accessibility_candidate',
-      sourceProvenance: ['cdp', 'ax'],
+      reason:
+        source === 'cdp_dom'
+          ? visuallyBlocked
+            ? 'cdp_dom_candidate_currently_not_visually_actionable'
+            : 'cdp_dom_candidate'
+          : visuallyBlocked
+            ? 'cdp_ax_accessibility_candidate_currently_not_visually_actionable'
+            : 'cdp_ax_accessibility_candidate',
+      sourceProvenance: source === 'cdp_dom' ? ['cdp', 'dom'] : ['cdp', 'ax'],
       freshness: 'fresh',
       visualBounds: visualBoundsFromCdpAxCandidate(candidate),
       ...(visibility ? { visibility } : {}),
@@ -793,6 +811,17 @@ function buildGenericContainerRegionObjects(params: {
   return output;
 }
 
+function isFilterPanelAction(action: ReadPageCandidateAction): boolean {
+  const intent = String(action.intent || '');
+  const targetRef = String(action.targetRef || '');
+  return (
+    intent.startsWith('filter.') ||
+    intent.startsWith('search.apply_filter.') ||
+    targetRef.startsWith('ref_text_filter_panel_') ||
+    targetRef.startsWith('ref_floating_option_')
+  );
+}
+
 function buildSearchAreaObjects(params: {
   candidateActions: readonly ReadPageCandidateAction[];
   interactiveByRef: Map<string, ReadPageInteractiveElement>;
@@ -800,8 +829,8 @@ function buildSearchAreaObjects(params: {
   cdpAxRegionObjects: readonly ReadPageRegionObject[];
   representedObjectIds: Set<string>;
 }): ReadPageRegionObject[] {
-  const searchActions = params.candidateActions.filter((action) =>
-    String(action.intent || '').startsWith('search.'),
+  const searchActions = params.candidateActions.filter(
+    (action) => String(action.intent || '').startsWith('search.') && !isFilterPanelAction(action),
   );
   const searchElements = Array.from(params.interactiveByRef.values()).filter((element) => {
     const role = String(element.role || '').toLowerCase();
@@ -902,15 +931,11 @@ function buildFilterPanelObjects(params: {
   aiFacingCandidateByTargetRef: Map<string, ReadPageCandidateAction[]>;
   representedObjectIds: Set<string>;
 }): ReadPageRegionObject[] {
-  const filterActions = params.candidateActions.filter((action) => {
-    const intent = String(action.intent || '');
-    const targetRef = String(action.targetRef || '');
-    return intent.startsWith('filter.') || targetRef.startsWith('ref_text_filter_panel_');
-  });
+  const filterActions = params.candidateActions.filter(isFilterPanelAction);
   if (filterActions.length === 0) return [];
 
   const containerId = 'container_filter_panel';
-  const childObjects = filterActions.slice(0, 6).flatMap((action): ReadPageRegionObject[] => {
+  const childObjects = filterActions.flatMap((action): ReadPageRegionObject[] => {
     const targetRef = String(action.targetRef || '').trim();
     if (!targetRef) return [];
     const element = params.interactiveByRef.get(targetRef);
@@ -1074,7 +1099,7 @@ function isNoisyGlobalMenuMapObject(object: ReadPageRegionObject): boolean {
 
 function maxObjectsForRegion(regionType: ReadPageRegionType): number {
   if (regionType === 'result_list') return 12;
-  if (regionType === 'filter_panel') return 8;
+  if (regionType === 'filter_panel') return 24;
   if (regionType === 'search_area') return 6;
   return regionType === 'navigation' ? MAX_NAVIGATION_REGION_OBJECTS : MAX_REGION_OBJECTS;
 }

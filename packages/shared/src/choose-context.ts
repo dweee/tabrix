@@ -474,7 +474,9 @@ export interface TabrixDirectApiTelemetry {
  * back to `read_page` anyway; `completed` means the whole task
  * completed successfully on top of the suggested strategy; `retried`
  * means the caller went back and re-issued `tabrix_choose_context`
- * (signalling the first decision wasn't useful).
+ * (signalling the first decision wasn't useful). The first outcome recorded
+ * for a decision owns artifact-usage projection; `retried` projects failed,
+ * not-adopted usage, and later outcomes do not project that decision again.
  *
  * Closed on purpose so the outcome aggregation in
  * `release:choose-context-stats` can keep its grouping deterministic.
@@ -490,12 +492,12 @@ export interface TabrixChooseContextRecordOutcomeInput {
 /**
  * Public response for `tabrix_choose_context_record_outcome`.
  * `status: 'invalid_input'` carries only `error`. `status: 'unknown_decision'`
- * means the decision id was well-formed but no telemetry row matched;
- * the caller should treat that as "decision lost" rather than "permission
- * denied" or a transport error.
+ * means the decision id was well-formed but no telemetry row matched.
+ * `status: 'write_failed'` means the decision may still exist but the atomic
+ * outcome/library update failed; the caller may retry it.
  */
 export interface TabrixChooseContextRecordOutcomeResult {
-  status: 'ok' | 'invalid_input' | 'unknown_decision';
+  status: 'ok' | 'invalid_input' | 'unknown_decision' | 'write_failed';
   decisionId?: string;
   outcome?: TabrixChooseContextOutcome;
   error?: TabrixChooseContextErrorBody;

@@ -121,10 +121,19 @@ function hasTransientTargetEvidence(object: BrowserObject): boolean {
 }
 
 const BLOCKED_PAGE_SIGNAL_PATTERN =
-  /\b(captcha|recaptcha|challenge|verification|security[-_]?check|human[-_]?check|verify(uuid|type|biz)?|user[_-]?verification[_-]?required|login[_-]?required|auth[_-]?required|access[_-]?denied|restricted)\b|安全验证|人机验证|滑块验证|验证码|登录验证/i;
+  /\b(captcha|recaptcha|challenge|security[-_]?check|human[-_]?check|user[_-]?verification[_-]?required|login[_-]?required|auth[_-]?required|access[_-]?denied|restricted)\b|安全验证|人机验证|滑块验证|验证码|登录验证/i;
+const BLOCKED_PAGE_STATE_PATTERN =
+  /\b(verification[-_]?required|verify(uuid|type|biz)?[-_]?required)\b/i;
 
 function stringHasBlockedPageSignal(value: string | null | undefined): boolean {
   return typeof value === 'string' && BLOCKED_PAGE_SIGNAL_PATTERN.test(value);
+}
+
+function stringHasBlockedPageStateSignal(value: string | null | undefined): boolean {
+  return (
+    typeof value === 'string' &&
+    (BLOCKED_PAGE_SIGNAL_PATTERN.test(value) || BLOCKED_PAGE_STATE_PATTERN.test(value))
+  );
 }
 
 function valueHasBlockedPageSignal(value: unknown): boolean {
@@ -154,8 +163,8 @@ function isTopLevelPageObject(object: BrowserObject): boolean {
 
 function hasBlockedKnowledgeSignal(object: BrowserObject): boolean {
   return (
-    stringHasBlockedPageSignal(object.operabilityReason) ||
-    stringHasBlockedPageSignal(object.lifecycleState) ||
+    stringHasBlockedPageStateSignal(object.operabilityReason) ||
+    stringHasBlockedPageStateSignal(object.lifecycleState) ||
     stringHasBlockedPageSignal(object.pageUrlPattern) ||
     stringHasBlockedPageSignal(object.rootRoute) ||
     stringHasBlockedPageSignal(object.currentRoute) ||
@@ -479,8 +488,6 @@ function buildKnowledgeInput(
     },
     sourceTraceIds: uniqueStrings(sourceTraceIds),
     observationCount,
-    successfulUseCount: 0,
-    failedUseCount: 0,
     confidenceScore: roundedScore(average(confidenceScores)),
     driftScore: null,
     archivedAt,

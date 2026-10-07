@@ -152,6 +152,72 @@ describe('evaluateNonInterferencePreflight', () => {
     });
   });
 
+  it('allows hover pointer recovery on a run-owned tab while impact actions remain gated', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.noteRunOwnedTab(42);
+    ctx.notePageProjectionAndBuildDelta(
+      makeProjection({ tabId: 42 }),
+      makeRuntimeFields({
+        currentPageLoadReadinessStatus: 'loading_after_wait',
+        currentPageStability: 'loading',
+        currentPageSnapshotUsableForBusinessAction: false,
+      }),
+    );
+
+    const hoverVerdict = evaluateNonInterferencePreflight({
+      toolName: TOOL_NAMES.BROWSER.CLICK,
+      args: { tabId: 42, ref: 'ref_outside_panel', interaction: 'hover' },
+      taskContext: ctx,
+    });
+    const clickVerdict = evaluateNonInterferencePreflight({
+      toolName: TOOL_NAMES.BROWSER.CLICK,
+      args: { tabId: 42, ref: 'ref_outside_panel', interaction: 'click' },
+      taskContext: ctx,
+    });
+
+    expect(hoverVerdict.allowed).toBe(true);
+    expect(hoverVerdict.audit).toMatchObject({
+      verdict: 'allow',
+      reason: 'pointer_move_only',
+      targetTabId: 42,
+    });
+    expect(clickVerdict.allowed).toBe(false);
+    expect(clickVerdict.audit.reason).toBe('task_resume_readiness_not_proven');
+  });
+
+  it('allows explicit-tab hover recovery in default mode but not on a non-owned strict tab', () => {
+    const ctx = new TaskSessionContext({ readBudget: 6 });
+    ctx.notePageProjectionAndBuildDelta(
+      makeProjection({ tabId: 42 }),
+      makeRuntimeFields({
+        currentPageLoadReadinessStatus: 'loading_after_wait',
+        currentPageStability: 'loading',
+        currentPageSnapshotUsableForBusinessAction: false,
+      }),
+    );
+
+    const defaultVerdict = evaluateNonInterferencePreflight({
+      toolName: TOOL_NAMES.BROWSER.CLICK,
+      args: { tabId: 42, ref: 'ref_outside_panel', interaction: 'hover' },
+      taskContext: ctx,
+    });
+    const strictVerdict = evaluateNonInterferencePreflight({
+      toolName: TOOL_NAMES.BROWSER.CLICK,
+      args: {
+        tabId: 42,
+        ref: 'ref_outside_panel',
+        interaction: 'hover',
+        nonInterferencePolicy: 'strict',
+      },
+      taskContext: ctx,
+    });
+
+    expect(defaultVerdict.allowed).toBe(true);
+    expect(defaultVerdict.audit.reason).toBe('pointer_move_only');
+    expect(strictVerdict.allowed).toBe(false);
+    expect(strictVerdict.audit.reason).toBe('task_resume_readiness_not_proven');
+  });
+
   it('does not use page-stability readiness to block new-tab navigation', () => {
     const ctx = new TaskSessionContext({ readBudget: 6 });
     ctx.notePageProjectionAndBuildDelta(

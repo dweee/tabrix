@@ -142,6 +142,10 @@ function isSyntheticFilterControlRef(value: string): boolean {
   return value.startsWith('ref_filter_');
 }
 
+function isSyntheticFloatingOptionRef(value: string): boolean {
+  return value.startsWith('ref_floating_option_');
+}
+
 function isSyntheticDynamicSurfaceRef(value: string): boolean {
   return value.startsWith('ref_dynamic_surface_');
 }
@@ -157,6 +161,7 @@ function isLocatorBackedSyntheticRef(value: string): boolean {
     isSyntheticSearchInputRef(value) ||
     isSyntheticFilterPanelRef(value) ||
     isSyntheticFilterControlRef(value) ||
+    isSyntheticFloatingOptionRef(value) ||
     isSyntheticDynamicSurfaceRef(value) ||
     isSyntheticResultCardRef(value)
   );
@@ -279,6 +284,24 @@ function resolveFreshCandidateCss(params: {
   };
 }
 
+function resolveCurrentSnapshotLocator(
+  params: ResolveCandidateActionTargetParams & {
+    targetRef: string;
+    locatorXpath: string | undefined;
+    locatorCss: string | undefined;
+    candidateFrameId: number | undefined;
+  },
+): ResolvedCandidateActionTarget | undefined {
+  const registeredLocator = resolveCandidateActionTargetLocator(params, params.targetRef);
+  if (registeredLocator?.selectorType !== 'xpath' && registeredLocator) {
+    return registeredLocator;
+  }
+  const freshCss = resolveFreshCandidateCss(params);
+  if (freshCss) return freshCss;
+  if (registeredLocator) return registeredLocator;
+  return resolveFreshCandidateXpath(params);
+}
+
 export function resolveCandidateActionTarget(
   params: ResolveCandidateActionTargetParams,
 ): ResolvedCandidateActionTarget {
@@ -302,6 +325,20 @@ export function resolveCandidateActionTarget(
       isLocatorBackedSyntheticRef(explicitRef) ||
       candidateActionRequiresSnapshotLocator(params, explicitRef)
     ) {
+      if (candidateActionRequiresSnapshotLocator(params, explicitRef)) {
+        const snapshotLocator = resolveCurrentSnapshotLocator({
+          ...params,
+          targetRef: explicitRef,
+          locatorXpath,
+          locatorCss,
+          candidateFrameId,
+        });
+        if (snapshotLocator) return snapshotLocator;
+        return {
+          ...(candidateFrameId !== undefined ? { frameId: candidateFrameId } : {}),
+          source: 'none',
+        };
+      }
       const freshXpath = resolveFreshCandidateXpath({ locatorXpath, candidateFrameId });
       if (freshXpath) return freshXpath;
       const resolvedLocator = resolveCandidateActionTargetLocator(params, explicitRef);
@@ -336,15 +373,26 @@ export function resolveCandidateActionTarget(
       isLocatorBackedSyntheticRef(candidateTargetRef) ||
       candidateActionRequiresSnapshotLocator(params, candidateTargetRef)
     ) {
-      const freshXpath = resolveFreshCandidateXpath({ locatorXpath, candidateFrameId });
-      if (freshXpath) return freshXpath;
-      const resolvedLocator = resolveCandidateActionTargetLocator(params, candidateTargetRef);
-      if (resolvedLocator) return resolvedLocator;
-      const freshCss = resolveFreshCandidateCss({
-        locatorCss,
-        candidateFrameId,
-      });
-      if (freshCss) return freshCss;
+      if (candidateActionRequiresSnapshotLocator(params, candidateTargetRef)) {
+        const snapshotLocator = resolveCurrentSnapshotLocator({
+          ...params,
+          targetRef: candidateTargetRef,
+          locatorXpath,
+          locatorCss,
+          candidateFrameId,
+        });
+        if (snapshotLocator) return snapshotLocator;
+      } else {
+        const freshXpath = resolveFreshCandidateXpath({ locatorXpath, candidateFrameId });
+        if (freshXpath) return freshXpath;
+        const resolvedLocator = resolveCandidateActionTargetLocator(params, candidateTargetRef);
+        if (resolvedLocator) return resolvedLocator;
+        const freshCss = resolveFreshCandidateCss({
+          locatorCss,
+          candidateFrameId,
+        });
+        if (freshCss) return freshCss;
+      }
     }
 
     if (isFallbackRef(candidateTargetRef)) {

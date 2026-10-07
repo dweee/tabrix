@@ -81,9 +81,10 @@ export const TOOL_RISK_TIERS: Readonly<Record<string, TabrixRiskTier>> = Object.
 
   // ---- MKEP Context selector (read-only SELECT against native SQLite) ----
   [TOOL_NAMES.CONTEXT.CHOOSE]: 'P0',
-  // Pure-INSERT outcome write-back. P0 because
-  // it appends one telemetry row keyed by `decisionId`, never replays,
-  // and is gated by the same Memory persistence check the chooser uses.
+  // Bounded outcome write-back. It appends one telemetry row keyed by
+  // `decisionId` and may atomically project the decision's first outcome into
+  // selected-artifact usage; it never executes browser actions or replays work.
+  // Keep P0: writes are schema-bounded and gated by the chooser's Memory check.
   [TOOL_NAMES.CONTEXT.RECORD_OUTCOME]: 'P0',
 
   // ---- MKEP Memory write-back ----

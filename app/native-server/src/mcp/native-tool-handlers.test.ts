@@ -4,7 +4,7 @@ import { getNativeToolHandler } from './native-tool-handlers';
 import type { NativeToolHandler, NativeToolHandlerDeps } from './native-tool-handlers';
 import type { KnowledgeApiRepository } from '../memory/knowledge/knowledge-api-repository';
 import { MkeAiFeedbackValidationError } from '../memory/mke-memory-trace-service';
-import type { TaskSessionContext } from '../execution/task-session-context';
+import { TaskSessionContext } from '../execution/task-session-context';
 
 function callTextPayload(result: CallToolResult): any {
   const text = String(result.content?.[0]?.text ?? '');
@@ -151,6 +151,7 @@ describe('native-tool-handlers · memory_record_ai_feedback', () => {
       },
     });
     expect(flushAndProjectMkeAfterAiFeedback).toHaveBeenCalledTimes(1);
+    expect(flushAndProjectMkeAfterAiFeedback).toHaveBeenCalledWith('trace-1');
   });
 
   it('records achieved AI feedback without trusted evaluator but does not trigger Experience projection', async () => {
@@ -274,11 +275,14 @@ describe('native-tool-handlers · memory_record_ai_feedback', () => {
     });
     expect(flushAndProjectMkeAfterAiFeedback).not.toHaveBeenCalled();
     expect(revokeMkeExperienceForTrace).toHaveBeenCalledWith(
-      expect.objectContaining({ traceId: 'trace-1' }),
+      expect.objectContaining({
+        traceId: 'trace-1',
+        revalidateScenario: false,
+      }),
     );
   });
 
-  it('records partial AI feedback without triggering Experience projection', async () => {
+  it('records partial AI feedback without invalidating unrelated same-scenario Experience', async () => {
     const handler = getMemoryFeedbackHandler();
     const recordAiBusinessFeedback = jest.fn().mockReturnValue({
       traceId: 'trace-1',
@@ -336,7 +340,10 @@ describe('native-tool-handlers · memory_record_ai_feedback', () => {
     });
     expect(flushAndProjectMkeAfterAiFeedback).not.toHaveBeenCalled();
     expect(revokeMkeExperienceForTrace).toHaveBeenCalledWith(
-      expect.objectContaining({ traceId: 'trace-1' }),
+      expect.objectContaining({
+        traceId: 'trace-1',
+        revalidateScenario: false,
+      }),
     );
   });
 
@@ -537,6 +544,56 @@ describe('native-tool-handlers · tabrix_choose_context (B-018 v1)', () => {
       siteFamily: 'content.example',
       pageRole: 'search_results',
       limit: 1,
+    });
+  });
+
+  it('preserves a fresh task read when an identity-free chooser call precedes reuse', async () => {
+    const handler = getChooseHandler();
+    const url = 'https://content.example/search_result/?keyword=AI';
+    const taskContext = new TaskSessionContext();
+    taskContext.noteUrlChange(url, 'search_results');
+    taskContext.noteReadPage({
+      layer: 'L0+L1+L2',
+      source: 'dom_json',
+      requestKey: 'fresh-current-page-read',
+      contextMeasurement: {
+        url,
+        pageRole: 'search_results',
+        fullReadByteLength: 40_000,
+        candidateActionsCount: 8,
+        highValueObjectCount: 6,
+      },
+    });
+    const findReusableMkeExperienceRecipes = jest.fn().mockReturnValue([
+      {
+        experienceId: 'exp-content-search',
+        taskSignature: 'tools:chrome_click_element',
+        successCount: 2,
+        failureCount: 0,
+        reliabilityScore: 1,
+        successCheck: {},
+      },
+    ]);
+
+    await handler(
+      { intent: 'plan the next browser action' },
+      makeDeps({ taskContext, findReusableMkeExperienceRecipes }),
+    );
+
+    const result = await handler(
+      {
+        intent: 'collect filtered result cards',
+        url,
+        pageRole: 'search_results',
+      },
+      makeDeps({ taskContext, findReusableMkeExperienceRecipes }),
+    );
+
+    expect(taskContext.peekReadPageContextMeasurement()).toMatchObject({ url });
+    expect(callTextPayload(result)).toMatchObject({
+      strategy: 'experience_reuse',
+      sourceRoute: 'experience_reuse',
+      dispatcherInputSource: 'live_snapshot',
     });
   });
 

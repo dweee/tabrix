@@ -53,6 +53,14 @@ export interface CDPConsoleSummary {
   warningCount: number;
 }
 
+export interface CDPDomControlScanSummary {
+  queriedCount: number;
+  uniqueSelectorCount: number;
+  visibleInViewportCount: number;
+  candidateCount: number;
+  parsedCandidateCount: number;
+}
+
 export interface CDPAccessibilityStateSignals {
   checkedCount: number;
   selectedCount: number;
@@ -68,7 +76,7 @@ export interface CDPAccessibilityObjectStateSignals {
 }
 
 export interface CDPAccessibilityObjectLocator {
-  source: 'cdp_ax';
+  source: 'cdp_ax' | 'cdp_dom';
   axNodeId?: string;
   backendDOMNodeId?: number;
   cssSelector?: string;
@@ -88,6 +96,7 @@ export interface NodeVisibilityProbe {
   inViewport: boolean;
   centerHitTarget: boolean | null;
   occluded: boolean;
+  valueState?: 'empty' | 'non_empty' | 'unknown';
   occludedBy?: string;
   reason: string;
 }
@@ -145,6 +154,7 @@ export interface CDPPageSensingSnapshot {
   networkActivity?: CDPNetworkEventSummary;
   networkResources?: CDPNetworkResourceSummary;
   console?: CDPConsoleSummary;
+  domControlScan?: CDPDomControlScanSummary;
   accessibility?: CDPAccessibilitySummary;
   partialErrors?: string[];
   error?: string;
@@ -200,10 +210,10 @@ const PAGE_STATE_PROBE = String.raw`(() => {
   const resourceEntries = performance.getEntriesByType('resource');
   const resourceSummary = resourceEntries.reduce(
     (acc, entry) => {
-      const perfEntry = entry as PerformanceResourceTiming;
+      const perfEntry = entry;
       acc.resourceEntryCount += 1;
       const responseEnd = typeof perfEntry.responseEnd === 'number' ? perfEntry.responseEnd : null;
-      const responseStatus = (perfEntry as { responseStatus?: unknown }).responseStatus;
+      const responseStatus = perfEntry.responseStatus;
       if (responseEnd === 0) acc.resourceInFlightCount += 1;
       if (typeof responseStatus === 'number' && responseStatus >= 400 && responseStatus < 600) {
         acc.failedResourceStatusCount += 1;
@@ -212,6 +222,551 @@ const PAGE_STATE_PROBE = String.raw`(() => {
     },
     { resourceEntryCount: 0, resourceInFlightCount: 0, failedResourceStatusCount: 0 },
   );
+  const viewportWidth = window.innerWidth || document.documentElement?.clientWidth || 0;
+  const viewportHeight = window.innerHeight || document.documentElement?.clientHeight || 0;
+  const cssString = (value) => String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  const safeText = (value) => {
+    const text = String(value || '').replace(/\s+/g, ' ').trim();
+    if (!text || text.length > 80) return '';
+    if (/token|secret|password|passwd|authorization|bearer|cookie|session/i.test(text)) return '';
+    return text;
+  };
+  const selectorCandidates = (element) => {
+    const tag = String(element.tagName || '').toLowerCase();
+    const candidates = [];
+    const id = safeText(element.id);
+    if (id && typeof CSS?.escape === 'function') candidates.push('#' + CSS.escape(id));
+    for (const name of ['data-testid', 'data-test', 'data-cy', 'aria-label']) {
+      const value = safeText(element.getAttribute(name));
+      if (value) candidates.push(tag + '[' + name + '="' + cssString(value) + '"]');
+    }
+    const name = safeText(element.getAttribute('name'));
+    const type = safeText(element.getAttribute('type'));
+    if (name && type) {
+      candidates.push(
+        tag + '[name="' + cssString(name) + '"][type="' + cssString(type) + '"]',
+      );
+    }
+    if (name) candidates.push(tag + '[name="' + cssString(name) + '"]');
+    if (element.classList && typeof CSS?.escape === 'function') {
+      const stableClasses = Array.from(element.classList)
+        .map((value) => String(value || '').trim())
+        .filter(
+          (value) =>
+            /^[A-Za-z_][A-Za-z0-9_-]{1,63}$/.test(value) &&
+            !/^(css|jsx|sc|style)-?[a-f0-9]{6,}$/i.test(value),
+        )
+        .slice(0, 3);
+      for (const className of stableClasses) {
+        candidates.push(tag + '.' + CSS.escape(className));
+      }
+      if (stableClasses.length > 1) {
+        candidates.push(
+          tag + stableClasses.slice(0, 2).map((value) => '.' + CSS.escape(value)).join(''),
+        );
+      }
+    }
+    return candidates;
+  };
+  const uniqueSelector = (element) => {
+    const candidates = selectorCandidates(element);
+    for (const selector of candidates) {
+      try {
+        if (document.querySelectorAll(selector).length === 1) return selector;
+      } catch {}
+    }
+    return '';
+  };
+  const anchoredDescendantSelector = (anchor, target) => {
+    const anchorSelector = uniqueSelector(anchor);
+    if (!anchorSelector) return '';
+    const targetSelectors = selectorCandidates(target);
+    let commonAncestor = anchor.parentElement;
+    while (
+      commonAncestor &&
+      commonAncestor !== document.body &&
+      commonAncestor !== document.documentElement
+    ) {
+      if (commonAncestor.contains(target)) {
+        for (const containerSelector of selectorCandidates(commonAncestor)) {
+          for (const targetSelector of targetSelectors) {
+            const selector =
+              containerSelector + ':has(' + anchorSelector + ') ' + targetSelector;
+            try {
+              const matches = document.querySelectorAll(selector);
+              if (matches.length === 1 && matches[0] === target) return selector;
+            } catch {}
+          }
+        }
+      }
+      commonAncestor = commonAncestor.parentElement;
+    }
+    for (const containerSelector of [
+      'form',
+      '[role="search"]',
+      'header',
+      'nav',
+      'section',
+      'div',
+    ]) {
+      for (const targetSelector of targetSelectors) {
+        const selector =
+          containerSelector + ':has(' + anchorSelector + ') ' + targetSelector;
+        try {
+          const matches = document.querySelectorAll(selector);
+          if (matches.length === 1 && matches[0] === target) return selector;
+        } catch {}
+      }
+    }
+    return '';
+  };
+  const inferRole = (element) => {
+    const explicit = String(element.getAttribute('role') || '').toLowerCase();
+    if (['searchbox', 'textbox', 'combobox', 'spinbutton'].includes(explicit)) return explicit;
+    const tag = String(element.tagName || '').toLowerCase();
+    const type = String(element.getAttribute('type') || '').toLowerCase();
+    if (tag === 'select') return 'combobox';
+    if (type === 'search') return 'searchbox';
+    const identity = [
+      element.id,
+      element.getAttribute('name'),
+      element.getAttribute('aria-label'),
+      element.getAttribute('placeholder'),
+    ]
+      .filter(Boolean)
+      .join(' ');
+    if (/\b(search|query|find)\b|搜索|查找|查询/i.test(identity)) return 'searchbox';
+    if (tag === 'input' || tag === 'textarea' || element.getAttribute('contenteditable') === 'true') {
+      return 'textbox';
+    }
+    return explicit || 'textbox';
+  };
+  const inferLabel = (element, role) => {
+    const id = safeText(element.id);
+    const associatedLabel =
+      id && typeof CSS?.escape === 'function'
+        ? document.querySelector('label[for="' + cssString(id) + '"]')
+        : null;
+    return (
+      safeText(element.getAttribute('aria-label')) ||
+      safeText(element.getAttribute('placeholder')) ||
+      safeText(associatedLabel?.textContent) ||
+      safeText(element.getAttribute('name')) ||
+      safeText(element.getAttribute('title')) ||
+      role
+    );
+  };
+  const formControlElements = Array.from(
+    document.querySelectorAll(
+      'input,textarea,select,[contenteditable="true"],[role="searchbox"],[role="textbox"],[role="combobox"],[role="spinbutton"]',
+    ),
+  );
+  let uniqueSelectorCount = 0;
+  let visibleInViewportCount = 0;
+  const visibleFormControls = formControlElements
+    .flatMap((element) => {
+      const tag = String(element.tagName || '').toLowerCase();
+      const type = String(element.getAttribute('type') || '').toLowerCase();
+      if (tag === 'input' && ['hidden', 'password', 'file', 'checkbox', 'radio', 'submit', 'button', 'reset', 'image'].includes(type)) {
+        return [];
+      }
+      const selector = uniqueSelector(element);
+      if (!selector) return [];
+      uniqueSelectorCount += 1;
+      const computed = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      const domVisible =
+        computed.display !== 'none' &&
+        computed.visibility !== 'hidden' &&
+        computed.visibility !== 'collapse' &&
+        Number.parseFloat(computed.opacity || '1') !== 0 &&
+        rect.width > 0 &&
+        rect.height > 0;
+      const inViewport =
+        rect.right > 0 &&
+        rect.bottom > 0 &&
+        rect.left < viewportWidth &&
+        rect.top < viewportHeight;
+      if (!domVisible || !inViewport) return [];
+      visibleInViewportCount += 1;
+      const cx = Math.min(Math.max(rect.left + rect.width / 2, 0), Math.max(viewportWidth - 1, 0));
+      const cy = Math.min(Math.max(rect.top + rect.height / 2, 0), Math.max(viewportHeight - 1, 0));
+      const hit = document.elementFromPoint(cx, cy);
+      const centerHitTarget = Boolean(hit && (hit === element || element.contains(hit)));
+      const role = inferRole(element);
+      let valueState = 'unknown';
+      if (tag === 'input' || tag === 'textarea' || tag === 'select') {
+        valueState = String(element.value || '').length > 0 ? 'non_empty' : 'empty';
+      } else if (element.getAttribute('contenteditable') === 'true') {
+        valueState = String(element.textContent || '').length > 0 ? 'non_empty' : 'empty';
+      }
+      return [{
+        role,
+        label: inferLabel(element, role),
+        cssSelector: selector,
+        nodeName: tag,
+        actionTypes: ['focus', 'setvalue'],
+        disabled: element.disabled === true || element.getAttribute('aria-disabled') === 'true',
+        valueState,
+        visualBounds: {
+          x: Math.round(rect.left),
+          y: Math.round(rect.top),
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+        },
+        visibilityProbe: {
+          domVisible,
+          inViewport,
+          centerHitTarget,
+          occluded: !centerHitTarget,
+          valueState,
+          reason: centerHitTarget ? 'visible_unobstructed' : 'center_occluded',
+        },
+      }];
+    })
+    .slice(0, 16);
+  const associatedSearchControls = [];
+  for (const searchElement of formControlElements.filter(
+    (element) => inferRole(element) === 'searchbox',
+  )) {
+    const searchComputed = window.getComputedStyle(searchElement);
+    const searchRect = searchElement.getBoundingClientRect();
+    const searchDomVisible =
+      searchComputed.display !== 'none' &&
+      searchComputed.visibility !== 'hidden' &&
+      searchComputed.visibility !== 'collapse' &&
+      Number.parseFloat(searchComputed.opacity || '1') !== 0 &&
+      searchRect.width > 0 &&
+      searchRect.height > 0;
+    const searchInViewport =
+      searchRect.right > 0 &&
+      searchRect.bottom > 0 &&
+      searchRect.left < viewportWidth &&
+      searchRect.top < viewportHeight;
+    if (!searchDomVisible || !searchInViewport) continue;
+    const formOwnerOf = (element) => element.form || element.closest('form');
+    const searchFormOwner = formOwnerOf(searchElement);
+    const searchSurfaceIdentity = (element) =>
+      [
+        element.getAttribute('role'),
+        element.getAttribute('aria-label'),
+        element.getAttribute('id'),
+        element.getAttribute('class'),
+        element.getAttribute('data-testid'),
+        element.getAttribute('data-test'),
+        element.getAttribute('data-cy'),
+      ]
+        .map(safeText)
+        .filter(Boolean)
+        .join(' ');
+    const isSemanticSearchSurface = (element) =>
+      element.getAttribute('role') === 'search' ||
+      /\b(search|find|query)\b|搜索|查找|查询/i.test(searchSurfaceIdentity(element));
+    let semanticSearchSurface = searchElement.closest('[role="search"]');
+    if (!semanticSearchSurface) {
+      let current = searchElement.parentElement;
+      const maxSearchSurfaceAncestorDepth = 5;
+      for (let level = 0; current && level < maxSearchSurfaceAncestorDepth; level += 1) {
+        if (current === document.body || current === document.documentElement) break;
+        if (isSemanticSearchSurface(current)) {
+          semanticSearchSurface = current;
+          break;
+        }
+        current = current.parentElement;
+      }
+    }
+    const scope = searchFormOwner || semanticSearchSurface || searchElement.parentElement;
+    if (!scope || scope === document.body || scope === document.documentElement) continue;
+    const ariaReferences = (source, target) => {
+      const targetId = safeText(target.id);
+      if (!targetId) return false;
+      return ['aria-controls', 'aria-owns'].some((attribute) =>
+        safeText(source.getAttribute(attribute))
+          .split(/\s+/)
+          .filter(Boolean)
+          .includes(targetId),
+      );
+    };
+    const iconSignalText = (element) =>
+      Array.from(element.querySelectorAll('use'))
+        .flatMap((icon) => [
+          icon.getAttribute('href'),
+          icon.getAttribute('xlink:href'),
+          icon.getAttributeNS?.('http://www.w3.org/1999/xlink', 'href'),
+        ])
+        .concat([
+          element.getAttribute('class'),
+          ...Array.from(element.querySelectorAll('svg')).map((icon) =>
+            icon.getAttribute('class'),
+          ),
+        ])
+        .map(safeText)
+        .filter(Boolean)
+        .join(' ');
+    const hasSearchIconSignal = (element) =>
+      /\b(search|find|query|submit|magnif)\b|搜索|查找|查询/i.test(
+        iconSignalText(element),
+      );
+    const clickableFacts = (element) => {
+      const tag = String(element.tagName || '').toLowerCase();
+      const type = String(element.getAttribute('type') || '').toLowerCase();
+      const role = String(element.getAttribute('role') || '').toLowerCase();
+      const style = window.getComputedStyle(element);
+      return {
+        semanticallyClickable:
+          tag === 'button' ||
+          tag === 'a' ||
+          role === 'button' ||
+          (tag === 'input' && ['submit', 'button', 'image'].includes(type)),
+        behaviorallyClickable:
+          element.tabIndex >= 0 ||
+          typeof element.onclick === 'function' ||
+          style.cursor === 'pointer' ||
+          style.cursor === 'not-allowed',
+        searchIconClickable: hasSearchIconSignal(element),
+      };
+    };
+    const owningClickTarget = (element) => {
+      let current = element;
+      let behavioralOwner = null;
+      let iconOwner = null;
+      while (current && current !== scope && current !== searchElement) {
+        const facts = clickableFacts(current);
+        if (facts.semanticallyClickable) return current;
+        if (!behavioralOwner && current instanceof HTMLElement && facts.behaviorallyClickable) {
+          behavioralOwner = current;
+        }
+        if (!iconOwner && current instanceof HTMLElement && facts.searchIconClickable) {
+          const rect = current.getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0 && rect.width <= 180 && rect.height <= 120) {
+            iconOwner = current;
+          }
+        }
+        current = current.parentElement;
+      }
+      return iconOwner || behavioralOwner;
+    };
+    const rawNearbyCandidates = Array.from(scope.querySelectorAll('*'))
+      .map((element) => owningClickTarget(element))
+      .filter(Boolean);
+    const nearbyCandidates = Array.from(new Set(rawNearbyCandidates))
+      .filter((element) => {
+        if (element === searchElement || element.contains(searchElement)) return false;
+        const { semanticallyClickable, behaviorallyClickable, searchIconClickable } =
+          clickableFacts(element);
+        if (!semanticallyClickable && !behaviorallyClickable && !searchIconClickable) return false;
+        const label =
+          [
+            element.getAttribute('aria-label'),
+            element.getAttribute('title'),
+            element.textContent,
+          ]
+            .map(safeText)
+            .find(Boolean) || '';
+        if (/\b(clear|reset|close|cancel)\b|清除|重置|关闭|取消/i.test(label)) return false;
+        const rect = element.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0 || rect.width > 180 || rect.height > 120) {
+          return false;
+        }
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        return (
+          cx >= searchRect.left - 80 &&
+          cx <= searchRect.right + 140 &&
+          cy >= searchRect.top - 60 &&
+          cy <= searchRect.bottom + 60
+        );
+      })
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+        const tag = String(element.tagName || '').toLowerCase();
+        const type = String(element.getAttribute('type') || '').toLowerCase();
+        const role = String(element.getAttribute('role') || '').toLowerCase();
+        const label =
+          [
+            element.getAttribute('aria-label'),
+            element.getAttribute('title'),
+            element.textContent,
+          ]
+            .map(safeText)
+            .find(Boolean) || '';
+        const iconSignal = iconSignalText(element);
+        const semanticText = label + ' ' + iconSignal;
+        if (
+          /\b(clear|reset|close|cancel|voice|microphone|camera|image|settings?)\b|清除|重置|关闭|取消|语音|麦克风|相机|图片|设置/i.test(
+            semanticText,
+          )
+        ) {
+          return null;
+        }
+        const directSemanticText =
+          label + ' ' + safeText(element.getAttribute('class'));
+        const explicitSubmit =
+          (tag === 'button' && type === 'submit') || ['submit', 'image'].includes(type);
+        const searchSemantic = /\b(search|find|query|magnif)\b|搜索|查找|查询/i.test(
+          semanticText,
+        );
+        const directSearchSemantic =
+          /\b(search|find|query|magnif)\b|搜索|查找|查询/i.test(
+            directSemanticText,
+          );
+        const directSubmitSemantic = /\bsubmit\b|提交/i.test(directSemanticText);
+        if (!explicitSubmit && !searchSemantic) return null;
+        const candidateFormOwner = formOwnerOf(element);
+        const sameFormOwner = Boolean(
+          searchFormOwner && candidateFormOwner === searchFormOwner,
+        );
+        const ariaRelated =
+          ariaReferences(searchElement, element) || ariaReferences(element, searchElement);
+        const boundedSearchSurfaceOwner = Boolean(
+          semanticSearchSurface &&
+          semanticSearchSurface.contains(searchElement) &&
+          semanticSearchSurface.contains(element),
+        );
+        if (
+          !sameFormOwner &&
+          !ariaRelated &&
+          !boundedSearchSurfaceOwner &&
+          !searchSemantic
+        ) {
+          return null;
+        }
+        const semanticScore =
+          explicitSubmit || tag === 'button' || role === 'button' ? 100 : 0;
+        const searchLabelScore = directSearchSemantic
+          ? 120
+          : directSubmitSemantic && searchSemantic
+            ? 100
+            : searchSemantic
+              ? 80
+              : 0;
+        const rightEdgeScore =
+          rect.left + rect.width / 2 >= searchRect.left + searchRect.width / 2 ? 30 : 0;
+        const distancePenalty = Math.abs(searchRect.right - (rect.left + rect.width / 2));
+        return {
+          element,
+          rect,
+          score: semanticScore + searchLabelScore + rightEdgeScore - distancePenalty / 10,
+        };
+      })
+      .filter(Boolean)
+      .sort((left, right) => right.score - left.score);
+    const rankedCandidates = nearbyCandidates
+      .map((candidate) => ({
+        ...candidate,
+        selector:
+          uniqueSelector(candidate.element) ||
+          anchoredDescendantSelector(searchElement, candidate.element),
+      }))
+      .filter((candidate) => candidate.selector);
+    const selected = rankedCandidates[0];
+    const runnerUp = rankedCandidates[1];
+    if (selected && runnerUp && Math.abs(selected.score - runnerUp.score) < 2) {
+      continue;
+    }
+    if (!selected) continue;
+    const best = selected;
+    const selector = selected.selector;
+    const computed = window.getComputedStyle(best.element);
+    const domVisible =
+      computed.display !== 'none' &&
+      computed.visibility !== 'hidden' &&
+      computed.visibility !== 'collapse' &&
+      Number.parseFloat(computed.opacity || '1') !== 0;
+    const inViewport =
+      best.rect.right > 0 &&
+      best.rect.bottom > 0 &&
+      best.rect.left < viewportWidth &&
+      best.rect.top < viewportHeight;
+    if (!domVisible || !inViewport) continue;
+    const cx = Math.min(
+      Math.max(best.rect.left + best.rect.width / 2, 0),
+      Math.max(viewportWidth - 1, 0),
+    );
+    const cy = Math.min(
+      Math.max(best.rect.top + best.rect.height / 2, 0),
+      Math.max(viewportHeight - 1, 0),
+    );
+    const hit = document.elementFromPoint(cx, cy);
+    const centerHitTarget = Boolean(
+      hit && (hit === best.element || best.element.contains(hit)),
+    );
+    const hasDisabledSignal = (element) => {
+      const className = String(element.getAttribute('class') || '');
+      return (
+        element.disabled === true ||
+        element.getAttribute('aria-disabled') === 'true' ||
+        element.hasAttribute('inert') ||
+        element.inert === true ||
+        /\b(?:is-)?disabled\b/i.test(className)
+      );
+    };
+    const disabledOwnerChain = (() => {
+      let current = best.element;
+      while (current && current !== scope.parentElement) {
+        const style = window.getComputedStyle(current);
+        if (
+          hasDisabledSignal(current) ||
+          style.cursor === 'not-allowed' ||
+          style.pointerEvents === 'none'
+        ) {
+          return true;
+        }
+        if (current === scope) break;
+        current = current.parentElement;
+      }
+      return false;
+    })();
+    const disabledDescendant = Array.from(
+      best.element.querySelectorAll('[disabled], [aria-disabled="true"], .disabled, .is-disabled'),
+    ).some((element) => {
+      const rect = element.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+      return (
+        hasDisabledSignal(element) &&
+        style.display !== 'none' &&
+        style.visibility !== 'hidden' &&
+        Number.parseFloat(style.opacity || '1') > 0 &&
+        rect.width > 0 &&
+        rect.height > 0
+      );
+    });
+    const disabled =
+      disabledOwnerChain ||
+      disabledDescendant ||
+      computed.cursor === 'not-allowed' ||
+      computed.pointerEvents === 'none';
+    associatedSearchControls.push({
+      role: 'button',
+      label: 'search submit',
+      cssSelector: selector,
+      nodeName: String(best.element.tagName || '').toLowerCase(),
+      actionTypes: disabled ? [] : ['click'],
+      disabled,
+      valueState: 'unknown',
+      visualBounds: {
+        x: Math.round(best.rect.left),
+        y: Math.round(best.rect.top),
+        width: Math.round(best.rect.width),
+        height: Math.round(best.rect.height),
+      },
+      visibilityProbe: {
+        domVisible,
+        inViewport,
+        centerHitTarget,
+        occluded: !centerHitTarget,
+        valueState: 'unknown',
+        reason: centerHitTarget ? 'visible_unobstructed' : 'center_occluded',
+      },
+    });
+  }
+  const visibleDomControls = [...visibleFormControls, ...associatedSearchControls].slice(0, 20);
+  const domControlScan = {
+    queriedCount: formControlElements.length,
+    uniqueSelectorCount,
+    visibleInViewportCount,
+    candidateCount: visibleDomControls.length,
+  };
  return {
     readyState: document.readyState,
     visibilityState: document.visibilityState,
@@ -232,6 +787,8 @@ const PAGE_STATE_PROBE = String.raw`(() => {
           namePresent: Boolean(active.getAttribute('name')),
         }
       : null,
+    visibleFormControls: visibleDomControls,
+    domControlScan,
     navigation: nav
       ? {
           type: nav.type,
@@ -268,6 +825,26 @@ const NODE_VISIBILITY_PROBE = String.raw`function() {
         : 0;
   const computed = window.getComputedStyle(element);
   const rect = typeof element.getBoundingClientRect === 'function' ? element.getBoundingClientRect() : null;
+  const tagName = String(element.tagName || '').toLowerCase();
+  const role = String(element.getAttribute('role') || '').toLowerCase();
+  let valueState = 'unknown';
+  if (tagName === 'input' || tagName === 'textarea' || tagName === 'select') {
+    valueState = String(element.value || '').length > 0 ? 'non_empty' : 'empty';
+  } else if (element.getAttribute('contenteditable') === 'true') {
+    valueState = String(element.textContent || '').length > 0 ? 'non_empty' : 'empty';
+  } else if (
+    role === 'textbox' ||
+    role === 'searchbox' ||
+    role === 'combobox' ||
+    role === 'spinbutton'
+  ) {
+    const ariaValue =
+      element.getAttribute('aria-valuetext') ||
+      element.getAttribute('aria-valuenow') ||
+      element.getAttribute('data-value') ||
+      '';
+    valueState = ariaValue ? 'non_empty' : 'unknown';
+  }
   const offsetParentMissing = element instanceof HTMLElement && element.offsetParent === null;
   const position = computed.position || '';
   const displayNone = computed.display === 'none';
@@ -317,6 +894,7 @@ const NODE_VISIBILITY_PROBE = String.raw`function() {
     inViewport,
     centerHitTarget,
     occluded,
+    valueState,
     ...(occludedBy ? { occludedBy } : {}),
     reason: reasons.join('+'),
   };
@@ -462,10 +1040,21 @@ export async function captureCDPPageSensingSnapshot(
           route,
           navigatedFrameUrl,
         });
-        const accessibility = await enrichAccessibilityTreeLocators(
+        const accessibilityFromAx = await enrichAccessibilityTreeLocators(
           tabId,
           summarizeAccessibilityTree(accessibilityTreeResult),
           partialErrors,
+        );
+        const visibleDomControlCandidates = parseVisibleDomControlCandidates(
+          pageState?.visibleFormControls,
+        );
+        const accessibility = mergeVisibleDomControlCandidates(
+          accessibilityFromAx,
+          visibleDomControlCandidates,
+        );
+        const domControlScan = parseDomControlScan(
+          pageState?.domControlScan,
+          visibleDomControlCandidates.length,
         );
 
         return {
@@ -488,6 +1077,7 @@ export async function captureCDPPageSensingSnapshot(
           networkResources: networkResources ?? undefined,
           networkActivity: networkActivityResolved,
           console: consoleSummaryBounded,
+          ...(domControlScan ? { domControlScan } : {}),
           accessibility: accessibility ?? undefined,
           ...(partialErrors.length > 0 ? { partialErrors } : {}),
         };
@@ -758,6 +1348,196 @@ function summarizeAccessibilityTree(treeResult: unknown): CDPAccessibilitySummar
   };
 }
 
+function parseVisibleDomControlCandidates(value: unknown): CDPAccessibilityObjectCandidate[] {
+  if (!Array.isArray(value)) return [];
+  const candidates: CDPAccessibilityObjectCandidate[] = [];
+  const seenSelectors = new Set<string>();
+  for (const rawCandidate of value.slice(0, 24)) {
+    const record = asRecord(rawCandidate);
+    if (!record) continue;
+    const role = asString(record.role)?.trim().toLowerCase();
+    const cssSelector = asString(record.cssSelector)?.trim();
+    const nodeName = safeCssIdentifier(asString(record.nodeName) || '');
+    if (
+      !role ||
+      !['searchbox', 'textbox', 'combobox', 'spinbutton', 'button'].includes(role) ||
+      !cssSelector ||
+      cssSelector.length > 240 ||
+      !selectorLooksStableForDomControl(cssSelector) ||
+      seenSelectors.has(cssSelector)
+    ) {
+      continue;
+    }
+    const visualBounds = parseElementRect(record.visualBounds);
+    const visibilityProbe = parseNodeVisibilityProbe(record.visibilityProbe);
+    if (
+      !visualBounds ||
+      !visibilityProbe ||
+      !visibilityProbe.domVisible ||
+      !visibilityProbe.inViewport
+    ) {
+      continue;
+    }
+    const rawLabel = truncateText(record.label);
+    const label = safeAttributeValue(rawLabel) || role;
+    const actionTypes = Array.isArray(record.actionTypes)
+      ? Array.from(
+          new Set(
+            record.actionTypes
+              .map((action) => asString(action)?.trim().toLowerCase())
+              .filter(
+                (action): action is string =>
+                  action === 'focus' ||
+                  action === 'setvalue' ||
+                  action === 'open' ||
+                  action === 'click',
+              ),
+          ),
+        ).slice(0, 4)
+      : ['focus', 'setvalue'];
+    const disabled = typeof record.disabled === 'boolean' ? record.disabled : undefined;
+    candidates.push({
+      role,
+      label,
+      locator: {
+        source: 'cdp_dom',
+        cssSelector,
+        ...(nodeName ? { nodeName } : {}),
+        visualBounds,
+      },
+      actionTypes,
+      state: typeof disabled === 'boolean' ? { disabled } : {},
+      visibilityProbe,
+    });
+    seenSelectors.add(cssSelector);
+  }
+  return candidates;
+}
+
+function parseDomControlScan(
+  value: unknown,
+  parsedCandidateCount: number,
+): CDPDomControlScanSummary | undefined {
+  const record = asRecord(value);
+  if (!record) return undefined;
+  const queriedCount = asNonNegativeInteger(record.queriedCount);
+  const uniqueSelectorCount = asNonNegativeInteger(record.uniqueSelectorCount);
+  const visibleInViewportCount = asNonNegativeInteger(record.visibleInViewportCount);
+  const candidateCount = asNonNegativeInteger(record.candidateCount);
+  if (
+    queriedCount === undefined ||
+    uniqueSelectorCount === undefined ||
+    visibleInViewportCount === undefined ||
+    candidateCount === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    queriedCount,
+    uniqueSelectorCount,
+    visibleInViewportCount,
+    candidateCount,
+    parsedCandidateCount,
+  };
+}
+
+function mergeVisibleDomControlCandidates(
+  summary: CDPAccessibilitySummary | undefined,
+  domCandidates: CDPAccessibilityObjectCandidate[],
+): CDPAccessibilitySummary | undefined {
+  if (domCandidates.length === 0) return summary;
+  const base: CDPAccessibilitySummary = summary ?? {
+    totalNodes: 0,
+    actionableNodeCount: 0,
+    actionableRoleTop: [],
+    actionableSampleLabels: [],
+    stateSignals: { checkedCount: 0, selectedCount: 0, expandedCount: 0, disabledCount: 0 },
+    locatorCoverage: {
+      locatorCandidateCount: 0,
+      axNodeIdCount: 0,
+      backendDOMNodeIdCount: 0,
+      locatorCoverageRate: 0,
+    },
+    objectCandidates: [],
+  };
+  const combined = [...base.objectCandidates];
+  for (const domCandidate of domCandidates) {
+    const selector = domCandidate.locator?.cssSelector;
+    const matchingIndex = selector
+      ? combined.findIndex((candidate) => candidate.locator?.cssSelector === selector)
+      : -1;
+    if (matchingIndex >= 0) {
+      const existing = combined[matchingIndex];
+      const disabled = existing.state.disabled === true || domCandidate.state.disabled === true;
+      combined[matchingIndex] = {
+        ...existing,
+        actionTypes: disabled ? [] : existing.actionTypes,
+        state: {
+          ...existing.state,
+          ...domCandidate.state,
+          ...(disabled ? { disabled: true } : {}),
+        },
+        visibilityProbe: domCandidate.visibilityProbe ?? existing.visibilityProbe,
+      };
+      continue;
+    }
+    combined.push(domCandidate);
+  }
+  const ranked = combined.map((candidate, index) => ({
+    candidate,
+    index,
+    score: scoreAccessibilityObjectCandidate(candidate),
+  }));
+  const objectCandidates = selectAccessibilityObjectCandidates(ranked);
+  const disabledObjectCandidateCount = objectCandidates.filter(
+    (candidate) => candidate.state.disabled === true,
+  ).length;
+  return {
+    ...base,
+    stateSignals: {
+      ...base.stateSignals,
+      disabledCount: Math.max(base.stateSignals.disabledCount, disabledObjectCandidateCount),
+    },
+    objectCandidates,
+  };
+}
+
+function selectorLooksStableForDomControl(selector: string): boolean {
+  const simpleSelectorLooksStable = (value: string): boolean =>
+    /^#[A-Za-z0-9_-]+$/.test(value) ||
+    /^(input|textarea|select|button|div|span|a|svg|\*)\[(data-testid|data-test|data-cy|aria-label|name)=/i.test(
+      value,
+    ) ||
+    /^(input|textarea|select|button|div|span|a|svg)\.[A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_-]*)?$/i.test(
+      value,
+    );
+  if (simpleSelectorLooksStable(selector)) return true;
+  const relational = selector.match(/^([^()\s]+):has\(([^()\s]+)\) ([^()\s]+)$/);
+  return Boolean(
+    relational &&
+    simpleSelectorLooksStable(relational[1] || '') &&
+    simpleSelectorLooksStable(relational[2] || '') &&
+    simpleSelectorLooksStable(relational[3] || ''),
+  );
+}
+
+function parseElementRect(value: unknown): CDPElementRect | undefined {
+  const record = asRecord(value);
+  if (!record) return undefined;
+  const x = Number(record.x);
+  const y = Number(record.y);
+  const width = Number(record.width);
+  const height = Number(record.height);
+  if (![x, y, width, height].every((item) => Number.isFinite(item))) return undefined;
+  if (width <= 0 || height <= 0) return undefined;
+  return {
+    x: Math.round(x),
+    y: Math.round(y),
+    width: Math.round(width),
+    height: Math.round(height),
+  };
+}
+
 function selectAccessibilityObjectCandidates(
   pool: RankedAccessibilityObjectCandidate[],
 ): CDPAccessibilityObjectCandidate[] {
@@ -765,8 +1545,31 @@ function selectAccessibilityObjectCandidates(
     return pool.map((item) => item.candidate);
   }
 
-  return [...pool]
-    .sort((left, right) => right.score - left.score || left.index - right.index)
+  const ranked = [...pool].sort(
+    (left, right) => right.score - left.score || left.index - right.index,
+  );
+  const reservedInputControls = ranked
+    .filter((item) =>
+      ['searchbox', 'textbox', 'combobox', 'spinbutton'].includes(
+        item.candidate.role.toLowerCase(),
+      ),
+    )
+    .slice(0, 4);
+  const reservedDomControls = ranked
+    .filter(
+      (item) =>
+        item.candidate.locator?.source === 'cdp_dom' &&
+        item.candidate.actionTypes.some((action) =>
+          ['click', 'focus', 'setvalue', 'open'].includes(action),
+        ),
+    )
+    .slice(0, 4);
+  const reserved = new Set([...reservedInputControls, ...reservedDomControls]);
+  return [
+    ...reservedInputControls,
+    ...reservedDomControls.filter((item) => !reservedInputControls.includes(item)),
+    ...ranked.filter((item) => !reserved.has(item)),
+  ]
     .slice(0, MAX_ACCESSIBILITY_OBJECT_CANDIDATES)
     .map((item) => item.candidate);
 }
@@ -936,6 +1739,11 @@ function parseNodeVisibilityProbe(value: unknown): NodeVisibilityProbe | undefin
     inViewport: record.inViewport,
     centerHitTarget: typeof record.centerHitTarget === 'boolean' ? record.centerHitTarget : null,
     occluded: record.occluded === true,
+    ...(record.valueState === 'empty' ||
+    record.valueState === 'non_empty' ||
+    record.valueState === 'unknown'
+      ? { valueState: record.valueState }
+      : {}),
     ...(typeof record.occludedBy === 'string' && record.occludedBy.trim()
       ? { occludedBy: record.occludedBy.trim().toLowerCase() }
       : {}),

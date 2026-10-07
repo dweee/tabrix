@@ -877,6 +877,24 @@ function findToolbarControlAction(
   );
 }
 
+function preferredFilterTriggerAction(
+  candidateActions: readonly ReadPageCandidateAction[],
+): ReadPageCandidateAction | undefined {
+  return candidateActions.find((action) => {
+    if (action.intent !== 'search.open_filters') return false;
+    if (!action.locatorChain.length) return false;
+    if (
+      ![
+        'visible_filter_trigger.related_floating_surface',
+        'visible_filter_trigger.search_toolbar',
+      ].includes(action.matchReason)
+    ) {
+      return false;
+    }
+    return isFilterLabel(candidateActionLabel(action));
+  });
+}
+
 function isSortAppliedCandidate(element: ReadPageInteractiveElement | undefined): boolean {
   if (!element) return false;
   if (element.checked === true) return true;
@@ -1801,10 +1819,31 @@ export function buildSearchSurface(params: {
     );
   }
 
-  const filterElement = params.interactiveElements.find(
-    (element) =>
-      isFilterLabel(element.name) && isSearchToolbarRowElement(element, params.interactiveElements),
-  );
+  const recoveredFilterAction = preferredFilterTriggerAction(params.candidateActions);
+  if (recoveredFilterAction) {
+    const label = candidateActionLabel(recoveredFilterAction);
+    if (label) {
+      controls.push(
+        controlForRecoveredAction({
+          kind: 'filter_trigger',
+          label,
+          action: recoveredFilterAction,
+          interactiveElements: params.interactiveElements,
+          reason:
+            'filter trigger preferred an explicit locator-backed search action over an ambiguous same-label page control',
+          confidence: 0.88,
+        }),
+      );
+    }
+  }
+
+  const filterElement = recoveredFilterAction
+    ? undefined
+    : params.interactiveElements.find(
+        (element) =>
+          isFilterLabel(element.name) &&
+          isSearchToolbarRowElement(element, params.interactiveElements),
+      );
   if (filterElement) {
     controls.push(
       controlForElement({

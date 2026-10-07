@@ -155,6 +155,49 @@ describe('visible search surface action collection', () => {
     ]);
   });
 
+  it('preserves an exact current-query suggestion as a snapshot-local search action', async () => {
+    const executeScript = vi.fn().mockResolvedValue([
+      {
+        result: {
+          pageInfo: { url: 'https://example.test/explore' },
+          candidateActions: [
+            {
+              id: 'ca_search_suggestion_image_creation',
+              actionType: 'click',
+              targetRef: 'ref_search_suggestion_image_creation',
+              executionTargetKind: 'snapshot_locator',
+              label: 'Image creation',
+              intent: 'search.select_suggestion',
+              matchReason: 'visible_search_suggestion.exact_current_query',
+              actionability: true,
+              locatorChain: [
+                { type: 'ref', value: 'ref_search_suggestion_image_creation' },
+                { type: 'aria', value: 'Image creation' },
+                { type: 'css', value: 'li[data-query-suggestion="image-creation"]' },
+              ],
+            },
+          ],
+        },
+      },
+    ]);
+
+    const result = await collectVisibleSearchSurfaceActions({
+      tabId: 12,
+      currentUrl: 'https://example.test/explore',
+      pageRole: 'multi_region_page',
+      executeScript,
+    });
+
+    expect(result.actions).toEqual([
+      expect.objectContaining({
+        targetRef: 'ref_search_suggestion_image_creation',
+        executionTargetKind: 'snapshot_locator',
+        intent: 'search.select_suggestion',
+        matchReason: 'visible_search_suggestion.exact_current_query',
+      }),
+    ]);
+  });
+
   it('can be forced when visible regions prove the page has a business surface before role reconciliation', async () => {
     const executeScript = vi.fn().mockResolvedValue([
       {

@@ -7,8 +7,9 @@ import {
 import {
   buildReadPagePageDeltaReport,
   buildReadPageSnapshotSourceStats,
-  consumePendingActionBinding,
+  clearPendingActionBinding,
   getPreviousPageObjectSnapshot,
+  peekPendingActionBinding,
   type PendingActionBinding,
   rememberPageObjectSnapshot,
   resolveTargetObjectId,
@@ -94,11 +95,11 @@ export function buildAndRememberReadPageObjectSensingOutput(
   const objectDeltaSignals = buildReadPageObjectDeltaSignals(objectSensingInput);
   const pageObjectSnapshot = buildReadPageSnapshotSourceStats(objectSensingInput);
   const previousSnapshot = getPreviousPageObjectSnapshot(objectSensingInput.tabId);
-  const consumedPendingActionBinding = consumePendingActionBinding(objectSensingInput.tabId);
-  const pendingActionBinding = consumedPendingActionBinding
+  const pendingActionBindingSnapshot = peekPendingActionBinding(objectSensingInput.tabId);
+  const pendingActionBinding = pendingActionBindingSnapshot
     ? {
-        ...consumedPendingActionBinding,
-        targetObjectId: resolveTargetObjectId(consumedPendingActionBinding, pageObjectSnapshot),
+        ...pendingActionBindingSnapshot,
+        targetObjectId: resolveTargetObjectId(pendingActionBindingSnapshot, pageObjectSnapshot),
       }
     : null;
   const pageDeltaReport = buildReadPagePageDeltaReport({
@@ -120,6 +121,20 @@ export function buildAndRememberReadPageObjectSensingOutput(
     postActionDeltaEvidence,
     pendingActionBinding,
   );
+  const retainForComparableResultRead =
+    Boolean(
+      pendingActionBinding?.actionIntent &&
+      (pendingActionBinding.actionIntent === 'search.submit' ||
+        pendingActionBinding.actionIntent === 'search.category_select' ||
+        pendingActionBinding.actionIntent === 'filter.option_select' ||
+        pendingActionBinding.actionIntent === 'filter.time_range_select' ||
+        pendingActionBinding.actionIntent.startsWith('search.apply_filter.')),
+    ) &&
+    (input.searchResultDelta?.status === 'not_available' ||
+      input.searchResultDelta?.status === 'baseline');
+  if (pendingActionBinding && !retainForComparableResultRead) {
+    clearPendingActionBinding(objectSensingInput.tabId, pendingActionBinding.actionId);
+  }
 
   rememberPageObjectSnapshot(objectSensingInput.tabId, pageObjectSnapshot, objectDeltaSignals);
 

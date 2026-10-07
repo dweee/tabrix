@@ -53,8 +53,10 @@ function createTaskPageContextReader(
   if (!taskContext) return null;
   const toSnapshot = () => {
     const measurement = taskContext.peekReadPageContextMeasurement();
-    if (!measurement || measurement.fullReadByteLength <= 0) return undefined;
+    if (!measurement) return undefined;
     return {
+      contextSource: 'live_snapshot' as const,
+      currentPageValidated: true,
       fullReadByteLength: measurement.fullReadByteLength,
       candidateActionCount: measurement.candidateActionsCount,
       highValueObjectCount: measurement.highValueObjectCount,
@@ -181,6 +183,7 @@ export interface NativeToolHandlerDeps {
     | 'flushAndProjectMkeIdle'
     | 'flushAndProjectMkeAfterAiFeedback'
     | 'revokeMkeExperienceForTrace'
+    | 'recordMkeSelectedArtifactOutcome'
     | 'browserObjects'
   > & {
     memoryTraces?: SessionManager['memoryTraces'];
@@ -309,13 +312,16 @@ function persistChooseContextDecision(
       ? argsObj.pageRole
       : (result.resolved?.pageRole ?? null);
 
-  // Always sync the URL/pageRole first. If they changed since the
-  // prior read on this context, `noteUrlChange` clears `lastReadLayer`
-  // / `targetRefsSeen` AND any prior chooser decision so the snapshot
-  // we are about to write is the only authority. Idempotent same-page
-  // calls are a no-op so a chooser that re-runs on the SAME page does
-  // not clobber its own decision.
-  taskContext.noteUrlChange(url, pageRole);
+  // A chooser may intentionally omit page identity when it only needs
+  // planning guidance. Missing optional hints are not a navigation to an
+  // empty page: clearing the task context here would discard a successful
+  // same-tab read and make the next fully-identified chooser call fail its
+  // current-page validation. Only an explicit URL can supersede the observed
+  // page identity; `noteUrlChange` still invalidates on an actual URL/role
+  // change.
+  if (url !== null) {
+    taskContext.noteUrlChange(url, pageRole);
+  }
 
   const sourceRoute = result.sourceRoute as LayerSourceRoute;
 
@@ -433,10 +439,12 @@ function extractCurrentPageValidation(
 const handleTabrixChooseContextRecordOutcome: NativeToolHandler = (args, deps) => {
   const result = runTabrixChooseContextRecordOutcome(args, {
     telemetry: deps.sessionManager.chooseContextTelemetry,
+    recordSelectedArtifactOutcome: (input) =>
+      deps.sessionManager.recordMkeSelectedArtifactOutcome(input),
   });
-  // Only `invalid_input` is a structural error; `unknown_decision` is
-  // a legitimate response the caller can branch on.
-  return jsonResult(result, result.status === 'invalid_input');
+  // `unknown_decision` is a legitimate absence response. Invalid input and
+  // an atomic write failure are actionable MCP errors.
+  return jsonResult(result, result.status === 'invalid_input' || result.status === 'write_failed');
 };
 
 /**

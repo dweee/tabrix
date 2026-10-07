@@ -847,6 +847,22 @@ export class TaskSessionContext {
   }
 
   /**
+   * Absorb page identity discovered by a successful read. A role learned for
+   * the first time enriches the current page without manufacturing a second
+   * navigation event after an explicit navigate call. A conflicting known
+   * role still uses the normal invalidation path.
+   */
+  public noteReadPageIdentity(url: string | null, pageRole?: string | null): void {
+    const nextUrl = typeof url === 'string' && url.length > 0 ? url : null;
+    const nextRole = typeof pageRole === 'string' && pageRole.length > 0 ? pageRole : null;
+    if (nextUrl === this.currentUrl && this.pageRole === null && nextRole !== null) {
+      this.pageRole = nextRole;
+      return;
+    }
+    this.noteUrlChange(nextUrl, nextRole);
+  }
+
+  /**
    * Record a `choose_context` decision so the `chrome_read_page` shim can ask
    * the orchestrator whether to skip the next read. The orchestrator NEVER
    * infers a route on its own; the chooser is the only authority.
@@ -1657,16 +1673,7 @@ export class TaskSessionContext {
   }
 
   public notePageInteraction(input: NotePageInteractionInput): void {
-    this.lastReadLayer = null;
-    this.lastReadRequestKey = null;
-    this.lastReadSource = null;
-    this.lastReadPageContextMeasurement = null;
-    this.targetRefsSeen.clear();
-    this._chooseContextDecision = null;
-    this.liveObservedApiData.length = 0;
-    this.liveObservedApiEvidence.length = 0;
-    this.visibleRegionRows = null;
-    this.domRegionRowsReadbackAccumulator = null;
+    this.invalidateReadReuseState();
     this.lastVerifiedBusinessInteractionBinding = null;
     const tabId =
       typeof input.tabId === 'number' && Number.isInteger(input.tabId) && input.tabId > 0
@@ -1691,6 +1698,42 @@ export class TaskSessionContext {
       invalidatedRefs: ['interaction_may_change_page', ...normalizeTargetRefs(input.targetRefs)],
       projectionId: input.action,
     });
+  }
+
+  public noteFreshReadRequiredAfterUncertainInteraction(input: {
+    action: string;
+    tabId?: number | null;
+    targetRefs?: readonly string[];
+  }): void {
+    this.invalidateReadReuseState();
+    const tabId =
+      typeof input.tabId === 'number' && Number.isInteger(input.tabId) && input.tabId > 0
+        ? input.tabId
+        : null;
+    this.recordLifecycleEvent({
+      kind: 'refs_invalidated',
+      url: this.currentUrl,
+      pageRole: this.pageRole,
+      tabId: tabId ?? undefined,
+      invalidatedRefs: [
+        'fresh_read_required_after_uncertain_interaction',
+        ...normalizeTargetRefs(input.targetRefs),
+      ],
+      projectionId: input.action,
+    });
+  }
+
+  private invalidateReadReuseState(): void {
+    this.lastReadLayer = null;
+    this.lastReadRequestKey = null;
+    this.lastReadSource = null;
+    this.lastReadPageContextMeasurement = null;
+    this.targetRefsSeen.clear();
+    this._chooseContextDecision = null;
+    this.liveObservedApiData.length = 0;
+    this.liveObservedApiEvidence.length = 0;
+    this.visibleRegionRows = null;
+    this.domRegionRowsReadbackAccumulator = null;
   }
 
   public consumePendingPageInteraction(
@@ -2459,22 +2502,29 @@ function buildPageStabilityResumeBlockReason(input: {
   const status = normalizeIdentifier(runtimeFields.currentPageLoadReadinessStatus);
   const pageStability = normalizeIdentifier(runtimeFields.currentPageStability);
   const explicitlyNotUsable = runtimeFields.currentPageSnapshotUsableForBusinessAction === false;
+  const nextStepHint = normalizeIdentifier(runtimeFields.currentPageLoadReadinessNextStepHint);
+  const provisionalCdpLocatorAction =
+    runtimeFields.currentPageSnapshotUsableForBusinessAction === true &&
+    ((status === 'cdp_ax_actionable_after_wait' &&
+      nextStepHint === 'use_current_cdp_ax_candidate_then_immediately_force_fresh_same_tab_read') ||
+      (status === 'cdp_dom_actionable_after_wait' &&
+        nextStepHint ===
+          'use_current_cdp_dom_candidate_then_immediately_force_fresh_same_tab_read'));
+  if (provisionalCdpLocatorAction) return null;
   const notReadyStatus = status === 'loading_after_wait' || status === 'stale';
   const unstablePage =
     pageStability === 'loading' || pageStability === 'changing' || pageStability === 'stale';
   if (!explicitlyNotUsable && !notReadyStatus && !unstablePage) return null;
 
   const blockTabId = input.tabId ?? projectionTabId;
-  const nextStepHint =
-    normalizeIdentifier(runtimeFields.currentPageLoadReadinessNextStepHint) ??
-    'run_chrome_read_page_force_refresh';
+  const requiredNextStepHint = nextStepHint ?? 'run_chrome_read_page_force_refresh';
   return {
     tabId: blockTabId,
     reason: [
       'page_load_readiness_not_ready',
       `status:${status ?? 'unknown'}`,
       `pageStability:${pageStability ?? 'unknown'}`,
-      `nextStepHint:${nextStepHint}`,
+      `nextStepHint:${requiredNextStepHint}`,
     ].join(':'),
     claimBoundary:
       'The latest same-tab read_page snapshot was not proven stable enough for business action. Run a fresh same-tab read after the page settles before clicking, typing, or resuming task work.',

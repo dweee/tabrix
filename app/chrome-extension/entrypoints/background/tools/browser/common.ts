@@ -9,11 +9,63 @@ import {
 } from '../../browser-world-inventory';
 import { preflightCloseTabs, type CloseTabsPreflightEvidence } from './close-tabs-preflight';
 import { recordPendingActionBinding } from './read-page-object-delta';
+import { cdpSessionManager } from '@/utils/cdp-session-manager';
 
 // Default window dimensions
 const DEFAULT_WINDOW_WIDTH = 1280;
 const DEFAULT_WINDOW_HEIGHT = 720;
 const NAVIGATE_CREATE_TAB_TIMEOUT_MS = 5000;
+const SWITCH_TAB_FOREGROUND_CDP_OWNER = 'switch-tab-foreground-recovery';
+
+type CdpForegroundRecovery = {
+  attempted: boolean;
+  succeeded: boolean;
+  methodsAttempted: string[];
+  methodsSucceeded: string[];
+  errors: string[];
+};
+
+async function tryBringPageToFrontWithCdp(tabId: number): Promise<CdpForegroundRecovery> {
+  const methodsAttempted = [
+    'Page.bringToFront',
+    'Emulation.setFocusEmulationEnabled',
+    'Page.setWebLifecycleState',
+  ];
+  const methodsSucceeded: string[] = [];
+  const errors: string[] = [];
+  await cdpSessionManager
+    .withSession(tabId, SWITCH_TAB_FOREGROUND_CDP_OWNER, async () => {
+      const commands: Array<{ method: string; params?: Record<string, unknown> }> = [
+        { method: 'Page.bringToFront' },
+        { method: 'Emulation.setFocusEmulationEnabled', params: { enabled: true } },
+        { method: 'Page.setWebLifecycleState', params: { state: 'active' } },
+      ];
+      for (const command of commands) {
+        try {
+          await cdpSessionManager.sendCommand(tabId, command.method, command.params);
+          methodsSucceeded.push(command.method);
+        } catch (error) {
+          const message = (error instanceof Error ? error.message : String(error))
+            .replace(/\s+/g, ' ')
+            .slice(0, 140);
+          errors.push(`${command.method}: ${message}`);
+        }
+      }
+    })
+    .catch((error) => {
+      const message = (error instanceof Error ? error.message : String(error))
+        .replace(/\s+/g, ' ')
+        .slice(0, 140);
+      errors.push(`session: ${message}`);
+    });
+  return {
+    attempted: true,
+    succeeded: methodsSucceeded.length > 0,
+    methodsAttempted,
+    methodsSucceeded,
+    errors,
+  };
+}
 
 interface NavigateToolParams {
   url?: string;
@@ -1459,10 +1511,26 @@ class SwitchTabTool extends BaseBrowserToolExecutor {
           ? null
           : await this.waitForTabSettled(tabId, { timeoutMs: 5000 });
       const updatedTab = settleResult?.tab || activationResult.tab;
-      const foregroundProof = await this.waitForTabForegroundProof(tabId, {
+      let foregroundProof = await this.waitForTabForegroundProof(tabId, {
         chromeWindowFocused: activationResult.windowFocused,
         chromeTabActive: activationResult.activated,
       });
+      let cdpForegroundRecovery: CdpForegroundRecovery | null = null;
+      const canUseCdpForegroundRecovery =
+        foregroundProof.verdict !== 'proven_foreground' &&
+        foregroundProof.documentVisibilityState !== 'visible' &&
+        activationResult.windowFocused &&
+        activationResult.activated &&
+        /^https?:/i.test(updatedTab.url || '');
+      if (canUseCdpForegroundRecovery) {
+        cdpForegroundRecovery = await tryBringPageToFrontWithCdp(tabId);
+        if (cdpForegroundRecovery.succeeded) {
+          foregroundProof = await this.waitForTabForegroundProof(tabId, {
+            chromeWindowFocused: activationResult.windowFocused,
+            chromeTabActive: activationResult.activated,
+          });
+        }
+      }
       markBrowserWorldTabAiOperated(updatedTab.id, 'switch_tab', {
         confidence: foregroundProof.verdict === 'proven_foreground' ? 0.95 : 0.45,
         evidenceLabel:
@@ -1485,6 +1553,7 @@ class SwitchTabTool extends BaseBrowserToolExecutor {
               activationWaitedMs: activationResult.waitedMs,
               windowFocused: activationResult.windowFocused,
               foregroundActivation: foregroundProof,
+              cdpForegroundRecovery,
               foregroundActivationVerdict: foregroundProof.verdict,
               documentVisibilityState: foregroundProof.documentVisibilityState,
               documentHasFocus: foregroundProof.documentHasFocus,

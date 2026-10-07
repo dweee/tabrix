@@ -33,7 +33,10 @@ import {
   type MkeExperienceProjectionResult,
 } from '../memory/mke-experience-projector';
 import { KnowledgeApiRepository } from '../memory/knowledge/knowledge-api-repository';
-import { ChooseContextTelemetryRepository } from '../memory/telemetry/choose-context-telemetry';
+import {
+  ChooseContextTelemetryRepository,
+  type SelectedChooseContextArtifactAudit,
+} from '../memory/telemetry/choose-context-telemetry';
 import { TaskSessionContext } from './task-session-context';
 
 const MKE_IDLE_PROJECTION_BATCH_LIMIT = 250;
@@ -347,10 +350,18 @@ export class SessionManager {
     this.scheduleMkeProjectionIdle();
   }
 
-  public async flushAndProjectMkeAfterAiFeedback(): Promise<{
+  public async flushAndProjectMkeAfterAiFeedback(traceId?: string): Promise<{
     knowledge: MkeKnowledgeProjectionResult | null;
     experience: MkeExperienceProjectionResult | null;
   }> {
+    if (traceId && this.mkeExperienceProjector) {
+      await this.flushMkeMemoryTraceWrites();
+      const knowledge = this.drainMkeKnowledgeProjectionIdle();
+      const experience = this.mkeExperienceProjector.projectIdleBatch({
+        contextTraceId: traceId,
+      });
+      return { knowledge, experience };
+    }
     return this.flushAndProjectMkeIdle({ resetExperienceCursor: true });
   }
 
@@ -767,7 +778,73 @@ export class SessionManager {
     return this.repos.experienceRecipe.findReusableByContext(input);
   }
 
-  public revokeMkeExperienceForTrace(input: { traceId: string; nowIso?: string }): {
+  public recordMkeSelectedArtifactOutcome(input: {
+    successful: boolean;
+    adopted: boolean;
+    selectedArtifacts: SelectedChooseContextArtifactAudit[];
+    recordedAt: string;
+  }): { updatedExperienceCount: number; updatedKnowledgeCount: number } {
+    if (!this.repos) {
+      return { updatedExperienceCount: 0, updatedKnowledgeCount: 0 };
+    }
+
+    let updatedExperienceCount = 0;
+    let updatedKnowledgeCount = 0;
+    const seen = new Set<string>();
+    for (const artifact of input.selectedArtifacts) {
+      const identity = `${artifact.kind}:${artifact.ref}`;
+      if (seen.has(identity)) continue;
+      seen.add(identity);
+
+      if (artifact.kind === 'experience_recipe') {
+        if (!this.repos.experienceRecipe.get(artifact.ref)) continue;
+        this.repos.experienceRecipe.recordUseOutcome({
+          experienceId: artifact.ref,
+          successful: input.successful,
+          adopted: input.adopted,
+          nowIso: input.recordedAt,
+        });
+        updatedExperienceCount += 1;
+        continue;
+      }
+
+      if (artifact.kind === 'knowledge_page_model') {
+        const knowledge = this.repos.knowledgeModel.get(artifact.ref);
+        if (!knowledge) continue;
+        const nextSuccessfulUseCount = knowledge.successfulUseCount + (input.successful ? 1 : 0);
+        const nextFailedUseCount = knowledge.failedUseCount + (input.successful ? 0 : 1);
+        const totalUseCount = nextSuccessfulUseCount + nextFailedUseCount;
+        this.repos.knowledgeModel.markValidated({
+          knowledgeId: artifact.ref,
+          successful: input.successful,
+          confidenceScore:
+            totalUseCount > 0
+              ? Number((nextSuccessfulUseCount / totalUseCount).toFixed(4))
+              : knowledge.confidenceScore,
+          nowIso: input.recordedAt,
+        });
+        updatedKnowledgeCount += 1;
+        continue;
+      }
+
+      if (artifact.kind === 'knowledge_api') {
+        const updated = this.repos.knowledgeApi.recordUseOutcome({
+          endpointId: artifact.ref,
+          successful: input.successful,
+          nowIso: input.recordedAt,
+        });
+        if (updated) updatedKnowledgeCount += 1;
+      }
+    }
+
+    return { updatedExperienceCount, updatedKnowledgeCount };
+  }
+
+  public revokeMkeExperienceForTrace(input: {
+    traceId: string;
+    nowIso?: string;
+    revalidateScenario?: boolean;
+  }): {
     updatedCount: number;
     archivedCount: number;
     affectedExperienceIds: string[];
@@ -783,23 +860,24 @@ export class SessionManager {
     const trace = this.repos.memoryTrace.get(input.traceId);
     const pageModelKey = trace ? buildMkePageModelKey(trace) : null;
     const scenarioRevalidationResult =
-      trace?.siteFamily && pageModelKey
+      input.revalidateScenario === true && trace?.siteFamily && pageModelKey
         ? this.repos.experienceRecipe.requireScenarioRevalidation({
             scenarioKey: `mke:${trace.siteFamily}:${pageModelKey}`,
             nowIso,
             excludeExperienceIds: sourceTraceResult.affectedExperienceIds,
           })
         : { updatedCount: 0, archivedCount: 0, affectedExperienceIds: [] };
+    const affectedExperienceIds = [
+      ...new Set([
+        ...sourceTraceResult.affectedExperienceIds,
+        ...scenarioRevalidationResult.affectedExperienceIds,
+      ]),
+    ];
 
     return {
-      updatedCount: sourceTraceResult.updatedCount + scenarioRevalidationResult.updatedCount,
+      updatedCount: affectedExperienceIds.length,
       archivedCount: sourceTraceResult.archivedCount + scenarioRevalidationResult.archivedCount,
-      affectedExperienceIds: [
-        ...new Set([
-          ...sourceTraceResult.affectedExperienceIds,
-          ...scenarioRevalidationResult.affectedExperienceIds,
-        ]),
-      ],
+      affectedExperienceIds,
     };
   }
 

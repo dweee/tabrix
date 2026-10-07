@@ -53,7 +53,7 @@
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.1.69",
     "@fastify/cors": "^11.0.1",
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "@tabrix/shared": "^2.7.0",
     "@types/node-fetch": "2",
     "better-sqlite3": "^11.6.0",
@@ -61,11 +61,11 @@
     "chrome-devtools-frontend": "^1.0.1643855",
     "commander": "^14.0.3",
     "drizzle-orm": "^0.45.2",
-    "fastify": "^5.8.5",
+    "fastify": "^5.12.5",
     "is-admin": "^4.0.0",
     "node-fetch": "2",
     "pino": "^10.3.1",
-    "uuid": "^11.1.0",
+    "uuid": "^11.1.1",
     "ws": "^8.21.0"
   },
   "devDependencies": {

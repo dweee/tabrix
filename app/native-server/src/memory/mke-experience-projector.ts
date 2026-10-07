@@ -13,6 +13,7 @@ import { buildMkePageModelKey } from './mke-knowledge-projector';
 
 export interface MkeExperienceProjectionInput {
   cursorCreatedAt?: string | null;
+  contextTraceId?: string;
   limit?: number;
   nowIso?: string;
 }
@@ -75,7 +76,9 @@ const TRANSIENT_TARGET_SIGNAL_PATTERN =
   /\b(coordinate|coordinates|coords|mouse[_-]?position|visual[-_]?fallback|screenshot|viewport[-_]?center|viewport[-_]?pixel|bounding[-_]?box)\b|(?:^|[:/_-])rect(?:$|[:/_-])/i;
 
 const BLOCKED_PAGE_SIGNAL_PATTERN =
-  /\b(captcha|recaptcha|challenge|verification|security[-_]?check|human[-_]?check|verify(uuid|type|biz)?|user[_-]?verification[_-]?required|login[_-]?required|auth[_-]?required|access[_-]?denied|restricted)\b|安全验证|人机验证|滑块验证|验证码|登录验证/i;
+  /\b(captcha|recaptcha|challenge|security[-_]?check|human[-_]?check|user[_-]?verification[_-]?required|login[_-]?required|auth[_-]?required|access[_-]?denied|restricted)\b|安全验证|人机验证|滑块验证|验证码|登录验证/i;
+const BLOCKED_PAGE_STATE_PATTERN =
+  /\b(verification[-_]?required|verify(uuid|type|biz)?[-_]?required)\b/i;
 
 const SENSITIVE_KEY_FRAGMENTS = [
   'account',
@@ -105,14 +108,31 @@ const SENSITIVE_KEY_FRAGMENTS = [
 ];
 
 const INTERNAL_SAFE_KEY_NAMES = new Set([
+  'chosentokens',
   'feedbacktoken',
+  'fullreadtokens',
+  'savedtokensestimate',
   'tasksessionid',
+  'tokenestimatechosen',
+  'tokenestimatefullread',
   'tracebindinghash',
+  'tokenssavedestimate',
   'tokenssavedestimatetotal',
 ]);
 
 function normalizeKey(key: string): string {
   return key.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]/g, '');
+}
+
+function matchesSensitiveKeyFragment(normalizedKey: string, fragment: string): boolean {
+  if (fragment === 'otp') {
+    return (
+      normalizedKey === fragment ||
+      normalizedKey.startsWith(fragment) ||
+      normalizedKey.endsWith(fragment)
+    );
+  }
+  return normalizedKey.includes(fragment);
 }
 
 function hasSensitiveKey(value: unknown): boolean {
@@ -122,7 +142,11 @@ function hasSensitiveKey(value: unknown): boolean {
   for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
     const normalized = normalizeKey(key);
     if (INTERNAL_SAFE_KEY_NAMES.has(normalized)) continue;
-    if (SENSITIVE_KEY_FRAGMENTS.some((fragment) => normalized.includes(fragment))) return true;
+    if (
+      SENSITIVE_KEY_FRAGMENTS.some((fragment) => matchesSensitiveKeyFragment(normalized, fragment))
+    ) {
+      return true;
+    }
     if (hasSensitiveKey(child)) return true;
   }
   return false;
@@ -154,6 +178,13 @@ function stringHasBlockedPageSignal(value: string | null | undefined): boolean {
   return typeof value === 'string' && BLOCKED_PAGE_SIGNAL_PATTERN.test(value);
 }
 
+function stringHasBlockedPageStateSignal(value: string | null | undefined): boolean {
+  return (
+    typeof value === 'string' &&
+    (BLOCKED_PAGE_SIGNAL_PATTERN.test(value) || BLOCKED_PAGE_STATE_PATTERN.test(value))
+  );
+}
+
 function valueHasBlockedPageSignal(value: unknown): boolean {
   if (value === null || value === undefined) return false;
   if (typeof value === 'string') return stringHasBlockedPageSignal(value);
@@ -173,8 +204,8 @@ function hasHardNegativeBusinessState(trace: MemoryTrace): boolean {
 function isBlockedOrUnreplayableTrace(trace: MemoryTrace): boolean {
   return (
     hasHardNegativeBusinessState(trace) ||
-    stringHasBlockedPageSignal(trace.errorCode) ||
-    stringHasBlockedPageSignal(trace.pageState) ||
+    stringHasBlockedPageStateSignal(trace.errorCode) ||
+    stringHasBlockedPageStateSignal(trace.pageState) ||
     stringHasBlockedPageSignal(trace.pageUrlPattern) ||
     stringHasBlockedPageSignal(trace.resultSummary) ||
     valueHasBlockedPageSignal(trace.requestParams) ||
@@ -272,15 +303,21 @@ function hasStableActionTarget(trace: MemoryTrace): boolean {
     return true;
   }
   const request = readObject(trace.requestParams);
+  const candidateAction = readObject(request?.candidateAction);
   const target = readObject(trace.actionTarget);
+  const provenTargetBinding =
+    readBoolean(target?.targetBindingProven) === true &&
+    Boolean(readString(target?.resolvedTargetRef) || readString(target?.requestedTargetRef));
   return Boolean(
     readString(request?.ref) ||
     readString(request?.selector) ||
     readString(request?.candidateActionId) ||
+    readString(candidateAction?.targetRef) ||
     readString(target?.ref) ||
     readString(target?.targetRef) ||
     readString(target?.objectId) ||
-    readString(target?.stableTargetRef),
+    readString(target?.stableTargetRef) ||
+    provenTargetBinding,
   );
 }
 
@@ -307,19 +344,76 @@ function hasReplayableQuality(trace: MemoryTrace): boolean {
   return hasStableActionTarget(trace);
 }
 
+function memoryTaskGroupKey(trace: MemoryTrace): string {
+  const browserContextKey = trace.browserContextKey?.trim();
+  if (browserContextKey && !browserContextKey.startsWith('mcp:auto:tab:')) {
+    return `context:${browserContextKey}`;
+  }
+  return `task:${trace.taskId}`;
+}
+
+function directScenarioIdentity(trace: MemoryTrace): string | null {
+  const pageModelKey = buildMkePageModelKey(trace);
+  return trace.siteFamily && pageModelKey ? `${trace.siteFamily}:${pageModelKey}` : null;
+}
+
+function resolveScenarioIdentity(trace: MemoryTrace, taskTraces: MemoryTrace[]): string | null {
+  const direct = directScenarioIdentity(trace);
+  if (direct) return direct;
+  if (typeof trace.tabId !== 'number') return null;
+
+  const traceTime = traceTimeMs(trace);
+  let best: { identity: string; distance: number; isAfter: boolean } | null = null;
+  for (const candidate of taskTraces) {
+    if (candidate.traceId === trace.traceId || candidate.tabId !== trace.tabId) continue;
+    const identity = directScenarioIdentity(candidate);
+    if (!identity) continue;
+    const candidateTime = traceTimeMs(candidate);
+    const next = {
+      identity,
+      distance: Math.abs(candidateTime - traceTime),
+      isAfter: candidateTime > traceTime,
+    };
+    if (
+      !best ||
+      next.distance < best.distance ||
+      (next.distance === best.distance && best.isAfter && !next.isAfter)
+    ) {
+      best = next;
+    }
+  }
+  return best?.identity ?? null;
+}
+
 function groupByTask(traces: MemoryTrace[]): TaskTraceGroup[] {
-  const groups = new Map<string, MemoryTrace[]>();
+  const taskGroups = new Map<string, MemoryTrace[]>();
   for (const trace of traces) {
-    const taskTraces = groups.get(trace.taskId);
+    const groupKey = memoryTaskGroupKey(trace);
+    const taskTraces = taskGroups.get(groupKey);
     if (taskTraces) {
       taskTraces.push(trace);
     } else {
-      groups.set(trace.taskId, [trace]);
+      taskGroups.set(groupKey, [trace]);
     }
   }
-  return [...groups.entries()].map(([taskId, taskTraces]) => ({
+
+  const scenarioGroups = new Map<string, MemoryTrace[]>();
+  for (const [taskKey, taskTraces] of taskGroups) {
+    for (const trace of taskTraces) {
+      const scenarioIdentity = resolveScenarioIdentity(trace, taskTraces);
+      const scenarioKey = `${taskKey}|scenario:${scenarioIdentity ?? 'unanchored'}`;
+      const scenarioTraces = scenarioGroups.get(scenarioKey);
+      if (scenarioTraces) {
+        scenarioTraces.push(trace);
+      } else {
+        scenarioGroups.set(scenarioKey, [trace]);
+      }
+    }
+  }
+
+  return [...scenarioGroups.entries()].map(([taskId, scenarioTraces]) => ({
     taskId,
-    traces: taskTraces,
+    traces: scenarioTraces,
   }));
 }
 
@@ -385,12 +479,18 @@ function choosePageAnchor(input: {
 
 function buildTargetTemplate(trace: MemoryTrace): Record<string, unknown> {
   const request = readObject(trace.requestParams);
+  const candidateAction = readObject(request?.candidateAction);
+  const candidateActionIntent = readString(candidateAction?.intent);
   return {
-    targetPolicy: readString(request?.ref)
-      ? 'reuse_current_page_target_hint'
-      : 'discover_current_page_target',
+    targetPolicy:
+      candidateActionIntent !== null
+        ? 'discover_by_candidate_intent'
+        : readString(request?.ref)
+          ? 'reuse_current_page_target_hint'
+          : 'discover_current_page_target',
     selectorType: readString(request?.selectorType) ?? null,
     candidateActionId: readString(request?.candidateActionId) ?? null,
+    candidateActionIntent,
   };
 }
 
@@ -577,6 +677,20 @@ function buildActionProfile(trace: MemoryTrace): Record<string, unknown> {
       selectedDataSource: reuseProfile.selectedDataSource,
     };
   }
+  if (trace.toolName === 'chrome_click_element' || trace.toolName === 'chrome_fill_or_select') {
+    const request = readObject(trace.requestParams);
+    const candidateAction = readObject(request?.candidateAction);
+    const postActionDelta = readObject(trace.postActionDelta);
+    const interaction =
+      readString(request?.interaction) ??
+      readString(postActionDelta?.actionKind) ??
+      (trace.toolName === 'chrome_click_element' ? 'click' : null);
+    return {
+      toolName: trace.toolName,
+      interaction,
+      candidateActionIntent: readString(candidateAction?.intent),
+    };
+  }
   return { toolName: trace.toolName };
 }
 
@@ -601,11 +715,23 @@ function buildRecipeBasis(
   allTraces: MemoryTrace[],
 ): RecipeBasis | null {
   const feedbackRequiredTraces = group.traces.filter(shouldRequestAiFeedbackForTrace);
-  if (feedbackRequiredTraces.some((trace) => !isBusinessAchieved(trace))) return null;
+  if (feedbackRequiredTraces.some((trace) => !hasAiFeedbackTrace(trace))) return null;
+  if (
+    feedbackRequiredTraces.some(
+      (trace) => hasAiFeedbackBusinessFailure(trace) || hasHardNegativeBusinessState(trace),
+    )
+  ) {
+    return null;
+  }
+  const reusableCandidateTraces = group.traces.filter((trace) => !hasAiExperienceReuseVeto(trace));
+  const reusableFeedbackTraces = feedbackRequiredTraces.filter(
+    (trace) => !hasAiExperienceReuseVeto(trace),
+  );
+  if (reusableFeedbackTraces.some((trace) => !isBusinessAchieved(trace))) return null;
   if (feedbackRequiredTraces.some(isBlockingUntemplatedTaskStep)) return null;
-  const sourceTraces = group.traces.filter(isBusinessAchieved);
+  const sourceTraces = reusableCandidateTraces.filter(isBusinessAchieved);
 
-  const replayableActionTraces = group.traces.filter(
+  const replayableActionTraces = reusableCandidateTraces.filter(
     (trace) =>
       REPLAYABLE_ACTION_TOOLS.has(trace.toolName) &&
       trace.toolSuccess === true &&
@@ -815,10 +941,18 @@ export class MkeExperienceProjector {
   ) {}
 
   public projectIdleBatch(input: MkeExperienceProjectionInput = {}): MkeExperienceProjectionResult {
-    const traces = this.traceRepo.listAfter({
-      cursorCreatedAt: input.cursorCreatedAt ?? null,
-      limit: input.limit ?? 100,
-    });
+    const contextTrace = input.contextTraceId
+      ? this.traceRepo.get(input.contextTraceId)
+      : undefined;
+    const explicitBrowserContextKey = contextTrace?.browserContextKey?.trim();
+    const traces = contextTrace
+      ? explicitBrowserContextKey && !explicitBrowserContextKey.startsWith('mcp:auto:tab:')
+        ? this.traceRepo.listByBrowserContextKey(explicitBrowserContextKey)
+        : this.traceRepo.listByTask(contextTrace.taskId)
+      : this.traceRepo.listAfter({
+          cursorCreatedAt: input.cursorCreatedAt ?? null,
+          limit: input.limit ?? 100,
+        });
     if (traces.length === 0) {
       return {
         processedTraceCount: 0,
@@ -837,6 +971,16 @@ export class MkeExperienceProjector {
     }
 
     const nowIso = input.nowIso ?? new Date().toISOString();
+    const contextualSupportTraces = contextTrace
+      ? [
+          ...new Map(
+            [...traces, ...this.traceRepo.listRecent({ limit: 200 })].map((trace) => [
+              trace.traceId,
+              trace,
+            ]),
+          ).values(),
+        ]
+      : traces;
     const savedById = new Map<string, ExperienceRecipe>();
     let skippedTraceCount = 0;
     let rejectedSensitiveSequenceCount = 0;
@@ -853,9 +997,13 @@ export class MkeExperienceProjector {
         skippedTraceCount += group.traces.length;
         continue;
       }
-      const basis = buildRecipeBasis(group, this.knowledgeRepo, traces);
+      const basis = buildRecipeBasis(group, this.knowledgeRepo, contextualSupportTraces);
       if (!basis) {
-        const rejection = countRecipeRejectionSignals(group, this.knowledgeRepo, traces);
+        const rejection = countRecipeRejectionSignals(
+          group,
+          this.knowledgeRepo,
+          contextualSupportTraces,
+        );
         missingAiFeedbackTraceCount += rejection.missingAiFeedbackTraceCount;
         rejectedBusinessFailureTraceCount += rejection.rejectedBusinessFailureTraceCount;
         rejectedUnreplayableQualityTraceCount += rejection.rejectedUnreplayableQualityTraceCount;

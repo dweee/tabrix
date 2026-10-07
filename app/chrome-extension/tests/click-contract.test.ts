@@ -7,6 +7,7 @@ import { isClickSuccessOutcome } from '@tabrix/shared';
 import {
   buildClickActionEvidenceResult,
   buildClickHelperDispatchTimingPolicy,
+  buildClickHelperResponseTimeoutMs,
   buildStructuredClickHelperErrorResult,
   mergeClickSignals,
   observeNewTabUntil,
@@ -506,6 +507,30 @@ describe('buildClickHelperDispatchTimingPolicy', () => {
       timeout: 13000,
       reason: 'lightweight_post_action_intent',
     });
+  });
+
+  it('does not shorten dynamic filter verification to the generic default click timeout', () => {
+    expect(
+      buildClickHelperDispatchTimingPolicy({
+        waitForNavigation: false,
+        timeout: 5000,
+        intent: 'filter.option_select',
+      }),
+    ).toEqual({
+      waitForNavigation: false,
+      timeout: 13000,
+      reason: 'lightweight_post_action_intent',
+    });
+  });
+
+  it('keeps a scheduler margin after dynamic post-action verification before timing out the bridge', () => {
+    const policy = buildClickHelperDispatchTimingPolicy({
+      waitForNavigation: false,
+      timeout: 5000,
+      intent: 'search.apply_filter.sort',
+    });
+
+    expect(buildClickHelperResponseTimeoutMs(policy)).toBe(16000);
   });
 
   it('treats objectized search filter controls as lightweight panel clicks', () => {

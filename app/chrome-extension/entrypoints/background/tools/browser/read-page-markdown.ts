@@ -111,11 +111,22 @@ export function buildMarkdownProjection(params: BuildMarkdownProjectionParams): 
   // Interactive elements section is helpful for reading but secondary
   // to the curated HVO list. We still cap it tightly so a long page
   // does not blow the Markdown payload back up to JSON-sized cost.
+  // Dedup identity is role + name + href: same-name links that point at
+  // different addresses (e.g. /items/alpha vs /items/beta) must all be
+  // kept, while an exact same-name/same-href repeat still collapses.
+  // The href participates verbatim — no lowercasing, no query/fragment
+  // normalization — so case or query differences count as different
+  // addresses. Missing href renders as '' and keeps the old behaviour
+  // (href-less duplicates of the same role+name still dedupe).
   const seenLabels = new Set<string>();
   const interactiveLines: string[] = [];
   for (const item of params.interactiveElements) {
     if (interactiveLines.length >= MAX_INTERACTIVE_LINES) break;
-    const dedupKey = `${String(item.role || '').toLowerCase()}|${String(item.name || '').toLowerCase()}`;
+    const dedupKey = JSON.stringify([
+      String(item.role || '').toLowerCase(),
+      String(item.name || '').toLowerCase(),
+      String(item.href || ''),
+    ]);
     if (seenLabels.has(dedupKey)) continue;
     seenLabels.add(dedupKey);
     const line = formatInteractiveLine(item);

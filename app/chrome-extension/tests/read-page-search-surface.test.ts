@@ -594,6 +594,78 @@ describe('buildSearchSurface', () => {
     expect(surface?.controls.find((control) => control.label === '综合')).toBeDefined();
   });
 
+  it('prefers an explicit search filter action over an ambiguous same-label page control', () => {
+    const surface = buildSearchSurface({
+      assistantGuidance: guidance,
+      interactiveElements: [
+        interactive({
+          ref: 'ref_search',
+          role: 'searchbox',
+          name: 'Search',
+          rect: { x: 240, y: 80, width: 640, height: 40 },
+        }),
+        interactive({
+          ref: 'ref_ambiguous_filter',
+          role: 'button',
+          name: '筛选',
+          rect: { x: 1000, y: 96, width: 64, height: 36 },
+        }),
+      ],
+      candidateActions: [
+        candidate({
+          id: 'ca_ambiguous_filter',
+          targetRef: 'ref_ambiguous_filter',
+          intent: 'filter.open',
+        }),
+        candidate({
+          id: 'ca_search_filter',
+          targetRef: 'ref_search_filter',
+          intent: 'search.open_filters',
+          matchReason: 'visible_filter_trigger.search_toolbar',
+          locatorChain: [
+            { type: 'ref', value: 'ref_search_filter' },
+            { type: 'aria', value: '筛选' },
+            { type: 'css', value: '[data-search-filter]' },
+          ],
+        }),
+      ],
+    });
+
+    expect(surface?.controls.find((control) => control.kind === 'filter_trigger')).toMatchObject({
+      targetRef: 'ref_search_filter',
+      candidateActionId: 'ca_search_filter',
+      source: 'text_recovery',
+    });
+  });
+
+  it('does not recover a locator-backed filter action without ownership evidence', () => {
+    const surface = buildSearchSurface({
+      assistantGuidance: guidance,
+      interactiveElements: [
+        interactive({
+          ref: 'ref_search',
+          role: 'searchbox',
+          name: 'Search',
+          rect: { x: 240, y: 80, width: 640, height: 40 },
+        }),
+      ],
+      candidateActions: [
+        candidate({
+          id: 'ca_unowned_filter',
+          targetRef: 'ref_unowned_filter',
+          intent: 'search.open_filters',
+          locatorChain: [
+            { type: 'ref', value: 'ref_unowned_filter' },
+            { type: 'aria', value: '筛选' },
+            { type: 'css', value: '[data-unowned-filter]' },
+          ],
+        }),
+      ],
+    });
+
+    expect(surface?.controls.some((control) => control.kind === 'filter_trigger')).toBe(false);
+  });
+
   it('keeps a locator-backed filter trigger when it is aligned with the search toolbar row', () => {
     const surface = buildSearchSurface({
       assistantGuidance: guidance,

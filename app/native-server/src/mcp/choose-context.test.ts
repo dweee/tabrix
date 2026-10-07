@@ -7,7 +7,12 @@
  * and risk tier presence.
  */
 
-import { TOOL_NAMES, TOOL_RISK_TIERS, type ContextStrategyName } from '@tabrix/shared';
+import {
+  TOOL_NAMES,
+  TOOL_RISK_TIERS,
+  TOOL_SCHEMAS,
+  type ContextStrategyName,
+} from '@tabrix/shared';
 import {
   TabrixChooseContextInputError,
   chooseContextStrategy,
@@ -427,6 +432,10 @@ describe('runTabrixChooseContext (orchestrator)', () => {
     expect(result.fallbackStrategy).toBe('read_page_required');
     expect(spy).toHaveBeenCalledWith('example.test', expect.any(Number));
     expect(result.artifacts?.[0]?.summary).toMatch(/example\.test/);
+    expect(result.artifacts?.[0]).toMatchObject({
+      kind: 'knowledge_api',
+      ref: 'ep-1',
+    });
   });
 
   it('uses local Knowledge by default', () => {
@@ -551,16 +560,19 @@ describe('runTabrixChooseContext (orchestrator)', () => {
 });
 
 describe('B-018 v1 risk tier wiring', () => {
+  it('publishes taskSessionId so strict MCP clients can share current-page validation', () => {
+    const schema = TOOL_SCHEMAS.find((tool) => tool.name === TOOL_NAMES.CONTEXT.CHOOSE);
+    expect(schema?.inputSchema.properties).toHaveProperty('taskSessionId');
+  });
+
   it('tabrix_choose_context is registered as P0 (read-only)', () => {
     // Doc §8 success criterion #6.
     expect(TOOL_RISK_TIERS[TOOL_NAMES.CONTEXT.CHOOSE]).toBe('P0');
   });
 
-  it('tabrix_choose_context_record_outcome is registered as P0 (pure-INSERT)', () => {
-    // V23-04 / B-018 v1.5: write-back is intentionally P0 because it
-    // appends one telemetry row keyed by `decisionId` and never
-    // mutates anything else. Lifting it to P1+ would require the
-    // owner-lane review documented in AGENTS.md §"Tiered Execution Model".
+  it('tabrix_choose_context_record_outcome is registered as P0 (bounded local write-back)', () => {
+    // Write-back is intentionally P0 because it is bound to a prior
+    // decisionId and only updates local telemetry/library usage metrics.
     expect(TOOL_RISK_TIERS[TOOL_NAMES.CONTEXT.RECORD_OUTCOME]).toBe('P0');
   });
 });
@@ -826,6 +838,7 @@ describe('runTabrixChooseContext telemetry (V23-04)', () => {
     });
     expect(tele.decisions[0]?.strategy).toBe('read_page_required');
     expect(tele.decisions[0]?.sourceRoute).toBe('read_page_required');
+    expect(tele.decisions[0]?.selectedArtifacts).toBeUndefined();
   });
 
   it('records dispatcherInputSource=fallback_zero with cause when no snapshot is available', () => {
@@ -1015,7 +1028,48 @@ describe('runTabrixChooseContextRecordOutcome (V23-04)', () => {
     ]);
   });
 
-  it('telemetry write failure surfaces as unknown_decision (not invalid_input)', () => {
+  it('forwards the first definitive artifact-use signal to the library writer', () => {
+    const tele = fakeTelemetry(['dc-known']);
+    tele.repo.recordOutcome = jest.fn().mockImplementation((_input, applyArtifactUsage) => {
+      const artifactUsage = {
+        successful: true,
+        adopted: true,
+        selectedArtifacts: [
+          { kind: 'experience_recipe', ref: 'experience-1' },
+          { kind: 'knowledge_page_model', ref: 'knowledge-1' },
+        ],
+      };
+      applyArtifactUsage?.(artifactUsage);
+      return {
+        status: 'ok',
+        outcomeId: 'oc-artifact',
+        artifactUsage,
+      };
+    });
+    const recordSelectedArtifactOutcome = jest.fn();
+
+    const result = runTabrixChooseContextRecordOutcome(
+      { decisionId: 'dc-known', outcome: 'completed' },
+      {
+        telemetry: tele.repo,
+        now: () => '2026-04-22T11:05:00.000Z',
+        recordSelectedArtifactOutcome,
+      },
+    );
+
+    expect(result.status).toBe('ok');
+    expect(recordSelectedArtifactOutcome).toHaveBeenCalledWith({
+      successful: true,
+      adopted: true,
+      selectedArtifacts: [
+        { kind: 'experience_recipe', ref: 'experience-1' },
+        { kind: 'knowledge_page_model', ref: 'knowledge-1' },
+      ],
+      recordedAt: '2026-04-22T11:05:00.000Z',
+    });
+  });
+
+  it('distinguishes a retryable telemetry write failure from an unknown decision', () => {
     const tele = fakeTelemetry(['dc-known']);
     (tele.repo.recordOutcome as unknown as jest.Mock) = jest.fn(() => {
       throw new Error('SQLITE_LOCKED');
@@ -1026,7 +1080,14 @@ describe('runTabrixChooseContextRecordOutcome (V23-04)', () => {
         { decisionId: 'dc-known', outcome: 'completed' },
         { telemetry: tele.repo },
       );
-      expect(result.status).toBe('unknown_decision');
+      expect(result).toMatchObject({
+        status: 'write_failed',
+        decisionId: 'dc-known',
+        outcome: 'completed',
+        error: {
+          code: 'outcome_write_failed',
+        },
+      });
       expect(warn).toHaveBeenCalled();
     } finally {
       warn.mockRestore();

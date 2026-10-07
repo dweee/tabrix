@@ -358,9 +358,17 @@ function readArtifactObject(value: unknown): Record<string, unknown> | null {
 
 function buildSelectedArtifactAudit(
   artifacts: TabrixChooseContextArtifact[],
+  strategy: ContextStrategyName,
   fallback: { siteFamily: string | null; pageRole: string | null },
 ): SelectedChooseContextArtifactAudit[] | null {
+  const selectedKinds =
+    strategy === 'experience_reuse'
+      ? new Set(['experience_recipe', 'knowledge_page_model'])
+      : strategy === 'knowledge_light'
+        ? new Set(['knowledge_page_model', 'knowledge_api'])
+        : new Set<string>();
   const selected = artifacts
+    .filter((artifact) => selectedKinds.has(artifact.kind))
     .map((artifact): SelectedChooseContextArtifactAudit | null => {
       if (typeof artifact.ref !== 'string' || artifact.ref.length === 0) {
         return null;
@@ -428,6 +436,7 @@ export interface ChooseContextFacts {
     site: string;
     totalEndpoints: number;
     sampleSignatures: string[];
+    selectedEndpointRef?: string | null;
   };
 }
 
@@ -510,7 +519,7 @@ export function chooseContextStrategy(facts: ChooseContextFacts): StrategyDecisi
       artifacts: [
         {
           kind: 'knowledge_api',
-          ref: cat.site,
+          ref: cat.selectedEndpointRef ?? cat.site,
           summary,
         },
         ...(facts.knowledgeModelArtifact ? [facts.knowledgeModelArtifact] : []),
@@ -772,6 +781,7 @@ export function runTabrixChooseContext(
           site,
           totalEndpoints: rows.length,
           sampleSignatures: rows.map((r) => r.endpointSignature),
+          selectedEndpointRef: rows[0]?.endpointId ?? null,
         };
       }
     }
@@ -905,7 +915,7 @@ export function runTabrixChooseContext(
   if (deps.telemetry) {
     const newId = deps.newDecisionId ?? randomUUID;
     const candidateId = newId();
-    const selectedArtifacts = buildSelectedArtifactAudit(decision.artifacts, {
+    const selectedArtifacts = buildSelectedArtifactAudit(decision.artifacts, decision.strategy, {
       siteFamily: siteFamily ?? null,
       pageRole: input.pageRole ?? null,
     });
@@ -1070,6 +1080,12 @@ function parseRecordOutcomeInput(rawArgs: unknown): ParsedRecordOutcomeInput {
 
 export interface RunTabrixChooseContextRecordOutcomeDeps {
   telemetry: ChooseContextTelemetryRepository | null;
+  recordSelectedArtifactOutcome?: (input: {
+    successful: boolean;
+    adopted: boolean;
+    selectedArtifacts: SelectedChooseContextArtifactAudit[];
+    recordedAt: string;
+  }) => void;
   now?: () => string;
 }
 
@@ -1079,6 +1095,7 @@ export interface RunTabrixChooseContextRecordOutcomeDeps {
  *   - `'invalid_input'` for malformed args (input type or value)
  *   - `'unknown_decision'` for valid args whose decisionId we don't
  *     have a row for (telemetry off / decision pruned / id typo)
+ *   - `'write_failed'` when the atomic outcome/library update failed
  *   - `'ok'` after a successful append
  *
  * The handler in `native-tool-handlers.ts` maps `'invalid_input'`
@@ -1116,24 +1133,38 @@ export function runTabrixChooseContextRecordOutcome(
   }
 
   const now = deps.now ?? (() => new Date().toISOString());
+  const recordedAt = now();
   let result;
   try {
-    result = deps.telemetry.recordOutcome({
-      decisionId: parsed.decisionId,
-      outcome: parsed.outcome,
-      recordedAt: now(),
-    });
+    result = deps.telemetry.recordOutcome(
+      {
+        decisionId: parsed.decisionId,
+        outcome: parsed.outcome,
+        recordedAt,
+      },
+      deps.recordSelectedArtifactOutcome
+        ? (artifactUsage) =>
+            deps.recordSelectedArtifactOutcome?.({
+              ...artifactUsage,
+              recordedAt,
+            })
+        : undefined,
+    );
   } catch (error) {
-    // Same swallow-and-warn discipline as the chooser: telemetry
-    // breakage MUST NOT escalate to a tool error. We surface
-    // `unknown_decision` so the caller does not retry forever and the
-    // failure is visible in the warning log.
+    // Keep the failure structured and redact implementation details. It
+    // must not be confused with an actually missing decision because the
+    // atomic transaction can be retried safely.
     const message = error instanceof Error ? error.message : String(error);
     chooseContextLogger.warn('telemetry recordOutcome failed', { errorMessage: message });
     return {
-      status: 'unknown_decision',
+      status: 'write_failed',
       decisionId: parsed.decisionId,
       outcome: parsed.outcome,
+      error: {
+        code: 'outcome_write_failed',
+        message:
+          'The outcome and selected-artifact usage were not recorded; retry this write-back.',
+      },
     };
   }
 

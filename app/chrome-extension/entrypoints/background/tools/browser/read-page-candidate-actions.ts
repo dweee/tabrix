@@ -41,14 +41,25 @@ function buildRefSelectorMap(refMap: any[]): Map<string, string> {
   return map;
 }
 
-function selectorLooksStableForCdpAx(selector: string): boolean {
+function simpleSelectorLooksStableForCdpAx(selector: string): boolean {
   const trimmed = selector.trim();
   if (!trimmed) return false;
   if (/^(button|input|a|select|textarea|div|span)$/i.test(trimmed)) return false;
   return (
     /^#[A-Za-z0-9_-]+$/.test(trimmed) ||
-    /\[(data-testid|data-test|data-cy|aria-label|name|role|type)=/i.test(trimmed)
+    /\[(data-testid|data-test|data-cy|aria-label|name|role|type)=/i.test(trimmed) ||
+    /^(input|textarea|select|button|div|span|a|svg)\.[A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_-]*)?$/i.test(
+      trimmed,
+    )
   );
+}
+
+function selectorLooksStableForCdpAx(selector: string): boolean {
+  const trimmed = selector.trim();
+  if (simpleSelectorLooksStableForCdpAx(trimmed)) return true;
+  const relationalMatch = trimmed.match(/^(.+):has\(([^()]+)\)\s+(.+)$/);
+  if (!relationalMatch) return false;
+  return relationalMatch.slice(1).every((part) => simpleSelectorLooksStableForCdpAx(part));
 }
 
 function buildCdpAxInteractiveElements(input: {
@@ -66,7 +77,7 @@ function buildCdpAxInteractiveElements(input: {
     const label = String(candidate.label || role || '').trim();
     const selector = String(candidate.locator?.cssSelector || '').trim();
     if (!role || !label || !selectorLooksStableForCdpAx(selector)) continue;
-    if (candidate.state?.disabled === true) continue;
+    const disabled = candidate.state?.disabled === true;
     const canClick =
       role === 'button' ||
       role === 'link' ||
@@ -81,7 +92,14 @@ function buildCdpAxInteractiveElements(input: {
       role === 'searchbox' ||
       role === 'combobox' ||
       candidate.actionTypes?.some((action) => /^(focus|setvalue)$/i.test(action));
-    if (!canClick && !canFill) continue;
+    const canObserveDisabledControl =
+      disabled &&
+      (role === 'button' ||
+        role === 'link' ||
+        role === 'menuitem' ||
+        role === 'tab' ||
+        role === 'option');
+    if (!canClick && !canFill && !canObserveDisabledControl) continue;
 
     const stableId =
       candidate.locator?.backendDOMNodeId !== undefined
@@ -90,7 +108,8 @@ function buildCdpAxInteractiveElements(input: {
           ? candidate.locator.axNodeId
           : `${role}_${index}`;
     const safeId = stableId.replace(/[^a-zA-Z0-9_]/g, '_');
-    const ref = `ref_fallback_cdp_ax_${safeId}`;
+    const source = candidate.locator?.source === 'cdp_dom' ? 'cdp_dom' : 'cdp_ax';
+    const ref = `ref_fallback_${source}_${safeId}`;
     if (seenRefs.has(ref)) continue;
     seenRefs.add(ref);
 
@@ -119,9 +138,9 @@ function buildCdpAxInteractiveElements(input: {
       role,
       name: label,
       selector,
-      matchSource: 'cdp_ax',
+      matchSource: source,
       actionability:
-        visibilityProbe?.domVisible === false || visibilityProbe?.inViewport === false
+        disabled || visibilityProbe?.domVisible === false || visibilityProbe?.inViewport === false
           ? 'not_actionable'
           : inViewport
             ? 'actionable'
@@ -135,8 +154,10 @@ function buildCdpAxInteractiveElements(input: {
             ? visibilityProbe.centerHitTarget
             : null,
         occluded: typeof visibilityProbe?.occluded === 'boolean' ? visibilityProbe.occluded : null,
-        reason: visibilityProbe?.reason ?? (hasBounds ? 'cdp_ax_box_model' : 'cdp_ax_locator_only'),
+        reason:
+          visibilityProbe?.reason ?? (hasBounds ? `${source}_box_model` : `${source}_locator_only`),
       },
+      ...(visibilityProbe?.valueState ? { valueState: visibilityProbe.valueState } : {}),
       ...(hasBounds ? { rect: bounds } : {}),
     });
     refMap.push({ ref, selector });

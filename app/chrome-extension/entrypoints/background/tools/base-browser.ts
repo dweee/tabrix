@@ -132,16 +132,10 @@ export abstract class BaseBrowserToolExecutor implements ToolExecutor {
     const startedAt = Date.now();
     let pingMs = 0;
     try {
-      const pingFrameId = frameIds?.[0];
+      const pingFrameId = frameIds?.[0] ?? 0;
       const pingStartedAt = Date.now();
       const response = await Promise.race([
-        typeof pingFrameId === 'number'
-          ? chrome.tabs.sendMessage(
-              tabId,
-              { action: `${this.name}_ping` },
-              { frameId: pingFrameId },
-            )
-          : chrome.tabs.sendMessage(tabId, { action: `${this.name}_ping` }),
+        chrome.tabs.sendMessage(tabId, { action: `${this.name}_ping` }, { frameId: pingFrameId }),
         new Promise((_, reject) =>
           setTimeout(
             () => reject(new Error(`${this.name} Ping action to tab ${tabId} timed out`)),
@@ -217,10 +211,9 @@ export abstract class BaseBrowserToolExecutor implements ToolExecutor {
    * Send message to tab
    */
   protected async sendMessageToTab(tabId: number, message: any, frameId?: number): Promise<any> {
-    const response =
-      typeof frameId === 'number'
-        ? await chrome.tabs.sendMessage(tabId, message, { frameId })
-        : await chrome.tabs.sendMessage(tabId, message);
+    const response = await chrome.tabs.sendMessage(tabId, message, {
+      frameId: frameId ?? 0,
+    });
 
     if (response && response.error && !isStructuredClickHelperError(message, response)) {
       throw new Error(String(response.error));

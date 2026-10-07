@@ -159,10 +159,35 @@ interface ReadPageParams {
 const READ_PAGE_SPARSE_RETRY_DELAY_MS = 450;
 const READ_PAGE_PENDING_DOCUMENT_WAIT_MS = 5000;
 const READ_PAGE_CONTENT_MESSAGE_RETRY_DELAY_MS = 450;
+const READ_PAGE_DOM_SENSING_TIMEOUT_MS = 4000;
 const INTERACTIVE_ELEMENTS_HELPER_FILE = 'inject-scripts/interactive-elements-helper.js';
 const INTERACTIVE_ELEMENTS_HELPER_PING_TIMEOUT_MS = 300;
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+class ReadPageDomSensingTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`DOM accessibility sensing timed out after ${timeoutMs}ms`);
+    this.name = 'ReadPageDomSensingTimeoutError';
+  }
+}
+
+async function withReadPageDomSensingTimeout<T>(
+  operation: Promise<T>,
+  timeoutMs: number,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new ReadPageDomSensingTimeoutError(timeoutMs)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 
 function getTabNavigationUrl(tab: Pick<chrome.tabs.Tab, 'url' | 'pendingUrl'>): string {
@@ -174,6 +199,10 @@ class ReadPageTool extends BaseBrowserToolExecutor {
 
   __resetObjectLifecycleCacheForTests(): void {
     resetObjectLifecycleCacheForTests();
+  }
+
+  private getDomSensingTimeoutMs(): number {
+    return READ_PAGE_DOM_SENSING_TIMEOUT_MS;
   }
 
   private async ensureInteractiveElementsHelper(tabId: number, frameId?: number): Promise<void> {
@@ -650,28 +679,42 @@ class ReadPageTool extends BaseBrowserToolExecutor {
         };
       }
 
-      // Inject helper in ISOLATED world to enable chrome.runtime messaging
-      // Inject into all frames to support same-origin iframe operations
-      await this.injectContentScript(
-        tabId,
-        ['inject-scripts/accessibility-tree-helper.js'],
-        false,
-        'ISOLATED',
-        typeof requestedFrameId === 'number' ? false : true,
-        typeof requestedFrameId === 'number' ? [requestedFrameId] : undefined,
-      );
-
-      // Ask content script to generate accessibility tree
-      let resp = await this.generateAccessibilityTreeWithRetry(
-        tabId,
-        {
-          action: TOOL_MESSAGE_TYPES.GENERATE_ACCESSIBILITY_TREE,
-          filter: filter || null,
-          depth: requestedDepth,
-          refId: focusRefId || undefined,
-        },
-        requestedFrameId,
-      );
+      let domSensingFailure: Error | null = null;
+      let domSensingTimedOut = false;
+      let resp: any = null;
+      try {
+        resp = await withReadPageDomSensingTimeout(
+          (async () => {
+            // Inject into all frames to support same-origin iframe operations.
+            await this.injectContentScript(
+              tabId,
+              ['inject-scripts/accessibility-tree-helper.js'],
+              false,
+              'ISOLATED',
+              typeof requestedFrameId === 'number' ? false : true,
+              typeof requestedFrameId === 'number' ? [requestedFrameId] : undefined,
+            );
+            return this.generateAccessibilityTreeWithRetry(
+              tabId,
+              {
+                action: TOOL_MESSAGE_TYPES.GENERATE_ACCESSIBILITY_TREE,
+                filter: filter || null,
+                depth: requestedDepth,
+                refId: focusRefId || undefined,
+              },
+              requestedFrameId,
+            );
+          })(),
+          this.getDomSensingTimeoutMs(),
+        );
+      } catch (error) {
+        domSensingFailure = error instanceof Error ? error : new Error(String(error));
+        domSensingTimedOut = domSensingFailure instanceof ReadPageDomSensingTimeoutError;
+        resp = {
+          success: false,
+          error: domSensingFailure.message,
+        };
+      }
 
       // Evaluate tree result and decide whether to fallback
       const treeOk = resp && resp.success === true;
@@ -682,31 +725,39 @@ class ReadPageTool extends BaseBrowserToolExecutor {
         : 0;
       let refCount = Array.isArray(resp?.refMap) ? resp.refMap.length : 0;
       let isSparse = !userControlled && lines < 10 && refCount < 3;
+      let sparseRetryFailure: Error | null = null;
 
       if (treeOk && isSparse) {
         await delay(READ_PAGE_SPARSE_RETRY_DELAY_MS);
-        const retryResp = await this.generateAccessibilityTreeWithRetry(
-          tabId,
-          {
-            action: TOOL_MESSAGE_TYPES.GENERATE_ACCESSIBILITY_TREE,
-            filter: filter || null,
-            depth: requestedDepth,
-            refId: focusRefId || undefined,
-          },
-          requestedFrameId,
-        );
-        const retryContent =
-          retryResp && typeof retryResp.pageContent === 'string' ? retryResp.pageContent : '';
-        const retryLines = retryContent
-          ? retryContent.split('\n').filter((l: string) => l.trim().length > 0).length
-          : 0;
-        const retryRefCount = Array.isArray(retryResp?.refMap) ? retryResp.refMap.length : 0;
-        if (retryResp?.success === true && retryLines + retryRefCount > lines + refCount) {
-          resp = retryResp;
-          pageContent = retryContent;
-          lines = retryLines;
-          refCount = retryRefCount;
-          isSparse = !userControlled && lines < 10 && refCount < 3;
+        try {
+          const retryResp = await withReadPageDomSensingTimeout(
+            this.generateAccessibilityTreeWithRetry(
+              tabId,
+              {
+                action: TOOL_MESSAGE_TYPES.GENERATE_ACCESSIBILITY_TREE,
+                filter: filter || null,
+                depth: requestedDepth,
+                refId: focusRefId || undefined,
+              },
+              requestedFrameId,
+            ),
+            this.getDomSensingTimeoutMs(),
+          );
+          const retryContent =
+            retryResp && typeof retryResp.pageContent === 'string' ? retryResp.pageContent : '';
+          const retryLines = retryContent
+            ? retryContent.split('\n').filter((l: string) => l.trim().length > 0).length
+            : 0;
+          const retryRefCount = Array.isArray(retryResp?.refMap) ? retryResp.refMap.length : 0;
+          if (retryResp?.success === true && retryLines + retryRefCount > lines + refCount) {
+            resp = retryResp;
+            pageContent = retryContent;
+            lines = retryLines;
+            refCount = retryRefCount;
+            isSparse = !userControlled && lines < 10 && refCount < 3;
+          }
+        } catch (error) {
+          sparseRetryFailure = error instanceof Error ? error : new Error(String(error));
         }
       }
 
@@ -734,9 +785,19 @@ class ReadPageTool extends BaseBrowserToolExecutor {
           : null;
 
       const contentSummary = summarizePageContent(pageContent);
-      const sensingDiagnostics = treeOk
+      let sensingDiagnostics = treeOk
         ? normalizeAccessibilityTreeDiagnostics(resp?.diagnostics, resp?.stats)
         : undefined;
+      if (sparseRetryFailure) {
+        sensingDiagnostics = appendObjectSensingDiagnostic(sensingDiagnostics, {
+          source:
+            sparseRetryFailure instanceof ReadPageDomSensingTimeoutError
+              ? 'read_page.sparse_retry_timeout'
+              : 'read_page.sparse_retry_unavailable',
+          message:
+            'the initial DOM accessibility snapshot remained usable, but its bounded sparse-content retry did not complete',
+        });
+      }
 
       // User markers have been removed with the Element Marker surface
       // (MKEP pruning §P7). Keep the field on the payload as an empty
@@ -789,6 +850,91 @@ class ReadPageTool extends BaseBrowserToolExecutor {
         sensingDiagnostics,
       };
       reconcilePageUnderstandingWithVisibleRows(basePayload);
+
+      if (!treeOk && !focusRefId && cdpSensing) {
+        basePayload.fallbackUsed = true;
+        basePayload.fallbackSource = 'cdp_ax_dom_unavailable';
+        basePayload.reason = domSensingTimedOut
+          ? 'dom_accessibility_timeout'
+          : 'dom_accessibility_unavailable';
+        basePayload.sensingDiagnostics = appendObjectSensingDiagnostic(
+          basePayload.sensingDiagnostics,
+          {
+            source: domSensingTimedOut
+              ? 'read_page.dom_accessibility_timeout'
+              : 'read_page.dom_accessibility_unavailable',
+            message: domSensingTimedOut
+              ? 'DOM accessibility sensing exceeded its bounded wait; CDP and AX objects were returned as partial evidence'
+              : `DOM accessibility sensing was unavailable; CDP and AX objects were returned as partial evidence${
+                  domSensingFailure?.message ? ` (${domSensingFailure.message.slice(0, 96)})` : ''
+                }`,
+          },
+        );
+
+        const modePayload = await buildModeOutput({
+          mode: selectedMode,
+          renderMode: selectedRender,
+          tabId,
+          currentWindowId,
+          currentWindowState,
+          currentWindowWidth,
+          currentWindowHeight,
+          currentWindowLeft,
+          currentWindowTop,
+          isCurrentTabActive,
+          isCurrentWindowFocused,
+          browserActiveTabId,
+          browserActiveTabIdKnown,
+          isReadTargetBrowserActiveTab,
+          pageStability,
+          loadReadiness,
+          currentUrl,
+          currentTitle,
+          pageType: schemeGuard.pageType,
+          scheme: schemeGuard.scheme,
+          pageRole: basePayload.pageRole,
+          primaryRegion: basePayload.primaryRegion,
+          primaryRegionConfidence: basePayload.primaryRegionConfidence,
+          footerOnly: basePayload.footerOnly,
+          anchorTexts: basePayload.anchorTexts,
+          pageContent: basePayload.pageContent,
+          visibleTextContent: basePayload.visibleTextContent,
+          contentSummary: basePayload.contentSummary,
+          frameContext: basePayload.frameContext,
+          stats: basePayload.stats,
+          viewport: basePayload.viewport,
+          filter: basePayload.filter,
+          depth: basePayload.depth,
+          focus: basePayload.focus,
+          sparse: true,
+          fallbackUsed: basePayload.fallbackUsed,
+          fallbackSource: basePayload.fallbackSource,
+          refMapCount: basePayload.refMapCount,
+          markedElements: basePayload.markedElements,
+          elements: basePayload.elements,
+          count: basePayload.count,
+          reason: basePayload.reason,
+          tips: basePayload.tips,
+          refMap: basePayload.refMap,
+          candidateActions: basePayload.candidateActions,
+          visibleSearchFilterState: basePayload.visibleSearchFilterState,
+          fileInputBindings: [],
+          visualElements: basePayload.visualElements,
+          visibleRegionRows: basePayload.visibleRegionRows,
+          sensingDiagnostics: basePayload.sensingDiagnostics,
+          includeAuthArtifacts,
+          assistantGuidance,
+          requestedLayer: selectedLayer,
+        });
+        return {
+          content: [{ type: 'text', text: JSON.stringify(modePayload) }],
+          isError: false,
+        };
+      }
+
+      if (!treeOk && domSensingTimedOut) {
+        return createErrorResponse(resp.error);
+      }
 
       if (
         shouldSampleVisibleText({
@@ -978,6 +1124,29 @@ class ReadPageTool extends BaseBrowserToolExecutor {
         });
         return {
           content: [{ type: 'text', text: JSON.stringify(modePayload) }],
+          isError: false,
+        };
+      }
+
+      const classifiedDomSensingFailure = domSensingFailure
+        ? this.classifyContentScriptError(domSensingFailure)
+        : null;
+      if (classifiedDomSensingFailure) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                success: false,
+                reason: classifiedDomSensingFailure.reason,
+                pageType: 'browser_error_page',
+                recommendedAction: classifiedDomSensingFailure.recommendedAction,
+                error: classifiedDomSensingFailure.message,
+                nextStepHint:
+                  'page_unreadable; return BLOCKED or retry navigation before attempting structured reads',
+              }),
+            },
+          ],
           isError: false,
         };
       }

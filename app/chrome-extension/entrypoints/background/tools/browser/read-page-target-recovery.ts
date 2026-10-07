@@ -261,6 +261,41 @@ export function normalizeVisibleSearchSurfaceAction(action: any): CandidateActio
           : {}),
       }
     : undefined;
+  const rectSource = action?.snapshotRect;
+  const snapshotRect =
+    rectSource &&
+    [rectSource.x, rectSource.y, rectSource.width, rectSource.height].every(
+      (value) => typeof value === 'number' && Number.isFinite(value),
+    ) &&
+    rectSource.width > 0 &&
+    rectSource.height > 0
+      ? {
+          x: rectSource.x,
+          y: rectSource.y,
+          width: rectSource.width,
+          height: rectSource.height,
+        }
+      : undefined;
+  const visibilitySource = action?.visibility;
+  const visibility =
+    visibilitySource &&
+    typeof visibilitySource.source === 'string' &&
+    typeof visibilitySource.domVisible === 'boolean' &&
+    typeof visibilitySource.inViewport === 'boolean' &&
+    (typeof visibilitySource.centerHitTarget === 'boolean' ||
+      visibilitySource.centerHitTarget === null) &&
+    (typeof visibilitySource.occluded === 'boolean' || visibilitySource.occluded === null)
+      ? {
+          source: visibilitySource.source,
+          domVisible: visibilitySource.domVisible,
+          inViewport: visibilitySource.inViewport,
+          centerHitTarget: visibilitySource.centerHitTarget,
+          occluded: visibilitySource.occluded,
+          ...(typeof visibilitySource.reason === 'string' && visibilitySource.reason.trim()
+            ? { reason: visibilitySource.reason.trim() }
+            : {}),
+        }
+      : undefined;
 
   return {
     id,
@@ -283,6 +318,8 @@ export function normalizeVisibleSearchSurfaceAction(action: any): CandidateActio
       ? { actionabilityReason: action.actionabilityReason }
       : {}),
     locatorChain,
+    ...(snapshotRect ? { snapshotRect } : {}),
+    ...(visibility ? { visibility } : {}),
     ...(provenance ? { provenance } : {}),
     ...(intent ? { intent } : {}),
   };

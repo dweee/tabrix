@@ -257,7 +257,7 @@ describe('V25-04 click-resolution L0 contract', () => {
     expect(resolved.selectorType).toBe('xpath');
   });
 
-  it('executes a locator-backed floating option through its fresh xpath', () => {
+  it('executes a locator-backed floating option through its current snapshot css', () => {
     const resolved = resolveCandidateActionTarget({
       candidateAction: {
         targetRef: 'ref_floating_option_4434fd2f',
@@ -273,11 +273,54 @@ describe('V25-04 click-resolution L0 contract', () => {
     });
 
     expect(resolved).toMatchObject({
-      selector: '//*[@data-filter-option="most-saved"]',
-      selectorType: 'xpath',
-      source: 'candidate_locator_xpath',
+      selector: '[data-filter-option="most-saved"]',
+      selectorType: 'css',
+      source: 'candidate_locator_css',
     });
     expect(resolved.ref).toBeUndefined();
+  });
+
+  it('resolves a copied floating option targetRef through the recorded snapshot locator', () => {
+    const resolved = resolveCandidateActionTarget({
+      explicitRef: 'ref_floating_option_4434fd2f',
+      tabId: FIXTURE_TAB.id,
+      lookupCandidateActionTargetLocator: () => ({
+        selector: '[data-filter-option="most-saved"]',
+        selectorType: 'css',
+      }),
+    });
+
+    expect(resolved).toMatchObject({
+      selector: '[data-filter-option="most-saved"]',
+      selectorType: 'css',
+      source: 'candidate_snapshot_locator_css',
+    });
+    expect(resolved.ref).toBeUndefined();
+  });
+
+  it('prefers current snapshot css over a registered xpath for trusted pointer execution', () => {
+    const resolved = resolveCandidateActionTarget({
+      candidateAction: {
+        targetRef: 'ref_floating_option_4434fd2f',
+        executionTargetKind: 'snapshot_locator',
+        locatorChain: [
+          { type: 'ref', value: 'ref_floating_option_4434fd2f' },
+          { type: 'xpath', value: '//*[@data-filter-option="most-saved"]' },
+          { type: 'css', value: '[data-filter-option="most-saved"]' },
+        ],
+      },
+      tabId: FIXTURE_TAB.id,
+      lookupCandidateActionTargetLocator: () => ({
+        selector: '//*[@data-filter-option="most-saved"]',
+        selectorType: 'xpath',
+      }),
+    });
+
+    expect(resolved).toMatchObject({
+      selector: '[data-filter-option="most-saved"]',
+      selectorType: 'css',
+      source: 'candidate_locator_css',
+    });
   });
 
   it('resolves a copied visible search-input targetRef through its candidate css locator', () => {

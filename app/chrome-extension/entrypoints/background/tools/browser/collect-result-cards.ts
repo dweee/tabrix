@@ -94,6 +94,15 @@ interface PageCandidateAction {
   actionabilityReason?: string;
   locatorChain: Array<{ type: 'ref' | 'aria' | 'css' | string; value: string }>;
   provenance?: FloatingSurfaceProvenance;
+  snapshotRect?: { x: number; y: number; width: number; height: number };
+  visibility?: {
+    source: 'dom';
+    domVisible: boolean;
+    inViewport: boolean;
+    centerHitTarget: boolean;
+    occluded: boolean;
+    reason: string;
+  };
 }
 
 interface SearchFilterGroupState {
@@ -1698,6 +1707,15 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
         const selector = selectorForElement(control);
         const concreteXpath = xpathForElement(control);
         const kind = filterActionKindForLabel(option.label);
+        const rect = control.getBoundingClientRect();
+        const inViewport =
+          rect.width > 0 &&
+          rect.height > 0 &&
+          rect.right > 0 &&
+          rect.bottom > 0 &&
+          rect.left < window.innerWidth &&
+          rect.top < window.innerHeight;
+        const centerHitTarget = hitScore >= 80;
         const action: PageCandidateAction = {
           id: `ca_${kind}_${stableIdentityHash(
             `${panel.panelRef}|${option.groupId}|${option.label}`,
@@ -1715,6 +1733,20 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
             ...(concreteXpath ? [{ type: 'xpath', value: concreteXpath }] : []),
             ...(selector ? [{ type: 'css', value: selector }] : []),
           ],
+          snapshotRect: {
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+          },
+          visibility: {
+            source: 'dom',
+            domVisible: true,
+            inViewport,
+            centerHitTarget,
+            occluded: !centerHitTarget,
+            reason: centerHitTarget ? 'visible_unobstructed' : 'center_hit_not_proven',
+          },
           provenance: {
             surfaceType: 'floating_surface',
             panelRef: panel.panelRef,
@@ -1723,7 +1755,6 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
             classificationEvidence: panel.classificationEvidence,
           },
         };
-        const rect = control.getBoundingClientRect();
         const directText = ownVisibleText(control);
         const accessibleText = normalize(
           control.getAttribute('aria-label') || control.getAttribute('title') || '',
@@ -1754,61 +1785,187 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
           '[aria-label]',
           '[title]',
           '[tabindex]',
+          '[class*="filter" i]',
+          '[class*="sort" i]',
         ].join(','),
       ),
     );
+    if (document.body) {
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      let visitedTextNodes = 0;
+      let currentTextNode = walker.nextNode();
+      while (currentTextNode && visitedTextNodes < 2_000) {
+        visitedTextNodes += 1;
+        const label = normalize(currentTextNode.nodeValue);
+        if (filterTriggerPattern.test(label) && currentTextNode.parentElement) {
+          triggerCandidates.push(currentTextNode.parentElement);
+        }
+        currentTextNode = walker.nextNode();
+      }
+    }
+    const uniqueTriggerCandidates = Array.from(new Set(triggerCandidates));
+    const hasStrongInteractionSignal = (element: Element): boolean => {
+      const tag = element.tagName.toLowerCase();
+      if (['button', 'a', 'input', 'select', 'summary'].includes(tag)) return true;
+      const role = normalize(element.getAttribute('role')).toLowerCase();
+      if (['button', 'menuitem', 'option', 'tab'].includes(role)) return true;
+      if (
+        element.hasAttribute('tabindex') ||
+        element.hasAttribute('aria-haspopup') ||
+        element.hasAttribute('onclick')
+      ) {
+        return true;
+      }
+      try {
+        return window.getComputedStyle(element).cursor === 'pointer';
+      } catch {
+        return false;
+      }
+    };
+    const isAuxiliaryConversationControl = (element: Element): boolean => {
+      let current: Element | null = element;
+      let depth = 0;
+      while (current && current !== document.body && depth <= 8) {
+        const semantics = normalize(
+          [
+            current.getAttribute('role'),
+            current.getAttribute('aria-label'),
+            current.getAttribute('aria-description'),
+            current.getAttribute('data-testid'),
+            current.id,
+            current.className,
+          ].join(' '),
+        ).toLowerCase();
+        if (/\b(assistant|copilot|chat|conversation|messaging)\b/.test(semantics)) {
+          return true;
+        }
+        current = current.parentElement;
+        depth += 1;
+      }
+      return false;
+    };
+    const closestSemanticTriggerControl = (element: Element, label: string): Element | null => {
+      const candidates: Element[] = [];
+      let current: Element | null = element;
+      let depth = 0;
+      while (current && current !== document.body && depth <= 5) {
+        if (
+          elementIsVisible(current) &&
+          hasStrongInteractionSignal(current) &&
+          labelForControl(current) === label
+        ) {
+          const rect = current.getBoundingClientRect();
+          if (
+            rect.width <= Math.min(480, window.innerWidth * 0.5) &&
+            rect.height <= Math.min(120, window.innerHeight * 0.2)
+          ) {
+            candidates.push(current);
+          }
+        }
+        current = current.parentElement;
+        depth += 1;
+      }
+      return (
+        candidates.sort((left, right) => {
+          const leftRect = left.getBoundingClientRect();
+          const rightRect = right.getBoundingClientRect();
+          return rightRect.width * rightRect.height - leftRect.width * leftRect.height;
+        })[0] ?? null
+      );
+    };
+    const hasSearchToolbarOwnership = (control: Element): boolean => {
+      const searchInputs = Array.from(
+        document.querySelectorAll(
+          'input[type="search"], input[role="searchbox"], textarea[role="searchbox"], [role="searchbox"]',
+        ),
+      ).filter(
+        (element): element is Element => element instanceof Element && elementIsVisible(element),
+      );
+      if (searchInputs.length === 0) return false;
+
+      let current: Element | null = control.parentElement;
+      let depth = 0;
+      while (current && current !== document.body && depth <= 5) {
+        const role = normalize(current.getAttribute('role')).toLowerCase();
+        const tag = current.tagName.toLowerCase();
+        const className = normalize((current as HTMLElement).className || '').toLowerCase();
+        const isToolbarOwner =
+          role === 'search' ||
+          role === 'toolbar' ||
+          tag === 'form' ||
+          tag === 'header' ||
+          /\b(search|toolbar)\b/.test(className);
+        if (isToolbarOwner && searchInputs.some((input) => current?.contains(input))) return true;
+        current = current.parentElement;
+        depth += 1;
+      }
+      return false;
+    };
     const isPlausibleFilterTrigger = (
       control: Element,
-    ): { panel: FloatingFilterPanelObject | null; plausible: boolean } => {
+    ): {
+      panel: FloatingFilterPanelObject | null;
+      ownership: 'related_floating_surface' | 'search_toolbar' | null;
+    } => {
       const relatedPanel = panels.find((panel) => panel.relatedTriggers.includes(control)) ?? null;
-      if (relatedPanel) return { panel: relatedPanel, plausible: true };
-      if (panels.length === 0) return { panel: null, plausible: true };
+      if (relatedPanel) {
+        return { panel: relatedPanel, ownership: 'related_floating_surface' };
+      }
       const rect = control.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) return { panel: null, plausible: false };
-      const centerY = rect.top + rect.height / 2;
-      const maxHorizontalGap = Math.max(360, window.innerWidth * 0.22);
-      const panel = panels.find((candidate) =>
-        candidate.options.some((option) => {
-          const optionRect = option.control.getBoundingClientRect();
-          const optionCenterY = optionRect.top + optionRect.height / 2;
-          const verticalGap = Math.abs(optionCenterY - centerY);
-          const horizontalGap =
-            optionRect.right < rect.left
-              ? rect.left - optionRect.right
-              : rect.right < optionRect.left
-                ? optionRect.left - rect.right
-                : 0;
-          return verticalGap <= 128 && horizontalGap <= maxHorizontalGap;
-        }),
-      );
-      return { panel: panel ?? null, plausible: Boolean(panel) };
+      if (rect.width > 0 && rect.height > 0) {
+        const centerY = rect.top + rect.height / 2;
+        const maxHorizontalGap = Math.max(360, window.innerWidth * 0.22);
+        const panel = panels.find((candidate) =>
+          candidate.options.some((option) => {
+            const optionRect = option.control.getBoundingClientRect();
+            const optionCenterY = optionRect.top + optionRect.height / 2;
+            const verticalGap = Math.abs(optionCenterY - centerY);
+            const horizontalGap =
+              optionRect.right < rect.left
+                ? rect.left - optionRect.right
+                : rect.right < optionRect.left
+                  ? optionRect.left - rect.right
+                  : 0;
+            return verticalGap <= 128 && horizontalGap <= maxHorizontalGap;
+          }),
+        );
+        if (panel) return { panel, ownership: 'related_floating_surface' };
+      }
+      return {
+        panel: null,
+        ownership: hasSearchToolbarOwnership(control) ? 'search_toolbar' : null,
+      };
     };
-
-    for (const element of triggerCandidates.slice(0, 300)) {
+    for (const element of uniqueTriggerCandidates.slice(0, 500)) {
       if (!(element instanceof Element)) continue;
       if (!elementIsVisible(element)) continue;
       const label = labelForControl(element);
       if (!label || label.length > 24) continue;
       if (!filterTriggerPattern.test(label)) continue;
-      const control = closestClickableControl(element);
+      const control = closestSemanticTriggerControl(element, label);
       if (!control) continue;
       if (panels.some((panel) => panel.element.contains(control))) continue;
+      if (isAuxiliaryConversationControl(control)) continue;
       const triggerContext = isPlausibleFilterTrigger(control);
-      if (!triggerContext.plausible) continue;
+      if (!triggerContext.ownership) continue;
       const hitScore = centerHitScore(control);
       if (hitScore < 0) continue;
       const selector = selectorForElement(control);
       const concreteXpath = xpathForElement(control);
       const canonicalLabel = label;
       const kind = 'filter_trigger';
-      const targetRef = stablePageTargetRef(kind, canonicalLabel);
+      const targetRef = stablePageTargetRef(
+        kind,
+        `${canonicalLabel}|${selector || concreteXpath || 'unresolved'}`,
+      );
       const action: PageCandidateAction = {
         id: `ca_${kind}_${stableIdentityHash(`${canonicalLabel}|${selector || ''}`)}`,
         actionType: 'click',
         targetRef,
+        executionTargetKind: 'snapshot_locator',
         label: canonicalLabel,
         intent: 'search.open_filters',
-        matchReason: 'visible_filter_trigger',
+        matchReason: `visible_filter_trigger.${triggerContext.ownership}`,
         actionability: Boolean(selector),
         ...(selector ? {} : { actionabilityReason: 'missing_stable_selector' }),
         locatorChain: [
@@ -1902,18 +2059,25 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
     return searchTextEntryIdentityPattern.test(identityText);
   };
 
-  const searchInputCandidate = (): PageCandidateAction | null => {
-    const input = Array.from(
+  const visibleSearchInputElement = (): Element | null =>
+    Array.from(
       document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLElement>(
         'input, textarea, [contenteditable="true"], [role="textbox"], [role="searchbox"], [role="combobox"]',
       ),
-    ).find(
-      (element) =>
-        element instanceof Element &&
-        isSearchTextEntryElement(element) &&
-        elementIsVisible(element) &&
-        visibleRect(element),
-    );
+    ).find((element) => {
+      if (
+        !(element instanceof Element) ||
+        !isSearchTextEntryElement(element) ||
+        !elementIsVisible(element)
+      ) {
+        return false;
+      }
+      const rect = element.getBoundingClientRect();
+      return rect.width >= 48 && rect.height >= 20;
+    }) ?? null;
+
+  const searchInputCandidate = (): PageCandidateAction | null => {
+    const input = visibleSearchInputElement();
     if (!input) return null;
     const label = normalize(
       input.getAttribute('aria-label') ||
@@ -1938,6 +2102,85 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
         ...(selector ? [{ type: 'css', value: selector }] : []),
       ],
     };
+  };
+
+  const currentSearchInputValue = (input: Element): string => {
+    const value = (input as HTMLInputElement | HTMLTextAreaElement).value;
+    if (typeof value === 'string') return normalize(value);
+    return normalize(input.getAttribute('aria-valuetext') || input.textContent || '');
+  };
+
+  const sharesSearchContainer = (control: Element, input: Element): boolean => {
+    let current: Element | null = control.parentElement;
+    let depth = 0;
+    while (current && current !== document.body && depth <= 5) {
+      if (current.contains(input)) return true;
+      current = current.parentElement;
+      depth += 1;
+    }
+    return false;
+  };
+
+  const visibleSearchSuggestionCandidateActions = (): PageCandidateAction[] => {
+    const input = visibleSearchInputElement();
+    if (!input) return [];
+    const query = currentSearchInputValue(input);
+    if (!query || query.length > 160) return [];
+
+    const candidateByTargetRef = new Map<string, PageCandidateAction>();
+    const resultCardAncestorSelector = [
+      'article',
+      '[role="article"]',
+      '[role="listitem"]',
+      '[class*="card" i]',
+    ].join(',');
+    const elements = Array.from(
+      document.querySelectorAll(
+        [
+          'button',
+          'a',
+          '[role="option"]',
+          '[role="menuitem"]',
+          '[role="button"]',
+          '[tabindex]',
+          'li',
+        ].join(','),
+      ),
+    );
+    for (const element of elements) {
+      if (!(element instanceof Element) || !elementIsVisible(element)) continue;
+      if (element.contains(input) || input.contains(element)) continue;
+      if (element.closest(resultCardAncestorSelector)) continue;
+      const label = labelForControl(element);
+      if (label !== query) continue;
+      const control = closestClickableControl(element);
+      if (!control || !sharesSearchContainer(control, input)) continue;
+      if (centerHitScore(control) < 0) continue;
+      const selector = selectorForElement(control);
+      const concreteXpath = xpathForElement(control);
+      if (!selector) continue;
+      const targetRef = stablePageTargetRef(
+        'search_suggestion',
+        `${label}|${selector || concreteXpath || 'unresolved'}`,
+      );
+      candidateByTargetRef.set(targetRef, {
+        id: `ca_search_suggestion_${stableIdentityHash(`${label}|${selector}`)}`,
+        actionType: 'click',
+        targetRef,
+        executionTargetKind: 'snapshot_locator',
+        label,
+        intent: 'search.select_suggestion',
+        matchReason: 'visible_search_suggestion.exact_current_query',
+        actionability: true,
+        locatorChain: [
+          { type: 'ref', value: targetRef },
+          { type: 'aria', value: label },
+          ...(concreteXpath ? [{ type: 'xpath', value: concreteXpath }] : []),
+          { type: 'css', value: selector },
+        ],
+      });
+    }
+    return [...candidateByTargetRef.values()].slice(0, 6);
   };
 
   const filterCandidateActions = (filterState: SearchFilterState): PageCandidateAction[] =>
@@ -2405,6 +2648,7 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
   );
   const filterState = collectFilterState(floatingFilterPanels);
   const searchAction = searchInputCandidate();
+  const visibleSearchSuggestionActions = visibleSearchSuggestionCandidateActions();
   const observedFilterActions = filterCandidateActions(filterState);
   const visibleFilterActions = visibleFilterCandidateActions(floatingFilterPanels);
   const visibleCardActions: PageCandidateAction[] = cards
@@ -2422,6 +2666,7 @@ export function scanVisibleResultCardsInPage(): VisibleCardScanResult {
     }));
   const candidateActions = [
     ...(searchAction ? [searchAction] : []),
+    ...visibleSearchSuggestionActions,
     ...observedFilterActions,
     ...visibleFilterActions,
     ...visibleCardActions,

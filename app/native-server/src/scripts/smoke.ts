@@ -1972,27 +1972,31 @@ export async function runSmoke(options: SmokeOptions = {}): Promise<number> {
       try {
         await setBrowserLaunchOverride(mcpUrl, null);
       } catch {
-        // Ignore cleanup failures.
+        record(
+          'cleanup_browser_launch_override',
+          false,
+          'Could not restore browser launch override',
+        );
       }
     }
     if (options.commandChannelRecovery) {
       try {
         await setCommandChannelTestingMode(mcpUrl, 'normal');
       } catch {
-        // Ignore cleanup failures.
+        record('cleanup_command_channel', false, 'Could not restore normal command channel');
       }
     }
     if (!options.keepTab && tempTabId) {
       try {
         await mcp.callTool('chrome_close_tabs', { tabIds: [tempTabId] });
       } catch {
-        // Ignore cleanup failures.
+        record('cleanup_smoke_tab', false, 'Could not close the temporary smoke tab');
       }
     }
     try {
       await mcp.close();
     } catch {
-      // Ignore cleanup failures.
+      record('cleanup_mcp_client', false, 'Could not close the smoke MCP client');
     }
     if (smokeServer) {
       smokeServer.server.close();
