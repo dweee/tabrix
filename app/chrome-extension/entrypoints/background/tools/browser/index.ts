@@ -1,4 +1,12 @@
 export { navigateTool, closeTabsTool, switchTabTool } from './common';
+export {
+  tabGroupCreateTool,
+  tabGroupUpdateTool,
+  tabGroupAddTabsTool,
+  tabGroupCloseTool,
+  tabGroupListTool,
+} from './tab-group';
+export { moveTabTool } from './move-tab';
 export { windowTool } from './window';
 export { screenshotTool } from './screenshot';
 export { webFetcherTool, getInteractiveElementsTool } from './web-fetcher';

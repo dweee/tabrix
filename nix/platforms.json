@@ -1,0 +1,14 @@
+{
+  "aarch64-darwin": [
+    "tabrix",
+    "tabrix-extension"
+  ],
+  "x86_64-linux": [
+    "tabrix",
+    "tabrix-extension"
+  ],
+  "aarch64-linux": [
+    "tabrix",
+    "tabrix-extension"
+  ]
+}

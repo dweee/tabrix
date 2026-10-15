@@ -89,9 +89,17 @@ export function detectBrowserProcessRunning(): boolean {
     }
 
     if (process.platform === 'darwin') {
-      const chrome = spawnSync('pgrep', ['-x', 'Google Chrome'], { encoding: 'utf8' });
-      const chromium = spawnSync('pgrep', ['-x', 'Chromium'], { encoding: 'utf8' });
-      return Boolean((chrome.stdout || '').trim() || (chromium.stdout || '').trim());
+      const pgrep = '/usr/bin/pgrep';
+      const chrome = spawnSync(pgrep, ['-x', 'Google Chrome'], { encoding: 'utf8' });
+      const chromium = spawnSync(pgrep, ['-x', 'Chromium'], { encoding: 'utf8' });
+      // Helium is a Chromium fork with its own macOS app/process name.
+      // Its native messaging host still uses the Chromium extension APIs.
+      const helium = spawnSync(pgrep, ['-x', 'Helium'], { encoding: 'utf8' });
+      return Boolean(
+        (chrome.stdout || '').trim() ||
+        (chromium.stdout || '').trim() ||
+        (helium.stdout || '').trim(),
+      );
     }
 
     const chrome = spawnSync('pgrep', ['-x', 'google-chrome'], { encoding: 'utf8' });
@@ -219,7 +227,12 @@ export class BridgeStateManager {
   }
 
   syncBrowserProcessNow(): boolean {
-    const running = this.detectBrowserProcess();
+    const heartbeatFresh =
+      this.snapshot.extensionHeartbeatAt !== null &&
+      Date.now() - this.snapshot.extensionHeartbeatAt <= HEARTBEAT_TIMEOUT_MS;
+    // A fresh heartbeat can only be sent by the browser-hosted extension. This
+    // also covers Chromium forks whose executable name we do not recognize.
+    const running = this.detectBrowserProcess() || heartbeatFresh;
     this.setBrowserProcessRunning(running);
     return running;
   }
@@ -289,6 +302,10 @@ export class BridgeStateManager {
   recordHeartbeat(options: RecordHeartbeatOptions = {}): void {
     const sentAt = Number.isFinite(options.sentAt) ? Number(options.sentAt) : Date.now();
     this.snapshot.extensionHeartbeatAt = sentAt;
+    // Do not wait for the periodic process probe to catch up with a live
+    // extension; its heartbeat proves the browser is open.
+    this.snapshot.browserProcessRunning = true;
+    this.snapshot.browserProcessDetectedAt = Date.now();
     this.snapshot.heartbeat = {
       extensionId: this.normalizeNullableString(options.extensionId),
       connectionId: this.normalizeNullableString(options.connectionId),

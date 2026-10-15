@@ -1,0 +1,9 @@
+{
+  "name": "tabrix-nix-release",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Nix wrapper that pins the published @tabrix/tabrix npm package",
+  "dependencies": {
+    "@tabrix/tabrix": "2.7.0"
+  }
+}

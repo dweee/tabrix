@@ -40,16 +40,66 @@ describe('服务器测试', () => {
     await Server.stop();
   });
 
-  test('GET /ping 应返回正确响应', async () => {
+  test('GET /ping 在无 nativeHost 时应返回 503', async () => {
+    Server.clearNativeHost();
+    bridgeRuntimeState.reset();
     const response = await supertest(Server.getInstance().server)
       .get('/ping')
-      .expect(200)
+      .expect(503)
       .expect('Content-Type', /json/);
 
     expect(response.body).toEqual({
-      status: 'ok',
-      message: 'pong',
+      status: 'error',
+      message: 'Extension bridge not available',
+      extensionConnected: false,
     });
+  });
+
+  test('GET /ping 在扩展探针成功时应返回 200', async () => {
+    const mockHost = {
+      sendRequestToExtensionAndWait: jest.fn(async () => ({ ping: true })),
+    };
+    Server.setNativeHost(mockHost as any);
+    try {
+      const response = await supertest(Server.getInstance().server)
+        .get('/ping')
+        .expect(200)
+        .expect('Content-Type', /json/);
+
+      expect(response.body).toEqual({
+        status: 'ok',
+        message: 'pong',
+        extensionConnected: true,
+      });
+      expect(mockHost.sendRequestToExtensionAndWait).toHaveBeenCalled();
+    } finally {
+      Server.clearNativeHost();
+      bridgeRuntimeState.reset();
+    }
+  });
+
+  test('GET /ping 在扩展探针失败时应返回 503', async () => {
+    const mockHost = {
+      sendRequestToExtensionAndWait: jest.fn(async () => {
+        throw new Error('Request timed out after 1500ms');
+      }),
+    };
+    Server.setNativeHost(mockHost as any);
+    try {
+      const response = await supertest(Server.getInstance().server)
+        .get('/ping')
+        .expect(503)
+        .expect('Content-Type', /json/);
+
+      expect(response.body).toEqual({
+        status: 'error',
+        message: 'Chrome extension not connected',
+        extensionConnected: false,
+      });
+    } finally {
+      Server.clearNativeHost();
+      bridgeRuntimeState.reset();
+    }
   });
 
   test('GET /status 应返回运行状态快照', async () => {
@@ -334,6 +384,30 @@ describe('服务器测试', () => {
     expect(res.body?.error).toContain('POST /mcp');
   });
 
+  // MCP Streamable HTTP: a terminated/unknown session must answer 404 so the
+  // client re-initializes instead of surfacing a hard error.
+  test('POST /mcp 使用未知 mcp-session-id 应返回 404', async () => {
+    const res = await supertest(Server.getInstance().server)
+      .post('/mcp')
+      .set('Accept', 'application/json, text/event-stream')
+      .set('Content-Type', 'application/json')
+      .set('mcp-session-id', 'does-not-exist')
+      .send({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} })
+      .expect(404);
+
+    expect(res.body?.error).toContain('MCP session not found');
+  });
+
+  test('GET /mcp 使用未知 mcp-session-id 应返回 404', async () => {
+    const res = await supertest(Server.getInstance().server)
+      .get('/mcp')
+      .set('Accept', 'text/event-stream')
+      .set('mcp-session-id', 'does-not-exist')
+      .expect(404);
+
+    expect(res.body?.error).toContain('MCP session not found');
+  });
+
   test('并行 streamable-http 会话与 /status 计数一致并可逐个删除', async () => {
     const initializeRequest = {
       jsonrpc: '2.0',
@@ -509,12 +583,15 @@ describe('服务器测试', () => {
 
     test('远程 IP 访问公开路径 /ping、/status 无需 Bearer', async () => {
       const app = Server.getInstance();
+      Server.clearNativeHost();
       const ping = await app.inject({
         method: 'GET',
         url: '/ping',
         remoteAddress: REMOTE_CLIENT_IP,
       });
-      expect(ping.statusCode).toBe(200);
+      // /ping remains auth-public; without a bridge it reports 503, not 401.
+      expect(ping.statusCode).toBe(503);
+      expect(JSON.parse(ping.body).extensionConnected).toBe(false);
       const status = await app.inject({
         method: 'GET',
         url: '/status',

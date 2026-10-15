@@ -48,6 +48,7 @@ import {
   getObservationDiagnosticsSnapshot,
   type ObservationDiagnosticsSnapshot,
 } from '../runtime/observation-diagnostics';
+import { NativeMessageType } from '@tabrix/shared';
 
 // Compatibility guard:
 // @hono/node-server may call socket.destroySoon() while draining incoming requests.
@@ -320,10 +321,32 @@ export class Server {
 
   private setupHealthRoutes(): void {
     this.fastify.get('/ping', async (_request: FastifyRequest, reply: FastifyReply) => {
-      reply.status(HTTP_STATUS.OK).send({
-        status: 'ok',
-        message: 'pong',
-      });
+      if (!this.nativeHost) {
+        return reply.status(HTTP_STATUS.SERVICE_UNAVAILABLE).send({
+          status: 'error',
+          message: 'Extension bridge not available',
+          extensionConnected: false,
+        });
+      }
+
+      try {
+        await this.nativeHost.sendRequestToExtensionAndWait(
+          { ping: true },
+          NativeMessageType.PROCESS_DATA,
+          1500,
+        );
+        return reply.status(HTTP_STATUS.OK).send({
+          status: 'ok',
+          message: 'pong',
+          extensionConnected: true,
+        });
+      } catch {
+        return reply.status(HTTP_STATUS.SERVICE_UNAVAILABLE).send({
+          status: 'error',
+          message: 'Chrome extension not connected',
+          extensionConnected: false,
+        });
+      }
     });
 
     this.fastify.get('/status', async (_request: FastifyRequest, reply: FastifyReply) => {
@@ -700,7 +723,8 @@ export class Server {
       if (transport) {
         // Existing session found, proceed.
       } else if (sessionId && !transport) {
-        reply.code(HTTP_STATUS.BAD_REQUEST).send({ error: ERROR_MESSAGES.STALE_MCP_SESSION });
+        // Spec: unknown/terminated session → 404, which tells the client to re-initialize.
+        reply.code(HTTP_STATUS.NOT_FOUND).send({ error: ERROR_MESSAGES.STALE_MCP_SESSION });
         return;
       } else if (!sessionId && isInitializeRequest(request.body)) {
         const createdSessionId = randomUUID();
@@ -774,6 +798,10 @@ export class Server {
       }
       const transport = sseEntry?.kind === 'streamable-http' ? sseEntry.transport : undefined;
 
+      if (sessionId && !transport) {
+        reply.code(HTTP_STATUS.NOT_FOUND).send({ error: ERROR_MESSAGES.STALE_MCP_SESSION });
+        return;
+      }
       if (!transport) {
         reply.code(HTTP_STATUS.BAD_REQUEST).send({ error: ERROR_MESSAGES.INVALID_SSE_SESSION });
         return;

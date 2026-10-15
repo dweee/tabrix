@@ -45,6 +45,7 @@ export default defineConfig({
     permissions: [
       'nativeMessaging',
       'tabs',
+      'tabGroups',
       'activeTab',
       'scripting',
       'contextMenus',
@@ -154,11 +155,9 @@ export default defineConfig({
         ],
         // Use writeBundle so outDir exists for dev and prod
         hook: 'writeBundle',
-        // Enable watch so changes to these files are reflected during dev
-        watch: {
-          // Use default patterns inferred from targets; explicit true enables watching
-          // Vite plugin will watch src patterns and re-copy on change
-        } as any,
+        // Watch only in `wxt`/`vite` serve. A truthy watch object keeps
+        // `wxt build` alive (nix packaging never finishes).
+        ...(env.command === 'serve' ? { watch: true } : {}),
       }) as any,
     ],
     build: {

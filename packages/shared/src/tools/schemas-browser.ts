@@ -594,6 +594,184 @@ export const BROWSER_SCHEMAS: Tool[] = [
     },
   },
   {
+    name: TOOL_NAMES.BROWSER.TAB_GROUP_CREATE,
+    description:
+      'Create a new Chrome tab group from a list of tabs. Optionally set the group title, color, or target window. Returns the new groupId. Requires Chrome 89+ and the "tabGroups" permission.',
+    annotations: {
+      readOnlyHint: false,
+    },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tabIds: {
+          type: 'array',
+          items: { type: 'number' },
+          minItems: 1,
+          description:
+            'Tab IDs to include in the new group. All tabs must belong to the same window (Chrome moves them together when grouping).',
+        },
+        title: {
+          type: 'string',
+          description: 'Optional title displayed on the group label.',
+        },
+        color: {
+          type: 'string',
+          enum: ['grey', 'blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan', 'orange'],
+          description: 'Optional color for the group label. Defaults to a Chrome-assigned color.',
+        },
+        windowId: {
+          type: 'number',
+          description:
+            'Optional window ID for the new group. Tabs must already live in this window; otherwise Chrome ignores this hint.',
+        },
+      },
+      required: ['tabIds'],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.TAB_GROUP_UPDATE,
+    description:
+      'Update an existing Chrome tab group: rename it, change its color, or expand/collapse it. At least one of title, color, or collapsed must be provided. Note: Chrome cannot collapse a group whose tab is currently active — open automation tabs with background: true before collapsing.',
+    annotations: {
+      readOnlyHint: false,
+      idempotentHint: true,
+    },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        groupId: {
+          type: 'number',
+          description: 'The ID of the group to update (from chrome_tab_group_create or _list).',
+        },
+        title: {
+          type: 'string',
+          description: 'New title for the group label. Pass an empty string to clear the title.',
+        },
+        color: {
+          type: 'string',
+          enum: ['grey', 'blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan', 'orange'],
+          description: 'New color for the group label.',
+        },
+        collapsed: {
+          type: 'boolean',
+          description:
+            'Collapse (true) or expand (false) the group. Note: Chrome cannot collapse a group whose tab is currently active.',
+        },
+      },
+      required: ['groupId'],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.TAB_GROUP_ADD_TABS,
+    description:
+      'Add one or more existing tabs to an existing Chrome tab group. Tabs must be in the same window as the group; otherwise Chrome rejects the call.',
+    annotations: {
+      readOnlyHint: false,
+    },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        groupId: {
+          type: 'number',
+          description: 'The ID of the existing group to add tabs to.',
+        },
+        tabIds: {
+          type: 'array',
+          items: { type: 'number' },
+          minItems: 1,
+          description: 'Tab IDs to add to the group.',
+        },
+      },
+      required: ['groupId', 'tabIds'],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.TAB_GROUP_CLOSE,
+    description:
+      'Close all tabs that belong to a Chrome tab group. The group itself disappears once empty. Use chrome_tab_group_update with collapsed=true if you only want to hide the group.',
+    annotations: {
+      destructiveHint: true,
+    },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        groupId: {
+          type: 'number',
+          description: 'The ID of the group whose tabs should be closed.',
+        },
+      },
+      required: ['groupId'],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.TAB_GROUP_LIST,
+    description:
+      'List all Chrome tab groups, optionally filtered by window, color, title, or collapsed state. Each entry includes the tab IDs that currently belong to the group.',
+    annotations: {
+      readOnlyHint: true,
+    },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        windowId: {
+          type: 'number',
+          description: 'Restrict results to groups in a specific window.',
+        },
+        color: {
+          type: 'string',
+          enum: ['grey', 'blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan', 'orange'],
+          description: 'Restrict results to groups with this color.',
+        },
+        title: {
+          type: 'string',
+          description: 'Restrict results to groups with this exact title.',
+        },
+        collapsed: {
+          type: 'boolean',
+          description: 'Restrict results to collapsed (true) or expanded (false) groups.',
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.MOVE_TAB,
+    description:
+      'Move an existing tab to another window or detach it into a new window without reloading. Preserves scroll position, form state, and navigation history. Provide exactly one of windowId or newWindow=true.',
+    annotations: {
+      readOnlyHint: false,
+      idempotentHint: true,
+    },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tabId: {
+          type: 'number',
+          description: 'The ID of the tab to move.',
+        },
+        windowId: {
+          type: 'number',
+          description: 'Destination window ID. Mutually exclusive with newWindow=true.',
+        },
+        newWindow: {
+          type: 'boolean',
+          description:
+            'When true, detach the tab into a new window. Mutually exclusive with windowId. Default: false.',
+        },
+        index: {
+          type: 'number',
+          description:
+            'Position within the destination window. Default: -1 (append). Ignored when newWindow=true.',
+        },
+        focused: {
+          type: 'boolean',
+          description: 'Focus the destination window after the move. Default: true.',
+        },
+      },
+      required: ['tabId'],
+    },
+  },
+  {
     name: TOOL_NAMES.BROWSER.WEB_FETCHER,
     description:
       'Fetch visible text or HTML content from a web page. Returns content-quality hints when a route is text-sparse, so prefer chrome_read_page before escalating to javascript on highly interactive pages.',

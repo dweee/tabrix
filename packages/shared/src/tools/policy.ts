@@ -39,6 +39,7 @@ export interface TabrixToolPolicyAnnotations {
 export const TOOL_RISK_TIERS: Readonly<Record<string, TabrixRiskTier>> = Object.freeze({
   // ---- P0: read-only observations ----
   [TOOL_NAMES.BROWSER.GET_WINDOWS_AND_TABS]: 'P0',
+  [TOOL_NAMES.BROWSER.TAB_GROUP_LIST]: 'P0',
   [TOOL_NAMES.BROWSER.SCREENSHOT]: 'P0',
   [TOOL_NAMES.BROWSER.WEB_FETCHER]: 'P0',
   [TOOL_NAMES.BROWSER.REQUEST_ELEMENT_SELECTION]: 'P0',
@@ -54,6 +55,10 @@ export const TOOL_RISK_TIERS: Readonly<Record<string, TabrixRiskTier>> = Object.
   // ---- P1: reversible side-effects ----
   [TOOL_NAMES.BROWSER.NAVIGATE]: 'P1',
   [TOOL_NAMES.BROWSER.SWITCH_TAB]: 'P1',
+  [TOOL_NAMES.BROWSER.TAB_GROUP_CREATE]: 'P1',
+  [TOOL_NAMES.BROWSER.TAB_GROUP_UPDATE]: 'P1',
+  [TOOL_NAMES.BROWSER.TAB_GROUP_ADD_TABS]: 'P1',
+  [TOOL_NAMES.BROWSER.MOVE_TAB]: 'P1',
   [TOOL_NAMES.BROWSER.PERFORMANCE_START_TRACE]: 'P1',
   [TOOL_NAMES.BROWSER.PERFORMANCE_STOP_TRACE]: 'P1',
   [TOOL_NAMES.BROWSER.GIF_RECORDER]: 'P1',
@@ -65,6 +70,7 @@ export const TOOL_RISK_TIERS: Readonly<Record<string, TabrixRiskTier>> = Object.
 
   // ---- P2: half-sensitive action tools ----
   [TOOL_NAMES.BROWSER.CLOSE_TABS]: 'P2',
+  [TOOL_NAMES.BROWSER.TAB_GROUP_CLOSE]: 'P2',
   [TOOL_NAMES.BROWSER.CLICK]: 'P2',
   [TOOL_NAMES.BROWSER.FILL]: 'P2',
   [TOOL_NAMES.BROWSER.KEYBOARD]: 'P2',

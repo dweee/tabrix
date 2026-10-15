@@ -30,6 +30,9 @@ export const STDIO_PROXY_CLIENT_INFO = {
 
 let stdioMcpServer: Server | null = null;
 let mcpClient: Client | null = null;
+/** Streamable HTTP session ID captured after connect — terminated on shutdown. */
+let sessionId: string | undefined;
+let mcpServerUrl: string | undefined;
 
 // Read configuration from stdio-config.json
 const loadConfig = () => {
@@ -70,13 +73,17 @@ export const ensureMcpClient = async () => {
     }
 
     const config = loadConfig();
+    mcpServerUrl = typeof config.url === 'string' ? config.url : undefined;
     mcpClient = new Client(STDIO_PROXY_CLIENT_INFO, { capabilities: {} });
     const transport = new StreamableHTTPClientTransport(new URL(config.url), {});
     await mcpClient.connect(transport);
+    // Save session ID so shutdown can DELETE the Streamable HTTP MCP session.
+    sessionId = transport.sessionId;
     return mcpClient;
   } catch (error) {
     mcpClient?.close();
     mcpClient = null;
+    sessionId = undefined;
     const message = error instanceof Error ? error.message : String(error);
     stdioLogger.error('failed to connect to MCP server', { errorMessage: message });
   }
@@ -125,9 +132,52 @@ const handleToolCall = async (name: string, args: any): Promise<CallToolResult> 
 
 let shuttingDown = false;
 
+async function terminateHttpSession(): Promise<void> {
+  if (!sessionId) return;
+
+  let url = mcpServerUrl;
+  if (!url) {
+    try {
+      url = loadConfig().url;
+    } catch {
+      // ignore — cannot terminate without a URL
+    }
+  }
+  if (!url) {
+    sessionId = undefined;
+    return;
+  }
+
+  const abortController = new AbortController();
+  const timeoutId = setTimeout(() => {
+    abortController.abort();
+  }, 3000);
+
+  try {
+    stdioLogger.error('closing MCP HTTP session', { sessionId });
+    await fetch(url, {
+      method: 'DELETE',
+      headers: { 'Mcp-Session-Id': sessionId },
+      signal: abortController.signal,
+    });
+    stdioLogger.error('MCP HTTP session terminated', { sessionId });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    stdioLogger.error('failed to terminate MCP HTTP session', { errorMessage: message });
+  } finally {
+    clearTimeout(timeoutId);
+    sessionId = undefined;
+  }
+}
+
 async function shutdownGracefully(reason: string): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
+  try {
+    await terminateHttpSession();
+  } catch {
+    // ignore session cleanup errors
+  }
   try {
     if (mcpClient) {
       await mcpClient.close();
@@ -136,8 +186,34 @@ async function shutdownGracefully(reason: string): Promise<void> {
   } catch {
     // ignore close errors
   }
+  try {
+    await stdioMcpServer?.close();
+  } catch {
+    // ignore close errors
+  }
   stdioLogger.error('shutting down', { reason });
   process.exit(0);
+}
+
+function installParentPidWatchdog(): void {
+  const parentPid = process.ppid;
+  const parentCheck = setInterval(() => {
+    try {
+      process.kill(parentPid, 0);
+    } catch (error: unknown) {
+      // Only treat ESRCH ("No such process") as a terminated parent.
+      // Other errors like EPERM mean the process may still exist.
+      const code =
+        error && typeof error === 'object' && 'code' in error
+          ? (error as { code?: string }).code
+          : undefined;
+      if (code === 'ESRCH') {
+        clearInterval(parentCheck);
+        void shutdownGracefully('parent process exited');
+      }
+    }
+  }, 10_000);
+  parentCheck.unref();
 }
 
 function installStdioLifecycleHooks(): void {
@@ -155,6 +231,7 @@ function installStdioLifecycleHooks(): void {
   process.on('SIGINT', () => {
     void shutdownGracefully('SIGINT');
   });
+  installParentPidWatchdog();
 }
 
 async function main() {

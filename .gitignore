@@ -64,6 +64,10 @@ app/chrome-extension/entrypoints/web-editor-v2/attr-ui-refactor.md
 # Local extension zip artifacts (do not commit binary release files)
 releases/chrome-extension/latest/*.zip
 
+# Nix build results (root store links only; do not match src files like result-normalizer.ts)
+/result
+/result-*
+
 # Scratch / local-only working directories (plans, evidence, mcp logs)
 .tmp/
 .private-artifacts/
@@ -73,3 +77,16 @@ releases/chrome-extension/latest/*.zip
 # Local codex-cli prompt scratch (not part of repo contract)
 .codex-prompts/
 .commit-msg-tmp.txt
+
+# Local operator artifacts
+/VALIDATION.json
+/PROVENANCE.json
+/provenance.json
+/FORK.json
+/UPSTREAM.json
+/.codex/
+/.cursor/
+/.claude/
+/chat-history/
+/chat-histories/
+/*.jsonl
