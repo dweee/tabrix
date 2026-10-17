@@ -592,7 +592,7 @@ describe('服务器测试', () => {
       .send({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} })
       .expect(404);
 
-    expect(res.body?.error).toContain('MCP session not found');
+    expect(res.body?.error?.message).toContain('MCP session not found');
   });
 
   test('GET /mcp 使用未知 mcp-session-id 应返回 404', async () => {
@@ -938,7 +938,7 @@ describe('服务器测试', () => {
         method: 'tools/list',
         params: {},
       })
-      .expect(400);
+      .expect(404);
 
     expect(stale.body).toMatchObject({
       jsonrpc: '2.0',
