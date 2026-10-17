@@ -40,7 +40,7 @@ class TransferSafetyTests(unittest.TestCase):
             with self.assertRaises(ValueError): module.transfer('export', Path(temporary), 1024)
 
     def test_workflow_token_is_confined_to_the_isolated_publisher(self):
-        for path in Path(__file__).parent.joinpath('disabled').glob('*.yml'):
+        for path in Path(__file__).resolve().parents[1].joinpath('.github/workflows').glob('*actions.yml'):
             with self.subTest(workflow=path.name):
                 build, separator, publisher = path.read_text().partition('\n  publish:\n')
                 self.assertTrue(separator)
