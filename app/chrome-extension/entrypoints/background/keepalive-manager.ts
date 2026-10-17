@@ -35,7 +35,7 @@ function getController(): KeepaliveController {
 /**
  * Acquire a keepalive reference with a tag.
  *
- * @param tag - Identifier for the reference (e.g., 'native-host', 'rr-engine')
+ * @param tag - Identifier for the reference (e.g., 'native-host', 'cdp-sensing')
  * @returns A release function to call when keepalive is no longer needed
  *
  * @example

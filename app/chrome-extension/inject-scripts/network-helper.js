@@ -159,14 +159,18 @@ if (window.__NETWORK_CAPTURE_HELPER_INITIALIZED__) {
               }
             }
           }
-        } catch {}
+        } catch {
+          /* best-effort network probe */
+        }
         // Let browser set the correct multipart boundary
         try {
           if (options.headers) {
             delete options.headers['content-type'];
             delete options.headers['Content-Type'];
           }
-        } catch {}
+        } catch {
+          /* best-effort network probe */
+        }
         options.body = fd;
       } else if (method !== 'GET' && method !== 'HEAD' && body !== undefined) {
         // Fallback to raw body

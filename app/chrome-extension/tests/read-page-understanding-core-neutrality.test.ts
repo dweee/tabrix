@@ -29,8 +29,8 @@ describe('read_page core neutrality', () => {
   );
   const coreFileSource = readFileSync(coreFilePath, 'utf8');
 
-  it('core source contains no site-specific Douyin anchors', () => {
-    const forbiddenDouyinStrings = [
+  it('core source contains no site-specific MediaSite anchors', () => {
+    const forbiddenMediaSiteStrings = [
       '视频总榜',
       '话题榜',
       '热度趋势',
@@ -40,21 +40,21 @@ describe('read_page core neutrality', () => {
       '发布视频',
       '账号总览',
       '创作者',
-      '抖音',
+      '媒体站',
     ];
-    for (const forbidden of forbiddenDouyinStrings) {
+    for (const forbidden of forbiddenMediaSiteStrings) {
       expect(coreFileSource).not.toContain(forbidden);
     }
   });
 
-  it('core source contains no GitHub-specific page-role literals', () => {
-    const githubSpecificIdentifiers = [
-      "'repo_home'",
-      "'issues_list'",
-      "'actions_list'",
-      "'workflow_run_detail'",
+  it('core source contains no platform-specific page-role literals', () => {
+    const workspaceSpecificIdentifiers = [
+      "'workspace_home'",
+      "'item_list'",
+      "'job_list'",
+      "'job_run_detail'",
     ];
-    for (const forbidden of githubSpecificIdentifiers) {
+    for (const forbidden of workspaceSpecificIdentifiers) {
       expect(coreFileSource).not.toContain(forbidden);
     }
   });

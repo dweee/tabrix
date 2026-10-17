@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 const repoRoot = process.cwd();
 
@@ -21,9 +22,13 @@ const requiredFiles = [
   'docs/USE_CASES.md',
   'docs/ARCHITECTURE.md',
   'docs/PROJECT_STRUCTURE.md',
+  'docs/REPOSITORY_GOVERNANCE.md',
   'docs/ROADMAP.md',
   'docs/RELEASE_PROCESS.md',
   'docs/TOOLS.md',
+  'docs/releases/README.md',
+  'docs/releases/EXTENSION_ASSETS.md',
+  'archive/README.md',
 ];
 
 const mustReference = [
@@ -50,9 +55,6 @@ const mustReference = [
       'docs/CLI_AND_MCP.md',
       'docs/USE_CASES.md',
       'docs/PRODUCT_SURFACE_MATRIX.md',
-      'docs/TESTING.md',
-      'docs/PLATFORM_SUPPORT.md',
-      'docs/COMPATIBILITY_MATRIX.md',
       'docs/ARCHITECTURE.md',
       'CONTRIBUTING.md',
       'SECURITY.md',
@@ -65,7 +67,7 @@ const mustReference = [
       'docs/QUICKSTART.md',
       'docs/TROUBLESHOOTING.md',
       'docs/CLI_AND_MCP.md',
-      'docs/ARCHITECTURE.md',
+      'docs/USE_CASES.md',
       'CONTRIBUTING.md',
       'SECURITY.md',
     ],
@@ -83,14 +85,42 @@ const mustReference = [
       'COMPATIBILITY_MATRIX.md',
       'ARCHITECTURE.md',
       'PROJECT_STRUCTURE.md',
+      'REPOSITORY_GOVERNANCE.md',
       'ROADMAP.md',
       'RELEASE_PROCESS.md',
       'TOOLS.md',
+      'releases/README.md',
     ],
   },
 ];
 
 const forbiddenPatterns = [/internal-docs[\\/]/, /E:\\projects\\AI\\codex\\internal-docs/i];
+const forbiddenHeroImagePatterns = [
+  {
+    file: 'README.md',
+    pattern: /!\[[^\]]*]\(https:\/\/img\.shields\.io\//,
+    reason: 'remote badge images break the first-screen README preview when image loading is blocked',
+  },
+  {
+    file: 'README_zh.md',
+    pattern: /!\[[^\]]*]\(https:\/\/img\.shields\.io\//,
+    reason: 'remote badge images break the first-screen README preview when image loading is blocked',
+  },
+];
+const rootReleaseNotesPattern = /^RELEASE_NOTES_v.+\.md$/;
+const forbiddenTrackedRootPrefixes = [
+  '.acp-sessions/',
+  '.agents/',
+  '.claude/',
+  '.codex-prompts/',
+  '.gstack-codex-txn/',
+  '.playwright-mcp/',
+  '.private-artifacts/',
+  '.private-tests/',
+  'code-reviews/',
+  'prompt/',
+  'releases/',
+];
 
 const codeSearchRoots = ['app', 'packages', 'scripts'];
 const allowedCodeDocLinkFiles = new Set(['app/chrome-extension/common/constants.ts']);
@@ -98,6 +128,17 @@ const githubDocsBlobPattern =
   /https:\/\/github\.com\/guodaxia103\/tabrix\/blob\/main\/(docs\/[A-Za-z0-9_./-]+\.md)/g;
 
 let failed = false;
+
+function getTrackedFiles() {
+  try {
+    return execFileSync('git', ['ls-files'], { cwd: repoRoot, encoding: 'utf8' })
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map((file) => file.replaceAll('\\', '/'));
+  } catch {
+    return [];
+  }
+}
 
 function collectFiles(rootDir) {
   if (!fs.existsSync(rootDir)) return [];
@@ -140,6 +181,26 @@ for (const relativeFile of requiredFiles) {
   }
 }
 
+for (const entry of fs.readdirSync(path.join(repoRoot, 'docs'), { withFileTypes: true })) {
+  if (entry.isFile() && rootReleaseNotesPattern.test(entry.name)) {
+    console.error(
+      `[docs:check] release notes must live under docs/releases/: docs/${entry.name}`,
+    );
+    failed = true;
+  }
+}
+
+for (const trackedFile of getTrackedFiles()) {
+  for (const prefix of forbiddenTrackedRootPrefixes) {
+    if (trackedFile.startsWith(prefix)) {
+      console.error(
+        `[docs:check] tracked public files must not live under root ${prefix}: ${trackedFile}`,
+      );
+      failed = true;
+    }
+  }
+}
+
 for (const rule of mustReference) {
   const absoluteFile = path.join(repoRoot, rule.file);
   if (!fs.existsSync(absoluteFile)) {
@@ -174,6 +235,18 @@ for (const relativeFile of publicDocsFiles) {
       );
       failed = true;
     }
+  }
+}
+
+for (const rule of forbiddenHeroImagePatterns) {
+  const absoluteFile = path.join(repoRoot, rule.file);
+  if (!fs.existsSync(absoluteFile)) {
+    continue;
+  }
+  const content = fs.readFileSync(absoluteFile, 'utf8');
+  if (rule.pattern.test(content)) {
+    console.error(`[docs:check] ${rule.file}: ${rule.reason}`);
+    failed = true;
   }
 }
 

@@ -92,6 +92,9 @@ describe('Phase0 Policy — buildPolicyDeniedPayload', () => {
     expect(payload.message).toContain('chrome_javascript');
     expect(payload.hint).toContain('TABRIX_POLICY_ALLOW_P3');
     expect(payload.hint).toContain('chrome_javascript');
+    expect(payload.hint).toContain('调用方 AI/client 先自行审查脚本');
+    expect(payload.callerResponsibility).toContain('calling AI/client');
+    expect(payload.tabrixExecutionBoundary).toContain('does not statically analyze');
   });
 
   it('mentions "all" and the tool name in the hint for actionable recovery', () => {

@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { buildNavigateUrlPatterns } from '../entrypoints/background/tools/browser/common';
+import {
+  buildNavigateUrlPatterns,
+  buildNavigationPostActionDelta,
+} from '../entrypoints/background/tools/browser/common';
 
 describe('buildNavigateUrlPatterns', () => {
   it('does not add www variants for localhost', () => {
@@ -37,5 +40,56 @@ describe('buildNavigateUrlPatterns', () => {
     expect(patterns).toContain('https://www.example.com/*');
     expect(patterns).toContain('http://example.com/*');
     expect(patterns).toContain('http://www.example.com/*');
+  });
+});
+
+describe('buildNavigationPostActionDelta', () => {
+  it('describes same-tab navigation without proving business success', () => {
+    const delta = buildNavigationPostActionDelta({
+      actionId: 'navigate-existing-1',
+      actionKind: 'navigate_existing_tab',
+      tabId: 42,
+      previousUrl: 'https://example.com/search?q=old',
+      finalUrl: 'https://example.com/search?q=new',
+      settled: true,
+    });
+
+    expect(delta).toMatchObject({
+      deltaKind: 'post_action_tool_delta',
+      actionId: 'navigate-existing-1',
+      actionKind: 'navigate_existing_tab',
+      tabId: 42,
+      observedOutcome: 'url_changed',
+      changed: true,
+      changedSignals: ['url_changed'],
+      urlDelta: 'same_origin',
+      readbackStatus: 'fresh_read_required',
+      recommendation: 'run_chrome_read_page_force_refresh_same_tab',
+      businessSuccessProven: false,
+    });
+    expect(delta.claimBoundary.join(' ')).toContain('not AI business evaluation');
+  });
+
+  it('marks new tab navigation as fresh-read evidence and never as a reusable coordinate', () => {
+    const delta = buildNavigationPostActionDelta({
+      actionId: 'navigate-new-tab-1',
+      actionKind: 'navigate_new_tab',
+      tabId: 77,
+      finalUrl: 'https://example.com/results',
+      newTabOpened: true,
+      settled: false,
+    });
+
+    expect(delta).toMatchObject({
+      observedOutcome: 'new_tab_opened',
+      changed: true,
+      changedSignals: ['new_tab_opened', 'navigation_unsettled'],
+      urlDelta: 'unavailable',
+      readbackStatus: 'navigation_unsettled',
+      businessSuccessProven: false,
+    });
+    expect(delta.targetRef).toBeNull();
+    expect(delta).not.toHaveProperty('x');
+    expect(delta).not.toHaveProperty('y');
   });
 });

@@ -7,6 +7,7 @@ import {
   type BrowserContextSafeResponseSummary,
   type ResponseSummarySamplerArmResult,
 } from './response-summary-sampler';
+import { markBrowserWorldTabAiCreated } from '../../browser-world-inventory';
 
 // Static resource file extensions
 const STATIC_RESOURCE_EXTENSIONS = [
@@ -47,7 +48,7 @@ const STATIC_RESOURCE_EXTENSIONS = [
   '.pptx', // Documents
 ];
 
-// Ad and analytics domain list
+// Generic ad / analytics / tracking URL pattern list.
 const AD_ANALYTICS_DOMAINS = NETWORK_FILTERS.EXCLUDED_DOMAINS;
 const SENSITIVE_HEADER_NAMES = new Set([
   'authorization',
@@ -167,16 +168,15 @@ export function classifyNetworkCaptureEndpoint(input: {
   } catch {
     return 'unknown';
   }
-  const host = parsed.hostname.toLowerCase();
   const path = parsed.pathname.toLowerCase();
   const normalizedUrl = input.url.toLowerCase();
   const method = (input.method || 'GET').toUpperCase();
   const type = (input.type || '').toLowerCase();
   const mimeType = (input.mimeType || '').toLowerCase();
 
-  if (AD_ANALYTICS_DOMAINS.some((pattern) => normalizedUrl.includes(pattern))) return 'analytics';
   if (path.includes('/_private/') || path.includes('/private/')) return 'private';
   if (/\b(login|logout|session|oauth|token|authorize|auth)\b/.test(path)) return 'auth';
+  if (AD_ANALYTICS_DOMAINS.some((pattern) => normalizedUrl.includes(pattern))) return 'analytics';
   if (/\b(stats|telemetry|metrics|collect|beacon|events?)\b/.test(path)) return 'telemetry';
   if (
     type === 'image' ||
@@ -190,7 +190,6 @@ export function classifyNetworkCaptureEndpoint(input: {
   if ((method === 'GET' || method === 'HEAD') && (type === 'xmlhttprequest' || type === 'fetch')) {
     return 'usable';
   }
-  if (host === 'api.github.com' && (method === 'GET' || method === 'HEAD')) return 'usable';
   if (mimeType.includes('json') && (method === 'GET' || method === 'HEAD')) return 'usable';
   return 'unknown';
 }
@@ -363,7 +362,7 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
 
   /**
    * Determine whether a request should be filtered (based on URL)
-   * Uses full URL substring match to support patterns like 'facebook.com/tr'
+   * Uses full URL substring match so generic tracking paths can be filtered.
    */
   private shouldFilterRequest(url: string, includeStatic: boolean): boolean {
     const normalizedUrl = String(url || '').toLowerCase();
@@ -1125,6 +1124,7 @@ class NetworkCaptureStartTool extends BaseBrowserToolExecutor {
           // Create new tab
           console.log(`NetworkCapture: Creating new tab with URL: ${targetUrl}`);
           tabToOperateOn = await chrome.tabs.create({ url: targetUrl, active: true });
+          markBrowserWorldTabAiCreated(tabToOperateOn.id);
 
           // Wait for page to load
           await new Promise((resolve) => setTimeout(resolve, 1000));

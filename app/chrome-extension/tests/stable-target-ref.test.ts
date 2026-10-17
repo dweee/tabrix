@@ -38,7 +38,7 @@ describe('B-011 stable targetRef builder', () => {
 
   describe('normalizeHrefBucket', () => {
     it('strips host, query, fragment and lowercases', () => {
-      expect(normalizeHrefBucket('https://github.com/Owner/Repo/issues?q=open#frag')).toBe(
+      expect(normalizeHrefBucket('https://code.example/Owner/Repo/issues?q=open#frag')).toBe(
         '/owner/repo/issues',
       );
     });
@@ -55,19 +55,19 @@ describe('B-011 stable targetRef builder', () => {
   describe('buildStableKey', () => {
     it('produces the same key when only ordinal changes are absent', () => {
       const a = buildStableKey({
-        pageRole: 'repo_home',
-        objectSubType: 'github.repo_nav_tab',
+        pageRole: 'workspace_home',
+        objectSubType: 'workspace.repo_nav_tab',
         role: 'link',
         label: 'Issues',
         href: '/owner/repo/issues',
         ordinal: 0,
       });
       const b = buildStableKey({
-        pageRole: 'repo_home',
-        objectSubType: 'github.repo_nav_tab',
+        pageRole: 'workspace_home',
+        objectSubType: 'workspace.repo_nav_tab',
         role: 'link',
         label: '  Issues  ',
-        href: 'https://github.com/owner/repo/issues?q=open',
+        href: 'https://code.example/owner/repo/issues?q=open',
         ordinal: 0,
       });
       expect(a).toBe(b);
@@ -75,7 +75,7 @@ describe('B-011 stable targetRef builder', () => {
     it('changes when ordinal changes', () => {
       const make = (ordinal: number) =>
         buildStableKey({
-          pageRole: 'repo_home',
+          pageRole: 'workspace_home',
           objectSubType: '',
           role: 'button',
           label: 'icon',
@@ -89,8 +89,8 @@ describe('B-011 stable targetRef builder', () => {
   describe('computeStableTargetRef', () => {
     it('returns a tgt_<10-hex> string for an identity-bearing input', () => {
       const ref = computeStableTargetRef({
-        pageRole: 'repo_home',
-        objectSubType: 'github.repo_nav_tab',
+        pageRole: 'workspace_home',
+        objectSubType: 'workspace.repo_nav_tab',
         role: 'link',
         label: 'Issues',
         href: '/owner/repo/issues',
@@ -100,35 +100,35 @@ describe('B-011 stable targetRef builder', () => {
     });
     it('is stable across cosmetic label whitespace and href query/host churn', () => {
       const a = computeStableTargetRef({
-        pageRole: 'repo_home',
-        objectSubType: 'github.repo_nav_tab',
+        pageRole: 'workspace_home',
+        objectSubType: 'workspace.repo_nav_tab',
         role: 'link',
         label: 'Issues',
         href: '/owner/repo/issues',
         ordinal: 0,
       });
       const b = computeStableTargetRef({
-        pageRole: 'repo_home',
-        objectSubType: 'github.repo_nav_tab',
+        pageRole: 'workspace_home',
+        objectSubType: 'workspace.repo_nav_tab',
         role: 'link',
         label: '  Issues  ',
-        href: 'https://github.com/owner/repo/issues?q=open#x',
+        href: 'https://code.example/owner/repo/issues?q=open#x',
         ordinal: 0,
       });
       expect(a).toBe(b);
     });
     it('is different for genuinely different objects (different label)', () => {
       const a = computeStableTargetRef({
-        pageRole: 'repo_home',
-        objectSubType: 'github.repo_nav_tab',
+        pageRole: 'workspace_home',
+        objectSubType: 'workspace.repo_nav_tab',
         role: 'link',
         label: 'Issues',
         href: '/owner/repo/issues',
         ordinal: 0,
       });
       const b = computeStableTargetRef({
-        pageRole: 'repo_home',
-        objectSubType: 'github.repo_nav_tab',
+        pageRole: 'workspace_home',
+        objectSubType: 'workspace.repo_nav_tab',
         role: 'link',
         label: 'Pull requests',
         href: '/owner/repo/pulls',
@@ -138,7 +138,7 @@ describe('B-011 stable targetRef builder', () => {
     });
     it('is different for the same identity tuple at different ordinals', () => {
       const a = computeStableTargetRef({
-        pageRole: 'repo_home',
+        pageRole: 'workspace_home',
         objectSubType: '',
         role: 'button',
         label: 'icon',
@@ -146,7 +146,7 @@ describe('B-011 stable targetRef builder', () => {
         ordinal: 0,
       });
       const b = computeStableTargetRef({
-        pageRole: 'repo_home',
+        pageRole: 'workspace_home',
         objectSubType: '',
         role: 'button',
         label: 'icon',
@@ -177,7 +177,7 @@ describe('B-011 stable targetRef builder', () => {
         label: 'Issues',
         ref: 'ref_001',
         role: 'link',
-        objectSubType: 'github.repo_nav_tab',
+        objectSubType: 'workspace.repo_nav_tab',
         href: '/owner/repo/issues',
         reason: 'r',
       },
@@ -187,7 +187,7 @@ describe('B-011 stable targetRef builder', () => {
         label: 'Pull requests',
         ref: 'ref_002',
         role: 'link',
-        objectSubType: 'github.repo_nav_tab',
+        objectSubType: 'workspace.repo_nav_tab',
         href: '/owner/repo/pulls',
         reason: 'r',
       },
@@ -211,27 +211,27 @@ describe('B-011 stable targetRef builder', () => {
     ];
 
     it('assigns a tgt_* targetRef to each identity-bearing HVO', () => {
-      const annotated = annotateStableTargetRefs(sampleObjects, 'repo_home');
+      const annotated = annotateStableTargetRefs(sampleObjects, 'workspace_home');
       for (const obj of annotated) {
         expect(obj.targetRef).toMatch(STABLE_REF_PATTERN);
       }
     });
 
     it('produces the same targetRef for the same input twice (round-trip stability)', () => {
-      const a = annotateStableTargetRefs(sampleObjects, 'repo_home');
-      const b = annotateStableTargetRefs(sampleObjects, 'repo_home');
+      const a = annotateStableTargetRefs(sampleObjects, 'workspace_home');
+      const b = annotateStableTargetRefs(sampleObjects, 'workspace_home');
       expect(a.map((o) => o.targetRef)).toEqual(b.map((o) => o.targetRef));
     });
 
     it('keeps the targetRef stable even when per-snapshot ref values churn', () => {
       const reread = sampleObjects.map((o, i) => ({ ...o, ref: `ref_${1000 + i}` }));
-      const a = annotateStableTargetRefs(sampleObjects, 'repo_home');
-      const b = annotateStableTargetRefs(reread, 'repo_home');
+      const a = annotateStableTargetRefs(sampleObjects, 'workspace_home');
+      const b = annotateStableTargetRefs(reread, 'workspace_home');
       expect(a.map((o) => o.targetRef)).toEqual(b.map((o) => o.targetRef));
     });
 
     it('disambiguates visually-identical siblings via ordinals', () => {
-      const annotated = annotateStableTargetRefs(sampleObjects, 'repo_home');
+      const annotated = annotateStableTargetRefs(sampleObjects, 'workspace_home');
       const c1 = annotated.find((o) => o.id === 'hvo_c1');
       const c2 = annotated.find((o) => o.id === 'hvo_c2');
       expect(c1?.targetRef).toBeTruthy();
@@ -240,11 +240,11 @@ describe('B-011 stable targetRef builder', () => {
     });
 
     it('drifts when a real identity property truly changes', () => {
-      const annotatedBefore = annotateStableTargetRefs(sampleObjects, 'repo_home');
+      const annotatedBefore = annotateStableTargetRefs(sampleObjects, 'workspace_home');
       const renamed = sampleObjects.map((o) =>
         o.id === 'hvo_a' ? { ...o, label: 'Issues (legacy)' } : o,
       );
-      const annotatedAfter = annotateStableTargetRefs(renamed, 'repo_home');
+      const annotatedAfter = annotateStableTargetRefs(renamed, 'workspace_home');
       const beforeRef = annotatedBefore.find((o) => o.id === 'hvo_a')?.targetRef;
       const afterRef = annotatedAfter.find((o) => o.id === 'hvo_a')?.targetRef;
       expect(beforeRef).toBeTruthy();
@@ -256,18 +256,18 @@ describe('B-011 stable targetRef builder', () => {
   describe('buildHistoryRef', () => {
     it('encodes host + role slug + content seed', () => {
       const ref = buildHistoryRef({
-        url: 'https://github.com/owner/repo',
-        pageRole: 'repo_home',
+        url: 'https://code.example/owner/repo',
+        pageRole: 'workspace_home',
         contentSeed: 'abc',
       });
-      expect(ref).toMatch(/^read:\/\/github\.com\/repo_home\/[0-9a-f]{8}$/);
+      expect(ref).toMatch(/^read:\/\/code\.example\/workspace_home\/[0-9a-f]{8}$/);
     });
     it('returns null when url is missing', () => {
-      expect(buildHistoryRef({ url: '', pageRole: 'repo_home' })).toBeNull();
-      expect(buildHistoryRef({ url: undefined, pageRole: 'repo_home' })).toBeNull();
+      expect(buildHistoryRef({ url: '', pageRole: 'workspace_home' })).toBeNull();
+      expect(buildHistoryRef({ url: undefined, pageRole: 'workspace_home' })).toBeNull();
     });
     it('falls back to slug=unknown when pageRole is missing', () => {
-      const ref = buildHistoryRef({ url: 'https://github.com', pageRole: null });
+      const ref = buildHistoryRef({ url: 'https://code.example', pageRole: null });
       expect(ref).toMatch(/\/unknown\//);
     });
   });

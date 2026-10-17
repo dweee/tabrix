@@ -14,10 +14,9 @@ export const TOOL_NAMES = {
     WEB_FETCHER: 'chrome_get_web_content',
     CLICK: 'chrome_click_element',
     FILL: 'chrome_fill_or_select',
-    REQUEST_ELEMENT_SELECTION: 'chrome_request_element_selection',
     GET_INTERACTIVE_ELEMENTS: 'chrome_get_interactive_elements',
     NETWORK_CAPTURE: 'chrome_network_capture',
-    // Legacy tool names (kept for internal use, not exposed in TOOL_SCHEMAS)
+    // Legacy/retired tool names kept for policy guards, not exposed in TOOL_SCHEMAS.
     NETWORK_CAPTURE_START: 'chrome_network_capture_start',
     NETWORK_CAPTURE_STOP: 'chrome_network_capture_stop',
     NETWORK_REQUEST: 'chrome_network_request',
@@ -34,43 +33,13 @@ export const TOOL_NAMES = {
     CONSOLE: 'chrome_console',
     FILE_UPLOAD: 'chrome_upload_file',
     READ_PAGE: 'chrome_read_page',
+    COLLECT_RESULT_CARDS: 'chrome_collect_result_cards',
     COMPUTER: 'chrome_computer',
     HANDLE_DIALOG: 'chrome_handle_dialog',
     HANDLE_DOWNLOAD: 'chrome_handle_download',
-    USERSCRIPT: 'chrome_userscript',
     PERFORMANCE_START_TRACE: 'performance_start_trace',
     PERFORMANCE_STOP_TRACE: 'performance_stop_trace',
     PERFORMANCE_ANALYZE_INSIGHT: 'performance_analyze_insight',
-    GIF_RECORDER: 'chrome_gif_recorder',
-  },
-  RECORD_REPLAY: {
-    FLOW_RUN: 'record_replay_flow_run',
-    LIST_PUBLISHED: 'record_replay_list_published',
-  },
-  /**
-   * MKEP Experience layer (Stage 3b). Native-handled tools (no Chrome
-   * extension round-trip) — the native-server reads its own SQLite and
-   * answers directly. See `mcp/native-tool-handlers.ts`.
-   */
-  EXPERIENCE: {
-    SUGGEST_PLAN: 'experience_suggest_plan',
-    /**
-     * Write/execute path. Replays a NAMED `actionPathId`
-     * previously recorded in `experience_action_paths`. Bridged tool
-     * — calls `chrome_click_element` / `chrome_fill_or_select` through
-     * the existing per-step Policy + verifier dispatch. Capability-gated
-     * by `experience_replay`.
-     */
-    REPLAY: 'experience_replay',
-    /**
-     * Per-step replay outcome write-back. Records one
-     * (success | failure) observation against the named action path,
-     * keyed by `(actionPathId, stepIndex)`. Native-handled, gated by
-     * the same `experience_replay` capability so the score-step
-     * channel is always governed by the capability that controls the
-     * replay tool itself.
-     */
-    SCORE_STEP: 'experience_score_step',
   },
   /**
    * MKEP context selector.
@@ -84,5 +53,14 @@ export const TOOL_NAMES = {
      * `tabrix_choose_context` returned actually save us a `read_page`?".
      */
     RECORD_OUTCOME: 'tabrix_choose_context_record_outcome',
+  },
+  /**
+   * MKEP Memory write-back layer.
+   * Native-handled. Lets the upstream AI attach business feedback to
+   * a concrete Memory trace id returned in the `_tabrix.traceId`
+   * envelope, without waiting for a later browser tool call.
+   */
+  MEMORY: {
+    RECORD_AI_FEEDBACK: 'memory_record_ai_feedback',
   },
 };

@@ -1,8 +1,9 @@
 import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from '@tabrix/shared';
-import { cdpSessionManager } from '@/utils/cdp-session-manager';
+import { cdpSessionManager, type CDPEventListener } from '@/utils/cdp-session-manager';
 import { consoleBuffer, BufferedConsoleMessage, BufferedConsoleException } from './console-buffer';
+import { markBrowserWorldTabAiCreated } from '../../browser-world-inventory';
 
 const DEFAULT_MAX_MESSAGES = 100;
 
@@ -325,6 +326,7 @@ class ConsoleTool extends BaseBrowserToolExecutor {
       const createInfo: chrome.tabs.CreateProperties = { url, active: background ? false : true };
       if (typeof windowId === 'number') createInfo.windowId = windowId;
       const newTab = await chrome.tabs.create(createInfo);
+      markBrowserWorldTabAiCreated(newTab.id);
       // Wait for tab to be ready
       await this.waitForTabReady(newTab.id!);
       return newTab;
@@ -398,7 +400,7 @@ class ConsoleTool extends BaseBrowserToolExecutor {
       const collectedMessages: any[] = [];
       const collectedExceptions: any[] = [];
 
-      const eventListener = (source: chrome.debugger.Debuggee, method: string, params?: any) => {
+      const eventListener: CDPEventListener = (source, method, params) => {
         if (source.tabId !== tabId) return;
 
         if (method === 'Log.entryAdded' && params?.entry) {
@@ -425,7 +427,7 @@ class ConsoleTool extends BaseBrowserToolExecutor {
         }
       };
 
-      chrome.debugger.onEvent.addListener(eventListener);
+      cdpSessionManager.addEventListener(eventListener);
 
       try {
         // Enable Runtime domain first to capture console API calls and exceptions
@@ -579,7 +581,7 @@ class ConsoleTool extends BaseBrowserToolExecutor {
         }
       } finally {
         // Clean up
-        chrome.debugger.onEvent.removeListener(eventListener);
+        cdpSessionManager.removeEventListener(eventListener);
 
         // 如果 buffer 模式正在使用这个 tab，不要关闭 Runtime/Log 域
         const keepDomainsEnabled = consoleBuffer.isCapturing(tabId);

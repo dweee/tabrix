@@ -147,8 +147,7 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
       byline: /byline|author|dateline|writtenby|p-author/i,
       replaceFonts: /<(\/?)font[^>]*>/gi,
       normalize: /\s{2,}/g,
-      videos:
-        /\/\/(www\.)?((dailymotion|youtube|youtube-nocookie|player\.vimeo|v\.qq)\.com|(archive|upload\.wikimedia)\.org|player\.twitch\.tv)/i,
+      videos: /\/\/[^/]+\/.*\b(embed|player|video)\b/i,
       shareElements: /(\b|_)(share|sharedaddy)(\b|_)/i,
       nextLink: /(next|weiter|continue|>([^\|]|$)|»([^\|]|$))/i,
       prevLink: /(prev|earl|old|new|<|«)/i,
@@ -1673,11 +1672,11 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
 
       // property is a space-separated list of values
       var propertyPattern =
-        /\s*(article|dc|dcterm|og|twitter)\s*:\s*(author|creator|description|published_time|title|site_name)\s*/gi;
+        /\s*(article|dc|dcterm|og)\s*:\s*(author|creator|description|published_time|title|site_name)\s*/gi;
 
       // name is a single value
       var namePattern =
-        /^\s*(?:(dc|dcterm|og|twitter|parsely|weibo:(article|webpage))\s*[-\.:]\s*)?(author|creator|pub-date|description|title|site_name)\s*$/i;
+        /^\s*(?:(dc|dcterm|og|parsely)\s*[-\.:]\s*)?(author|creator|pub-date|description|title|site_name)\s*$/i;
 
       // Find description tags.
       this._forEachNode(metaElements, function (element) {
@@ -1717,10 +1716,7 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
         values['dc:title'] ||
         values['dcterm:title'] ||
         values['og:title'] ||
-        values['weibo:article:title'] ||
-        values['weibo:webpage:title'] ||
         values.title ||
-        values['twitter:title'] ||
         values['parsely-title'];
 
       if (!metadata.title) {
@@ -1747,10 +1743,7 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
         values['dc:description'] ||
         values['dcterm:description'] ||
         values['og:description'] ||
-        values['weibo:article:description'] ||
-        values['weibo:webpage:description'] ||
-        values.description ||
-        values['twitter:description'];
+        values.description;
 
       // get site name
       metadata.siteName = jsonld.siteName || values['og:site_name'];
@@ -2073,7 +2066,8 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
 
     /**
      * Clean a node of all elements of type "tag".
-     * (Unless it's a youtube/vimeo video. People love movies.)
+     * Generic embedded media can be preserved when it matches the allowed
+     * player/video pattern.
      *
      * @param Element
      * @param string tag to clean
@@ -2083,9 +2077,9 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
       var isEmbed = ['object', 'embed', 'iframe'].includes(tag);
 
       this._removeNodes(this._getAllNodesWithTag(e, [tag]), function (element) {
-        // Allow youtube and vimeo videos through as people usually want to see those.
+        // Allow generic embedded media through when it matches the neutral pattern.
         if (isEmbed) {
-          // First, check the elements attributes to see if any of them contain youtube or vimeo
+          // First, check the element attributes for player/video signals.
           for (var i = 0; i < element.attributes.length; i++) {
             if (this._allowedVideoRegex.test(element.attributes[i].value)) {
               return false;
@@ -2671,11 +2665,13 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
     minTextLength: 20,
     maxTotalLength: 500000,
     minParagraphLength: 2,
+    maxDiagnosticsElements: 400,
+    largeDomElementThreshold: 400,
   };
 
   // Listen for messages from the extension
   chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
-    const pingActions = ['search_tabs_content_ping', 'chrome_web_fetcher_ping'];
+    const pingActions = ['chrome_web_fetcher_ping'];
     // Respond to ping message
     if (pingActions.includes(request.action)) {
       sendResponse({ status: 'pong' });
@@ -2701,10 +2697,13 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
         }
 
         const cleanedHtml = cleanHtmlContent(rawHtml);
+        const htmlTextContent = extractTextFromHtml(cleanedHtml);
 
         sendResponse({
           success: true,
           htmlContent: cleanedHtml,
+          htmlTextContent,
+          htmlTextContentSource: 'cleaned_html_textContent',
           selector: request.selector,
         });
       } catch (error) {
@@ -2729,11 +2728,46 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
               success: true,
               textContent: textContent,
               selector: request.selector,
+              textMode: 'selector',
+              textContentSource: 'selector_innerText',
             });
           } else {
             throw new Error(`No element found matching selector: ${request.selector}`);
           }
+        } else if (request.textMode === 'full-visible') {
+          const fallback = extractVisibleBodyTextContent('visible_text_nodes');
+          const textContent = fallback.textContent;
+          sendResponse({
+            success: true,
+            textContent,
+            textMode: 'full-visible',
+            fallback: true,
+            fallbackSource: fallback.source,
+            textContentSource: `fallback_${fallback.source}`,
+            contentDiagnostics: buildContentDiagnostics(textContent, {
+              skipContainerScan: true,
+              skipReason: 'full_visible_fast_path',
+            }),
+            metadata: extractPageMetadata(),
+          });
         } else {
+          if (isLargeDomForTextExtraction()) {
+            const fallback = extractFastBodyTextContent('large_dom_body_textContent');
+            sendResponse({
+              success: true,
+              textContent: fallback.textContent,
+              fallback: true,
+              fallbackSource: fallback.source,
+              textMode: 'body',
+              textContentSource: `fallback_${fallback.source}`,
+              contentDiagnostics: buildContentDiagnostics(fallback.textContent, {
+                skipContainerScan: true,
+                skipReason: 'large_dom_fast_path',
+              }),
+              metadata: extractPageMetadata(),
+            });
+            return true;
+          }
           // Otherwise use Readability to extract the main content
           const documentClone = document.cloneNode(true);
 
@@ -2759,6 +2793,9 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
             sendResponse({
               success: true,
               textContent: fullContent,
+              textMode: 'body',
+              textContentSource: 'readability_body_text',
+              contentDiagnostics: buildContentDiagnostics(fullContent),
               article: {
                 title: article.title,
                 byline: article.byline,
@@ -2771,11 +2808,15 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
             });
           } else {
             // Fallback to basic extraction
-            const textContent = document.body.innerText;
+            const fallback = extractFallbackTextContent();
             sendResponse({
               success: true,
-              textContent: textContent,
+              textContent: fallback.textContent,
               fallback: true,
+              fallbackSource: fallback.source,
+              textMode: 'body',
+              textContentSource: `fallback_${fallback.source}`,
+              contentDiagnostics: buildContentDiagnostics(fallback.textContent),
             });
           }
         }
@@ -2867,10 +2908,233 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
             }
           }
         }
-      } catch {}
+      } catch {
+        /* best-effort response cleanup */
+      }
     }
 
     return allIframeText.trim();
+  }
+
+  /**
+   * Extract fallback text when Readability cannot identify an article.
+   * Some SPA/virtual-list pages expose long answer bodies through textContent
+   * even when innerText is empty or too small.
+   * @returns {{textContent: string, source: string}}
+   */
+  function isLargeDomForTextExtraction() {
+    if (!document.body) return false;
+    return document.body.getElementsByTagName('*').length > config.largeDomElementThreshold;
+  }
+
+  function extractFastBodyTextContent(source) {
+    return {
+      textContent: cleanContent(document.body?.textContent || ''),
+      source,
+    };
+  }
+
+  function extractVisibleBodyTextContent(source) {
+    if (!document.body) {
+      return {
+        textContent: '',
+        source,
+      };
+    }
+
+    const texts = [];
+    const textNodeFlag =
+      typeof NodeFilter !== 'undefined' && NodeFilter.SHOW_TEXT ? NodeFilter.SHOW_TEXT : 4;
+    const acceptNodeFlag =
+      typeof NodeFilter !== 'undefined' && NodeFilter.FILTER_ACCEPT ? NodeFilter.FILTER_ACCEPT : 1;
+    const rejectNodeFlag =
+      typeof NodeFilter !== 'undefined' && NodeFilter.FILTER_REJECT ? NodeFilter.FILTER_REJECT : 2;
+    const walker = document.createTreeWalker(document.body, textNodeFlag, {
+      acceptNode(node) {
+        const rawText = node.textContent || '';
+        if (!rawText.trim()) return rejectNodeFlag;
+        const parent = node.parentElement;
+        if (!isVisibleTextParent(parent)) return rejectNodeFlag;
+        return acceptNodeFlag;
+      },
+    });
+
+    let node = walker.nextNode();
+    let totalLength = 0;
+    while (node) {
+      const text = node.textContent || '';
+      texts.push(text);
+      totalLength += text.length + 1;
+      if (totalLength > config.maxTotalLength) break;
+      node = walker.nextNode();
+    }
+
+    return {
+      textContent: cleanContent(texts.join(' ')),
+      source,
+    };
+  }
+
+  function isVisibleTextParent(element) {
+    if (!element) return false;
+    if (
+      element.closest(
+        'script, style, noscript, template, svg, canvas, [hidden], [aria-hidden="true"]',
+      )
+    ) {
+      return false;
+    }
+
+    let current = element;
+    while (current && current !== document.body) {
+      const style = window.getComputedStyle(current);
+      if (
+        style.display === 'none' ||
+        style.visibility === 'hidden' ||
+        style.visibility === 'collapse'
+      ) {
+        return false;
+      }
+      current = current.parentElement;
+    }
+
+    return true;
+  }
+
+  function extractFallbackTextContent(options = {}) {
+    const preferTextContent = options.preferTextContent === true;
+    if (preferTextContent) {
+      return extractFastBodyTextContent('large_dom_body_textContent');
+    }
+
+    const innerText = preferTextContent ? '' : document.body?.innerText || '';
+    if (!preferTextContent && innerText.trim().length >= config.minTextLength) {
+      return {
+        textContent: cleanContent(innerText),
+        source: 'body_innerText',
+      };
+    }
+
+    const blockTexts = [];
+    const candidates = document.body
+      ? document.body.querySelectorAll(
+          'article, main, section, [role="main"], p, li, h1, h2, h3, h4, td, pre, blockquote, div',
+        )
+      : [];
+
+    for (const element of candidates) {
+      if (!isElementVisible(element)) continue;
+      if (element.closest('script, style, noscript, nav, aside')) continue;
+
+      const text = (element.textContent || '').replace(/\s+/g, ' ').trim();
+      if (text.length < config.minTextLength) continue;
+
+      const parentText = (element.parentElement?.textContent || '').replace(/\s+/g, ' ').trim();
+      if (parentText === text && element.parentElement && element.parentElement !== document.body) {
+        continue;
+      }
+
+      if (!blockTexts.includes(text)) {
+        blockTexts.push(text);
+      }
+
+      if (blockTexts.join('\n\n').length > config.maxTotalLength) {
+        break;
+      }
+    }
+
+    const textContent =
+      blockTexts.length > 0 ? blockTexts.join('\n\n') : document.body?.textContent || '';
+    const source =
+      blockTexts.length > 0
+        ? 'visible_textContent_blocks'
+        : preferTextContent
+          ? 'large_dom_body_textContent'
+          : 'body_textContent';
+    return {
+      textContent: cleanContent(textContent),
+      source,
+    };
+  }
+
+  function buildContentDiagnostics(extractedText, options = {}) {
+    const extractedLength = cleanContent(extractedText || '').length;
+    if (options.skipContainerScan === true) {
+      return {
+        extractedLength,
+        scrollContainerCandidateCount: 0,
+        bestScrollableTextLength: 0,
+        longScrollableContentLikely: false,
+        scrollContainers: [],
+        diagnosticsSkipped: true,
+        diagnosticsSkippedReason: options.skipReason || 'fast_path',
+      };
+    }
+
+    const diagnostics = findScrollableTextContainers();
+    const scrollContainers = diagnostics.containers.slice(0, 5);
+    const bestScrollableTextLength = scrollContainers.reduce(
+      (max, item) => Math.max(max, item.textLength),
+      0,
+    );
+    return {
+      extractedLength,
+      scrollContainerCandidateCount: scrollContainers.length,
+      bestScrollableTextLength,
+      longScrollableContentLikely: bestScrollableTextLength > extractedLength * 1.5,
+      scrollContainers,
+      diagnosticsCapped: diagnostics.capped,
+      diagnosticsScannedElementCount: diagnostics.scannedElementCount,
+      diagnosticsMatchedElementCount: diagnostics.matchedElementCount,
+    };
+  }
+
+  function findScrollableTextContainers() {
+    if (!document.body)
+      return {
+        containers: [],
+        capped: false,
+        scannedElementCount: 0,
+        matchedElementCount: 0,
+      };
+    const candidates = [];
+    const elements = document.body.querySelectorAll('main, article, section, div, textarea');
+    let scannedElementCount = 0;
+    let capped = false;
+    for (const element of elements) {
+      scannedElementCount += 1;
+      if (scannedElementCount > config.maxDiagnosticsElements) {
+        capped = true;
+        break;
+      }
+      if (!isElementVisible(element)) continue;
+      if (element.closest('script, style, noscript, nav, aside')) continue;
+      const scrollHeight = Number(element.scrollHeight || 0);
+      const clientHeight = Number(element.clientHeight || 0);
+      if (scrollHeight <= clientHeight + 40) continue;
+      const text = cleanContent(element.innerText || element.textContent || '');
+      if (text.length < config.minTextLength) continue;
+      const tagName = element.tagName;
+      const redactTextPreview = tagName === 'TEXTAREA';
+      candidates.push({
+        tagName,
+        id: element.id || null,
+        className: String(element.className || '').slice(0, 120) || null,
+        scrollTop: Math.round(Number(element.scrollTop || 0)),
+        scrollHeight: Math.round(scrollHeight),
+        clientHeight: Math.round(clientHeight),
+        textLength: text.length,
+        textPreview: redactTextPreview ? null : text.slice(0, 160),
+        textPreviewRedacted: redactTextPreview,
+      });
+    }
+    candidates.sort((a, b) => b.textLength - a.textLength || b.scrollHeight - a.scrollHeight);
+    return {
+      containers: candidates,
+      capped,
+      scannedElementCount,
+      matchedElementCount: elements.length,
+    };
   }
 
   /**
@@ -2931,6 +3195,19 @@ if (window.__WEB_FETCHER_HELPER_INITIALIZED__) {
       );
     }
     return cleaned;
+  }
+
+  /**
+   * Extract plain text from already-cleaned HTML.
+   * This is a low-risk fallback for pages where visible text extraction is sparse
+   * but sanitized HTML still carries readable body content.
+   * @param {string} html - The cleaned HTML content
+   * @returns {string} - Plain text derived from cleaned HTML
+   */
+  function extractTextFromHtml(html) {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html || '', 'text/html');
+    return cleanContent(doc.body?.textContent || doc.documentElement?.textContent || '');
   }
 
   /**

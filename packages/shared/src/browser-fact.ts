@@ -17,6 +17,11 @@
  *   (`packages/shared/src/tools.ts`) are not modified by observation
  *   type changes.
  */
+import type {
+  BrowserSourceTruthChain,
+  BrowserTaskEvidenceLevel,
+  BrowserTaskScenarioClass,
+} from './browser-task-thing-contract';
 
 // ---------------------------------------------------------------------------
 // Lifecycle state machine
@@ -115,12 +120,10 @@ export const NAVIGATION_INTENTS = [
 
 /**
  * Snapshot of the lifecycle state machine. Producer:
- * `lifecycle-state-machine.ts`. Consumers: `browser-context-manager.ts`
- * and the operation-log writer.
+ * `lifecycle-state-machine.ts`. Consumer: `browser-context-manager.ts`.
  *
  * Privacy: this snapshot carries NO raw URL. The `urlPattern` field is
- * the path-only, query-stripped, brand-neutral form already used by
- * the operation log (`OperationMemoryLog.urlPattern`).
+ * the path-only, query-stripped, brand-neutral form used for browser facts.
  */
 export interface LifecycleStateSnapshot {
   /** Current state (closed enum, always includes `'unknown'`). */
@@ -132,8 +135,7 @@ export interface LifecycleStateSnapshot {
   /**
    * Confidence in the state, formatted as a clamped float in `[0, 1]`.
    * Higher when more independent signals corroborate the state. The
-   * lifecycle writer stamps the formatted `'0.00'..'1.00'` string into
-   * `OperationLogMetadata.lifecycleConfidence`.
+   * lifecycle writer exposes the same confidence through browser facts.
    */
   lifecycleConfidence: number;
   /**
@@ -433,13 +435,23 @@ export interface BrowserFactSnapshotEnvelope {
  *
  * Always includes `'unknown'` per the shared invariant.
  */
-export type ActionKind = 'click' | 'fill' | 'submit' | 'navigate' | 'keyboard' | 'unknown';
+export type ActionKind =
+  | 'click'
+  | 'fill'
+  | 'submit'
+  | 'navigate'
+  | 'read'
+  | 'close'
+  | 'keyboard'
+  | 'unknown';
 
 export const ACTION_KINDS = [
   'click',
   'fill',
   'submit',
   'navigate',
+  'read',
+  'close',
   'keyboard',
   'unknown',
 ] as const satisfies ReadonlyArray<ActionKind>;
@@ -457,6 +469,7 @@ export type ActionSignalKind =
   | 'tab_created'
   | 'dom_region_changed'
   | 'network_completed'
+  | 'network_failed'
   | 'dialog_opened'
   | 'unknown';
 
@@ -465,6 +478,7 @@ export const ACTION_SIGNAL_KINDS = [
   'tab_created',
   'dom_region_changed',
   'network_completed',
+  'network_failed',
   'dialog_opened',
   'unknown',
 ] as const satisfies ReadonlyArray<ActionSignalKind>;
@@ -501,6 +515,7 @@ export type ActionOutcome =
   | 'navigated_new_tab'
   | 'spa_partial_update'
   | 'modal_opened'
+  | 'error_observed'
   | 'no_observed_change'
   | 'multiple_signals'
   | 'ambiguous'
@@ -511,6 +526,7 @@ export const ACTION_OUTCOMES = [
   'navigated_new_tab',
   'spa_partial_update',
   'modal_opened',
+  'error_observed',
   'no_observed_change',
   'multiple_signals',
   'ambiguous',
@@ -553,6 +569,69 @@ export interface ActionOutcomeSnapshot {
    *  (deduplicated). Useful for the operation-log evidence trail. */
   observedSignalKinds: ActionSignalKind[];
   /** Producer wallclock for the snapshot (ms). */
+  producedAtMs: number;
+}
+
+// ---------------------------------------------------------------------------
+// Action postcondition verifier (BNS-04)
+// ---------------------------------------------------------------------------
+
+/**
+ * Closed-enum verdict for the first BNS-04 postcondition verifier slice.
+ * This is not a product-grade or real-browser acceptance verdict; it only
+ * describes whether an already-classified action outcome supports the expected
+ * class of effect for the frozen action kind.
+ */
+export type PostconditionVerdict = 'passed' | 'failed' | 'unknown';
+
+export const POSTCONDITION_VERDICTS = [
+  'passed',
+  'failed',
+  'unknown',
+] as const satisfies ReadonlyArray<PostconditionVerdict>;
+
+/**
+ * Minimum provenance taxonomy for BNS-04 postcondition results.
+ * The verifier consumes runtime action envelopes, classifier snapshots, and a
+ * deterministic inference matrix.
+ */
+export type PostconditionSourceOrigin =
+  | 'runtime'
+  | 'action_outcome_classifier'
+  | 'inference'
+  | 'unknown';
+
+export const POSTCONDITION_SOURCE_ORIGINS = [
+  'runtime',
+  'action_outcome_classifier',
+  'inference',
+  'unknown',
+] as const satisfies ReadonlyArray<PostconditionSourceOrigin>;
+
+export type PostconditionEvidenceRefKind = 'action_outcome' | 'stream_event' | 'unknown';
+
+/**
+ * Coarse evidence reference for BNS-04. Current authoritative inputs expose
+ * `actionId`, but not per-signal ids or standalone classifier snapshot ids, so
+ * implementations must not invent event-level ids.
+ */
+export interface PostconditionEvidenceRef {
+  kind: PostconditionEvidenceRefKind;
+  id: string;
+  origin: PostconditionSourceOrigin;
+}
+
+export interface PostconditionResult {
+  actionId: string;
+  actionKind: ActionKind;
+  tabId: number | null;
+  urlPattern: string | null;
+  verdict: PostconditionVerdict;
+  reason: string;
+  observedOutcome: ActionOutcome;
+  observedOutcomeConfidence: number;
+  sourceEventRefs: PostconditionEvidenceRef[];
+  sourceOrigins: PostconditionSourceOrigin[];
   producedAtMs: number;
 }
 
@@ -773,9 +852,7 @@ export const TAB_WINDOW_EVENT_KINDS = [
 
 /**
  * Closed-enum reason the ContextManager bumps a tab's context
- * version. Mirrors `OperationLogMetadata.contextInvalidationReason`
- * (already declared in operation-log metadata — do not bump that allowlist
- * here; this enum just pins the wire-side closed set).
+ * version. This enum pins the wire-side closed set.
  *
  * Always includes `'unknown'` per the shared invariant.
  */
@@ -941,3 +1018,416 @@ export const OBSERVATION_KINDS = [
   'tab_event',
   'unknown',
 ] as const satisfies ReadonlyArray<ObservationKind>;
+
+// ---------------------------------------------------------------------------
+// Browser Event Stream (BNS-01)
+// ---------------------------------------------------------------------------
+
+/** Opaque correlation id used to group nearby stream events. */
+export type CorrelationGroupId = string;
+
+/**
+ * Closed-enum kind of internal stream event. Mirrors the bridge
+ * `ObservationKind` set with `observation_`-prefixed stream kinds so
+ * downstream consumers can distinguish raw bridge events from
+ * stream-forwarded ones.
+ *
+ * Always includes `'unknown'` per the shared invariant.
+ */
+export type BrowserStreamEventKind =
+  | 'observation_lifecycle'
+  | 'observation_fact_snapshot'
+  | 'observation_action_outcome'
+  | 'observation_tab_event'
+  | 'observation_unknown'
+  | 'unknown';
+
+export const BROWSER_STREAM_EVENT_KINDS = [
+  'observation_lifecycle',
+  'observation_fact_snapshot',
+  'observation_action_outcome',
+  'observation_tab_event',
+  'observation_unknown',
+  'unknown',
+] as const satisfies ReadonlyArray<BrowserStreamEventKind>;
+
+/**
+ * Mapping from bridge `ObservationKind` to internal stream event kind.
+ * Pure function contract: implementations MUST use this mapping so
+ * downstream subscribers see stable, predictable event kinds.
+ */
+export const OBSERVATION_TO_STREAM_EVENT_KIND: Readonly<
+  Record<ObservationKind, BrowserStreamEventKind>
+> = Object.freeze({
+  lifecycle_event: 'observation_lifecycle',
+  fact_snapshot: 'observation_fact_snapshot',
+  action_outcome: 'observation_action_outcome',
+  tab_event: 'observation_tab_event',
+  unknown: 'observation_unknown',
+});
+
+/**
+ * Unified internal event envelope. Every bridge observation that
+ * passes through the stream router produces a `BrowserStreamEvent`.
+ */
+export interface BrowserStreamEvent {
+  /** Producer-side opaque id, stable per event. */
+  streamEventId: string;
+  /** Advisory correlation group. Events sharing the same
+   *  `correlationGroupId` are likely related (same tab, close in
+   *  time). The derivation is a pure function over `(tabId,
+   *  observedAtMs)` — same tab + within correlation window = same group. */
+  correlationGroupId: CorrelationGroupId;
+  /** Closed-enum stream event kind. */
+  kind: BrowserStreamEventKind;
+  /** Producer wallclock for the event (ms). */
+  observedAtMs: number;
+  /** The tab this event is about. `null` when unknown. */
+  tabId: number | null;
+  /** Brand-neutral path-only urlPattern. `null` when unknown. */
+  urlPattern: string | null;
+  /** The original bridge observation kind this event was derived from. */
+  sourceObservationKind: ObservationKind | null;
+  /** The original bridge observation payload, forwarded unchanged. */
+  sourcePayload: unknown | null;
+}
+
+/**
+ * Per-subscriber health descriptor. The stream router snapshots these
+ * on demand for diagnostic consumers.
+ */
+export interface StreamSubscriberHealth {
+  /** Subscriber id assigned at registration. */
+  subscriberId: string;
+  /** Event kinds this subscriber is registered for. */
+  subscribedKinds: BrowserStreamEventKind[];
+  /** Cumulative events dispatched to this subscriber since registration. */
+  eventsDispatched: number;
+  /** Cumulative events dropped because the subscriber threw an error
+   *  or failed its own health check. */
+  eventsDropped: number;
+  /** Wallclock of the most recent event acknowledged by this
+   *  subscriber (ms). `null` if no events have been dispatched yet. */
+  lastAcknowledgedAtMs: number | null;
+  /** Is the subscriber believed to be healthy? Derived from the
+   *  subscriber's own health check and zero delivery errors. */
+  healthy: boolean;
+}
+
+/**
+ * Stream health snapshot, consumed by the existing diagnostics
+ * surface (`observation-diagnostics.ts`).
+ */
+export interface StreamHealthSnapshot {
+  /** Total events dispatched across the stream since init. */
+  totalEventsDispatched: number;
+  /** Total events dropped due to no subscribers or fan-out errors. */
+  totalEventsDropped: number;
+  /** Count of currently registered subscribers. */
+  subscriberCount: number;
+  /** Per-subscriber health descriptors (order matches registration). */
+  subscribers: StreamSubscriberHealth[];
+  /** Producer wallclock for this snapshot (ms). */
+  producedAtMs: number;
+}
+
+// ---------------------------------------------------------------------------
+// Semantic Signal Aggregator (BNS-02)
+// ---------------------------------------------------------------------------
+
+/**
+ * Closed-enum semantic signal kinds approved for the BNS runtime signal layer.
+ *
+ * Boundary: this is an internal bridge/runtime contract, not a public MCP tool
+ * schema. Keep every new value brand-neutral and backed by deterministic
+ * evidence before adding it here.
+ */
+export type SemanticSignalKind =
+  | 'wait_for_stability'
+  | 'ready_to_act'
+  | 'user_took_over'
+  | 'login_required'
+  | 'challenge_required'
+  | 'results_changed'
+  | 'error_page_detected'
+  | 'postcondition_failed'
+  | 'unknown';
+
+export const SEMANTIC_SIGNAL_KINDS = [
+  'wait_for_stability',
+  'ready_to_act',
+  'user_took_over',
+  'login_required',
+  'challenge_required',
+  'results_changed',
+  'error_page_detected',
+  'postcondition_failed',
+  'unknown',
+] as const satisfies ReadonlyArray<SemanticSignalKind>;
+
+/**
+ * Closed-enum origin for a semantic signal. The first implementation uses
+ * `browser_stream`; the other values reserve evidence provenance without
+ * adding state DTOs or MCP schema.
+ */
+export type SemanticSignalSourceOrigin =
+  | 'browser_stream'
+  | 'page_projection'
+  | 'runtime_inference'
+  | 'unknown';
+
+export const SEMANTIC_SIGNAL_SOURCE_ORIGINS = [
+  'browser_stream',
+  'page_projection',
+  'runtime_inference',
+  'unknown',
+] as const satisfies ReadonlyArray<SemanticSignalSourceOrigin>;
+
+/** Minimal pointer back to the stream event that caused a signal. */
+export interface SignalEvidenceRef {
+  streamEventId: string;
+  eventKind: BrowserStreamEventKind;
+  sourceObservationKind: ObservationKind | null;
+  observedAtMs: number;
+}
+
+/** Narrow semantic signal DTO for BNS-02 Batch A. */
+export interface SemanticSignal {
+  signalId: string;
+  kind: SemanticSignalKind;
+  confidence: number;
+  tabId: number | null;
+  urlPattern: string | null;
+  sourceEventRefs: SignalEvidenceRef[];
+  sourceOrigins: SemanticSignalSourceOrigin[];
+  producedAtMs: number;
+}
+
+// ---------------------------------------------------------------------------
+// Lifecycle evidence artifact (BNS-05)
+// ---------------------------------------------------------------------------
+
+export type LifecycleEvidenceArtifactSection =
+  | 'scenario_baseline'
+  | 'event_timeline'
+  | 'signal_sequence'
+  | 'scope_transitions'
+  | 'action_log'
+  | 'browser_hygiene_closeout'
+  | 'source_truth_chain'
+  | 'claim_boundary'
+  | 'final_verdict'
+  | 'unknown';
+
+export const LIFECYCLE_EVIDENCE_ARTIFACT_SECTIONS = [
+  'scenario_baseline',
+  'event_timeline',
+  'signal_sequence',
+  'scope_transitions',
+  'action_log',
+  'browser_hygiene_closeout',
+  'source_truth_chain',
+  'claim_boundary',
+  'final_verdict',
+  'unknown',
+] as const satisfies ReadonlyArray<LifecycleEvidenceArtifactSection>;
+
+export interface LifecycleEvidenceBaseline {
+  scenarioId: string;
+  scenarioClass: BrowserTaskScenarioClass | string;
+  evidenceLevel: BrowserTaskEvidenceLevel;
+  startedAtMs: number;
+}
+
+export interface LifecycleEvidenceKeyEvent {
+  streamEventId: string;
+  kind: BrowserStreamEventKind;
+  observedAtMs: number;
+  tabId: number | null;
+  urlPattern: string | null;
+  sourceObservationKind: ObservationKind | null;
+}
+
+export interface LifecycleEvidenceEventTimeline {
+  available: boolean;
+  totalEvents: number;
+  eventsByKind: Record<string, number>;
+  firstEventAtMs: number | null;
+  lastEventAtMs: number | null;
+  keyEvents: LifecycleEvidenceKeyEvent[];
+}
+
+export interface LifecycleEvidenceUnavailableSection {
+  available: false;
+  reason: string;
+}
+
+export interface LifecycleEvidenceSignalSequence {
+  available: boolean;
+  totalSignals: number;
+  signalsByKind: Record<string, number>;
+  firstSignalAtMs: number | null;
+  lastSignalAtMs: number | null;
+  signals: SemanticSignal[];
+}
+
+export type LifecycleEvidenceScopeKind =
+  | 'search'
+  | 'form'
+  | 'auth'
+  | 'challenge'
+  | 'long_content'
+  | 'multi_tab'
+  | 'error_recovery'
+  | 'user_takeover'
+  | 'loading'
+  | 'idle'
+  | 'unknown';
+
+export type LifecycleEvidenceScopeRegionPurpose =
+  | 'input'
+  | 'output'
+  | 'feedback'
+  | 'navigation'
+  | 'unknown';
+
+export interface LifecycleEvidenceScopeRegion {
+  regionId: string;
+  regionPurpose: LifecycleEvidenceScopeRegionPurpose;
+  expectedRole: string | null;
+}
+
+export interface LifecycleEvidenceScopeTransition {
+  scopeKind: LifecycleEvidenceScopeKind;
+  tabId: number | null;
+  regions: LifecycleEvidenceScopeRegion[];
+  confidence: number;
+  reason: string;
+  producedAtMs: number;
+}
+
+export interface LifecycleEvidenceScopeTransitions {
+  available: boolean;
+  totalTransitions: number;
+  transitions: LifecycleEvidenceScopeTransition[];
+}
+
+export interface LifecycleEvidenceActionLog {
+  available: boolean;
+  totalActions: number;
+  passed: number;
+  failed: number;
+  unknown: number;
+  entries: PostconditionResult[];
+}
+
+export type LifecycleEvidenceBrowserHygieneCheckKind =
+  | 'tab_window_baseline'
+  | 'active_tab_restore'
+  | 'run_owned_cleanup'
+  | 'user_owned_protection'
+  | 'failure_cleanup'
+  | 'unknown';
+
+export const LIFECYCLE_EVIDENCE_BROWSER_HYGIENE_CHECK_KINDS = [
+  'tab_window_baseline',
+  'active_tab_restore',
+  'run_owned_cleanup',
+  'user_owned_protection',
+  'failure_cleanup',
+  'unknown',
+] as const satisfies ReadonlyArray<LifecycleEvidenceBrowserHygieneCheckKind>;
+
+export type LifecycleEvidenceBrowserHygieneCheckVerdict = 'pass' | 'fail' | 'unknown';
+
+export const LIFECYCLE_EVIDENCE_BROWSER_HYGIENE_CHECK_VERDICTS = [
+  'pass',
+  'fail',
+  'unknown',
+] as const satisfies ReadonlyArray<LifecycleEvidenceBrowserHygieneCheckVerdict>;
+
+export type LifecycleEvidenceBrowserHygieneCheckReason =
+  | 'pre_post_tab_window_baseline_unchanged'
+  | 'pre_post_tab_window_baseline_changed'
+  | 'active_tab_restored'
+  | 'active_tab_not_restored'
+  | 'run_owned_tabs_cleaned'
+  | 'run_owned_tabs_left_open'
+  | 'user_owned_tabs_protected'
+  | 'user_owned_tab_closed'
+  | 'failure_cleanup_completed'
+  | 'failure_cleanup_failed'
+  | 'failure_cleanup_not_needed'
+  | 'browser_hygiene_check_not_reported'
+  | 'unknown';
+
+export const LIFECYCLE_EVIDENCE_BROWSER_HYGIENE_CHECK_REASONS = [
+  'pre_post_tab_window_baseline_unchanged',
+  'pre_post_tab_window_baseline_changed',
+  'active_tab_restored',
+  'active_tab_not_restored',
+  'run_owned_tabs_cleaned',
+  'run_owned_tabs_left_open',
+  'user_owned_tabs_protected',
+  'user_owned_tab_closed',
+  'failure_cleanup_completed',
+  'failure_cleanup_failed',
+  'failure_cleanup_not_needed',
+  'browser_hygiene_check_not_reported',
+  'unknown',
+] as const satisfies ReadonlyArray<LifecycleEvidenceBrowserHygieneCheckReason>;
+
+export interface LifecycleEvidenceBrowserHygieneCheck {
+  kind: LifecycleEvidenceBrowserHygieneCheckKind;
+  verdict: LifecycleEvidenceBrowserHygieneCheckVerdict;
+  reason: LifecycleEvidenceBrowserHygieneCheckReason;
+}
+
+export interface LifecycleEvidenceBrowserHygiene {
+  available: boolean;
+  baselineTabs: number | null;
+  runOwnedTabsClosed: number | null;
+  baselineChanged: boolean | null;
+  checks: LifecycleEvidenceBrowserHygieneCheck[];
+  notes: string[];
+}
+
+export interface LifecycleEvidenceClaimBoundary {
+  deterministicArtifactOnly: boolean;
+  realBrowserProven: boolean;
+  commercialGradeProven: boolean;
+  competitorSuperiorityProven: boolean;
+  fallbackSuccessSeparated: boolean;
+  sourceRouteProven: boolean;
+}
+
+export type LifecycleEvidenceFinalVerdictKind =
+  | 'task_success'
+  | 'task_failed'
+  | 'partial_success'
+  | 'blocked'
+  | 'unknown';
+
+export interface LifecycleEvidenceFinalVerdict {
+  verdict: LifecycleEvidenceFinalVerdictKind;
+  confidence: number;
+  reason: string;
+}
+
+export interface LifecycleEvidenceArtifact {
+  artifactId: string;
+  version: 1;
+  evidenceLevel: BrowserTaskEvidenceLevel;
+  scenarioId: string;
+  scenarioClass: BrowserTaskScenarioClass | string;
+  baseline: LifecycleEvidenceBaseline;
+  eventTimeline: LifecycleEvidenceEventTimeline;
+  signalSequence: LifecycleEvidenceSignalSequence | LifecycleEvidenceUnavailableSection;
+  scopeTransitions: LifecycleEvidenceScopeTransitions | LifecycleEvidenceUnavailableSection;
+  actionLog: LifecycleEvidenceActionLog;
+  browserHygiene: LifecycleEvidenceBrowserHygiene;
+  sourceTruthChain: BrowserSourceTruthChain | null;
+  claimBoundary: LifecycleEvidenceClaimBoundary;
+  finalVerdict: LifecycleEvidenceFinalVerdict;
+  producedAtMs: number;
+}

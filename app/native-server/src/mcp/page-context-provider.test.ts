@@ -19,20 +19,21 @@
 import {
   LivePageContextProvider,
   createLivePageContextProvider,
+  type PageSnapshotLike,
   type PageSnapshotReader,
 } from './page-context-provider';
 import type { PageSnapshot } from '../memory/db/page-snapshot-repository';
 
-function makeSnap(overrides: Partial<PageSnapshot> = {}): PageSnapshot {
+function makeSnap(overrides: Partial<PageSnapshot & PageSnapshotLike> = {}): PageSnapshotLike {
   return {
     snapshotId: 'snap-1',
     stepId: 'step-1',
     tabId: null,
     url: 'https://example.com/issues',
     title: 'issues',
-    pageType: 'github',
+    pageType: 'workspace',
     mode: 'l0',
-    pageRole: 'github_issues_list',
+    pageRole: 'workspace_item_list',
     primaryRegion: 'main',
     quality: 'ok',
     taskMode: 'browse',
@@ -75,9 +76,77 @@ describe('LivePageContextProvider — lookup order', () => {
     expect(result.source).toBe('live_snapshot');
     expect(result.candidateActionsCount).toBe(9);
     expect(result.hvoCount).toBe(4);
-    expect(result.pageRole).toBe('github_issues_list');
+    expect(result.pageRole).toBe('workspace_item_list');
     expect(result.fullReadByteLength).toBe(40 + 60 + 100);
+    expect(result.factSnapshotVerdict).toBe('fresh');
+    expect(result.readinessVerdict).toBe('ready');
     expect(result.fallbackCause).toBeUndefined();
+  });
+
+  test('uses measured fullReadByteLength before protocol blob lengths', () => {
+    const snap = makeSnap({
+      fullReadByteLength: 40_000,
+      protocolL0Blob: 'a'.repeat(1),
+      protocolL1Blob: 'b'.repeat(1),
+      protocolL2Blob: 'c'.repeat(1),
+    });
+    const provider = new LivePageContextProvider({
+      reader: makeReader({
+        findLatestForUrl: (url) => (url === 'https://example.com/issues' ? snap : undefined),
+      }),
+    });
+
+    const result = provider.getContext({ url: 'https://example.com/issues' });
+
+    expect(result.source).toBe('live_snapshot');
+    expect(result.fullReadByteLength).toBe(40_000);
+  });
+
+  test('treats an explicitly validated current-task compact read as fresh', () => {
+    const provider = new LivePageContextProvider({
+      reader: makeReader({
+        findLatestForUrl: () =>
+          makeSnap({
+            currentPageValidated: true,
+            fullReadByteLength: 0,
+            protocolL0Blob: null,
+            protocolL1Blob: null,
+            protocolL2Blob: null,
+            candidateActionCount: 12,
+          }),
+      }),
+    });
+
+    const result = provider.getContext({ url: 'https://example.com/issues' });
+
+    expect(result).toMatchObject({
+      source: 'live_snapshot',
+      candidateActionsCount: 12,
+      fullReadByteLength: 0,
+      factSnapshotVerdict: 'fresh',
+      readinessVerdict: 'ready',
+    });
+  });
+
+  test('preserves explicit object_library_snapshot source without calling it live', () => {
+    const snap = makeSnap({
+      contextSource: 'object_library_snapshot',
+      candidateActionCount: 3,
+      highValueObjectCount: 5,
+    });
+    const provider = new LivePageContextProvider({
+      reader: makeReader({
+        findLatestForUrl: (url) => (url === 'https://example.com/issues' ? snap : undefined),
+      }),
+    });
+
+    const result = provider.getContext({ url: 'https://example.com/issues' });
+
+    expect(result.source).toBe('object_library_snapshot');
+    expect(result.candidateActionsCount).toBe(3);
+    expect(result.hvoCount).toBe(5);
+    expect(result.factSnapshotVerdict).toBe('unknown');
+    expect(result.readinessVerdict).toBe('unknown');
   });
 
   test('falls back to memory_snapshot when only pageRole matches', () => {
@@ -88,16 +157,18 @@ describe('LivePageContextProvider — lookup order', () => {
     });
     const provider = new LivePageContextProvider({
       reader: makeReader({
-        findLatestForPageRole: (role) => (role === 'github_issues_list' ? snap : undefined),
+        findLatestForPageRole: (role) => (role === 'workspace_item_list' ? snap : undefined),
       }),
     });
     const result = provider.getContext({
       url: 'https://example.com/issues',
-      pageRole: 'github_issues_list',
+      pageRole: 'workspace_item_list',
     });
     expect(result.source).toBe('memory_snapshot');
     expect(result.candidateActionsCount).toBe(2);
     expect(result.hvoCount).toBe(1);
+    expect(result.factSnapshotVerdict).toBe('unknown');
+    expect(result.readinessVerdict).toBe('unknown');
     expect(result.fallbackCause).toBeUndefined();
   });
 
@@ -113,7 +184,7 @@ describe('LivePageContextProvider — lookup order', () => {
             ? makeSnap({ url, candidateActionCount: 5, highValueObjectCount: 2 })
             : undefined,
         findLatestForPageRole: (role) =>
-          role === 'github_repo_overview' ? makeSnap({ pageRole: role }) : undefined,
+          role === 'workspace_repo_overview' ? makeSnap({ pageRole: role }) : undefined,
       }),
     });
     const result = provider.getContext({});
@@ -158,6 +229,8 @@ describe('LivePageContextProvider — fallback_zero shapes', () => {
       hvoCount: 0,
       fullReadByteLength: 0,
       pageRole: 'role_x',
+      factSnapshotVerdict: 'unknown',
+      readinessVerdict: 'unknown',
       fallbackCause: 'persistence_off',
     });
   });
@@ -184,10 +257,10 @@ describe('LivePageContextProvider — fallback_zero shapes', () => {
     // tell "we knew the role but had no row" apart from the other
     // two failure modes — useful for sizing memory coverage.
     const provider = new LivePageContextProvider({ reader: makeReader() });
-    const result = provider.getContext({ pageRole: 'github_pull_review' });
+    const result = provider.getContext({ pageRole: 'workspace_pull_review' });
     expect(result.source).toBe('fallback_zero');
     expect(result.fallbackCause).toBe('no_matching_snapshot');
-    expect(result.pageRole).toBe('github_pull_review');
+    expect(result.pageRole).toBe('workspace_pull_review');
     expect(result.candidateActionsCount).toBe(0);
     expect(result.hvoCount).toBe(0);
   });

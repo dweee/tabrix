@@ -65,6 +65,7 @@ export const TOOL_MESSAGE_TYPES = {
   GENERATE_ACCESSIBILITY_TREE: 'generateAccessibilityTree',
   RESOLVE_REF: 'resolveRef',
   ENSURE_REF_FOR_SELECTOR: 'ensureRefForSelector',
+  ENSURE_REF_FOR_POINT: 'ensureRefForPoint',
   VERIFY_FINGERPRINT: 'verifyFingerprint',
   DISPATCH_HOVER_FOR_REF: 'dispatchHoverForRef',
 
@@ -113,8 +114,7 @@ export enum SendMessageType {
 }
 
 // ============================================================
-// Quick Panel / AgentChat message contracts were removed as part of the
-// MKEP pruning removed the legacy element marker surface. The file keeps
-// only the cross-surface message enums that non-agent features still
-// use (extension <-> native host, MKEP viewers etc.).
+// Removed assistant-panel and element-marker message contracts stay out of
+// this file. Keep only the cross-surface message enums still used by the
+// extension, native host, and MKEP viewers.
 // ============================================================

@@ -18,7 +18,6 @@ const ALLOWED_HOSTS = ['127.0.0.1', '0.0.0.0', 'localhost', '::'];
 
 interface HostConfig {
   host?: string;
-  policyCapabilities?: string;
 }
 
 function getConfigFile(): string {
@@ -63,15 +62,6 @@ export function getPersistedHost(): string | undefined {
 export function setPersistedHost(host: string): void {
   if (!ALLOWED_HOSTS.includes(host)) return;
   writeConfig({ host });
-}
-
-export function getPersistedPolicyCapabilities(): string | undefined {
-  const cfg = readConfig();
-  return typeof cfg.policyCapabilities === 'string' ? cfg.policyCapabilities : undefined;
-}
-
-export function setPersistedPolicyCapabilities(policyCapabilities: string): void {
-  writeConfig({ policyCapabilities });
 }
 
 export const __hostConfigInternals = {

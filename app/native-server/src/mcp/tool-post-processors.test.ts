@@ -1,15 +1,10 @@
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
 import { TOOL_NAMES } from '@tabrix/shared';
 import { SessionManager } from '../execution/session-manager';
 import { TaskSessionContext } from '../execution/task-session-context';
-import { __hostConfigInternals, setPersistedPolicyCapabilities } from '../host-config';
 import {
   runPostProcessor,
   chromeReadPagePostProcessor,
-  chromeActionPostProcessor,
   chromeNetworkCapturePostProcessor,
   TOOL_POST_PROCESSORS,
 } from './tool-post-processors';
@@ -21,11 +16,11 @@ function wrap(body: unknown): CallToolResult {
 const readPageBody = {
   mode: 'compact',
   page: {
-    url: 'https://github.com/openclaw/openclaw',
+    url: 'https://code.example/openclaw/openclaw',
     title: 'openclaw/openclaw',
     pageType: 'web_page',
   },
-  summary: { pageRole: 'github_repo_home', primaryRegion: 'main', quality: 'usable' },
+  summary: { pageRole: 'workspace_home', primaryRegion: 'main', quality: 'usable' },
   interactiveElements: [],
   artifactRefs: [],
   highValueObjects: [],
@@ -69,7 +64,7 @@ describe('runPostProcessor', () => {
 });
 
 describe('chromeReadPagePostProcessor', () => {
-  it('injects historyRef into the JSON body and returns it as an artifact ref', () => {
+  it('strips retired historyRef from read_page JSON bodies without creating artifact refs', () => {
     const manager = new SessionManager({ dbPath: ':memory:' });
     try {
       const task = manager.createTask({
@@ -98,11 +93,10 @@ describe('chromeReadPagePostProcessor', () => {
         args: { tabId: 9 },
       });
 
-      expect(out.extraArtifactRefs).toHaveLength(1);
-      expect(out.extraArtifactRefs[0]).toMatch(/^memory:\/\/snapshot\/[0-9a-f-]+$/);
+      expect(out.extraArtifactRefs).toEqual([]);
 
       const parsed = JSON.parse((out.rawResult.content as any[])[0].text);
-      expect(parsed.historyRef).toBe(out.extraArtifactRefs[0]);
+      expect(parsed.historyRef).toBeUndefined();
 
       // Original raw result must not have been mutated.
       const original = JSON.parse((raw.content as any[])[0].text);
@@ -141,8 +135,9 @@ describe('chromeReadPagePostProcessor', () => {
         args: {},
       });
 
-      expect(out.rawResult).toBe(raw);
       expect(out.extraArtifactRefs).toEqual([]);
+      const parsed = JSON.parse((out.rawResult.content as any[])[0].text);
+      expect(parsed.historyRef).toBeUndefined();
     } finally {
       manager.close();
     }
@@ -185,148 +180,49 @@ describe('chromeReadPagePostProcessor', () => {
   });
 });
 
-describe('TOOL_POST_PROCESSORS registry (Phase 0.3)', () => {
-  it('registers the action processor for all four DOM action tools', () => {
+describe('TOOL_POST_PROCESSORS registry', () => {
+  it('registers only active post-processors and leaves retired action memory writers unhooked', () => {
+    expect(TOOL_POST_PROCESSORS.chrome_read_page).toBe(chromeReadPagePostProcessor);
+    expect(TOOL_POST_PROCESSORS[TOOL_NAMES.BROWSER.NETWORK_CAPTURE]).toBe(
+      chromeNetworkCapturePostProcessor,
+    );
+    expect(TOOL_POST_PROCESSORS[TOOL_NAMES.BROWSER.NETWORK_CAPTURE_STOP]).toBe(
+      chromeNetworkCapturePostProcessor,
+    );
+    expect(TOOL_POST_PROCESSORS[TOOL_NAMES.BROWSER.NETWORK_DEBUGGER_STOP]).toBe(
+      chromeNetworkCapturePostProcessor,
+    );
     for (const name of [
       'chrome_click_element',
       'chrome_fill_or_select',
       'chrome_navigate',
       'chrome_keyboard',
     ]) {
-      expect(TOOL_POST_PROCESSORS[name]).toBe(chromeActionPostProcessor);
-    }
-  });
-});
-
-describe('chromeActionPostProcessor', () => {
-  function bootstrap() {
-    const manager = new SessionManager({ dbPath: ':memory:' });
-    const task = manager.createTask({
-      taskType: 'tool-call',
-      title: 't',
-      intent: 'i',
-      origin: 'jest',
-    });
-    const session = manager.startSession({
-      taskId: task.taskId,
-      transport: 'stdio',
-      clientName: 'jest',
-    });
-    const step = manager.startStep({
-      sessionId: session.sessionId,
-      toolName: 'chrome_click_element',
-    });
-    return { manager, session, step };
-  }
-
-  it('records a click action and injects historyRef into JSON body', () => {
-    const { manager, session, step } = bootstrap();
-    try {
-      const raw = wrap({ message: 'clicked', elementInfo: { role: 'button' } });
-      const out = chromeActionPostProcessor({
-        toolName: 'chrome_click_element',
-        rawResult: raw,
-        stepId: step.stepId,
-        sessionId: session.sessionId,
-        sessionManager: manager,
-        args: { tabId: 9, ref: 'e-1' },
-      });
-      expect(out.extraArtifactRefs).toHaveLength(1);
-      expect(out.extraArtifactRefs[0]).toMatch(/^memory:\/\/action\/[0-9a-f-]+$/);
-      const parsed = JSON.parse((out.rawResult.content as any[])[0].text);
-      expect(parsed.historyRef).toBe(out.extraArtifactRefs[0]);
-
-      // Original is not mutated.
-      const original = JSON.parse((raw.content as any[])[0].text);
-      expect(original.historyRef).toBeUndefined();
-
-      const persisted = manager.actions!.listByStep(step.stepId);
-      expect(persisted).toHaveLength(1);
-      expect(persisted[0].actionKind).toBe('click');
-      expect(persisted[0].tabId).toBe(9);
-    } finally {
-      manager.close();
-    }
-  });
-
-  it('still records a row and returns artifactRef for plain-text error bodies', () => {
-    const { manager, session, step } = bootstrap();
-    try {
-      const raw: CallToolResult = {
-        content: [{ type: 'text', text: 'Element not found' }],
-        isError: true,
-      };
-      const out = chromeActionPostProcessor({
-        toolName: 'chrome_click_element',
-        rawResult: raw,
-        stepId: step.stepId,
-        sessionId: session.sessionId,
-        sessionManager: manager,
-        args: { tabId: 9, ref: 'e-missing' },
-      });
-      expect(out.extraArtifactRefs).toHaveLength(1);
-      // Plain-text body: inline injection is skipped.
-      expect((out.rawResult.content as any[])[0].text).toBe('Element not found');
-      const persisted = manager.actions!.listByStep(step.stepId);
-      expect(persisted[0].status).toBe('failed');
-    } finally {
-      manager.close();
-    }
-  });
-
-  it('degrades silently when Memory persistence is off', () => {
-    const manager = new SessionManager({ persistenceEnabled: false });
-    try {
-      const task = manager.createTask({
-        taskType: 'tool-call',
-        title: 't',
-        intent: 'i',
-        origin: 'jest',
-      });
-      const session = manager.startSession({
-        taskId: task.taskId,
-        transport: 'stdio',
-        clientName: 'jest',
-      });
-      const step = manager.startStep({
-        sessionId: session.sessionId,
-        toolName: 'chrome_click_element',
-      });
-      const raw = wrap({ message: 'ok' });
-      const out = chromeActionPostProcessor({
-        toolName: 'chrome_click_element',
-        rawResult: raw,
-        stepId: step.stepId,
-        sessionId: session.sessionId,
-        sessionManager: manager,
-        args: { tabId: 9, ref: 'e-1' },
-      });
-      expect(out.rawResult).toBe(raw);
-      expect(out.extraArtifactRefs).toEqual([]);
-    } finally {
-      manager.close();
+      expect(TOOL_POST_PROCESSORS[name]).toBeUndefined();
     }
   });
 });
 
 /**
- * B-017 end-to-end — proves the capability gate + redaction contract
+ * B-017 end-to-end — proves the default capture + redaction contract
  * actually fires through the post-processor that real `chrome_network_capture`
  * results flow through.
  *
  * The shape we feed `runPostProcessor` here mirrors the JSON body the
  * extension's `network-capture-debugger.ts` / `network-capture-web-request.ts`
  * tools serialize when `action: "stop"` returns. We do NOT mock the
- * post-processor itself — we want the registry → gate → derive → upsert
+ * post-processor itself — we want the registry → derive → upsert
  * chain to be the unit under test.
  */
 describe('chromeNetworkCapturePostProcessor (B-017 integration)', () => {
   const SAMPLE_BUNDLE = {
     requests: [
       {
-        url: 'https://api.github.com/search/repositories?q=AI助手&sort=stars&order=desc',
+        url: 'https://api.code.example/search/repositories?q=AI助手&sort=stars&order=desc',
         method: 'GET',
+        type: 'xmlhttprequest',
         statusCode: 200,
+        mimeType: 'application/json',
         specificRequestHeaders: {
           Authorization: 'Bearer ghp_SUPERSECRET_token_VALUE_should_never_persist',
           Cookie: 'session=cookie-payload-PII; tracking=xyz',
@@ -342,17 +238,17 @@ describe('chromeNetworkCapturePostProcessor (B-017 integration)', () => {
           items: [{ id: 1, full_name: 'octocat/private-title-PII', owner: { login: 'octocat' } }],
         }),
       },
-      // A non-github request that must be silently dropped.
+      // A request without usable XHR/fetch or JSON evidence must be silently dropped.
       {
         url: 'https://example.com/api/things?secret=hunter2',
         method: 'GET',
         statusCode: 200,
         responseBody: '{}',
       },
-      // A private telemetry-like GitHub endpoint must not become
+      // A private telemetry-like Workspace endpoint must not become
       // unclassified endpoint knowledge.
       {
-        url: 'https://api.github.com/_private/browser/stats?token=raw_query_secret',
+        url: 'https://api.code.example/_private/browser/stats?token=raw_query_secret',
         method: 'GET',
         statusCode: 200,
         mimeType: 'application/json',
@@ -381,29 +277,13 @@ describe('chromeNetworkCapturePostProcessor (B-017 integration)', () => {
     return { manager, session, step };
   }
 
-  const ENV_KEY = 'TABRIX_POLICY_CAPABILITIES';
-  let prevEnv: string | undefined;
-  let configDir: string;
-  beforeEach(() => {
-    prevEnv = process.env[ENV_KEY];
-    configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tabrix-network-capabilities-'));
-    __hostConfigInternals.setConfigFileForTesting(path.join(configDir, 'config.json'));
-  });
-  afterEach(() => {
-    if (prevEnv === undefined) delete process.env[ENV_KEY];
-    else process.env[ENV_KEY] = prevEnv;
-    __hostConfigInternals.setConfigFileForTesting(null);
-    fs.rmSync(configDir, { recursive: true, force: true });
-  });
-
   it('is registered for the canonical NETWORK_CAPTURE tool name', () => {
     expect(TOOL_POST_PROCESSORS[TOOL_NAMES.BROWSER.NETWORK_CAPTURE]).toBe(
       chromeNetworkCapturePostProcessor,
     );
   });
 
-  it('captures NOTHING when capability gate is closed (default)', () => {
-    delete process.env[ENV_KEY];
+  it('captures useful API rows by default', () => {
     const { manager, session, step } = bootstrap();
     try {
       const raw = wrap(SAMPLE_BUNDLE);
@@ -418,16 +298,14 @@ describe('chromeNetworkCapturePostProcessor (B-017 integration)', () => {
       // Result is unchanged (Knowledge capture is invisible side-effect).
       expect(out.rawResult).toBe(raw);
       expect(out.extraArtifactRefs).toEqual([]);
-      // And NOTHING landed in the Knowledge table.
-      expect(manager.knowledgeApi!.countAll()).toBe(0);
+      // Useful, redacted API knowledge landed by default.
+      expect(manager.knowledgeApi!.countAll()).toBe(1);
     } finally {
       manager.close();
     }
   });
 
-  it('captures GitHub-only rows from persisted api_knowledge when shell env is absent', () => {
-    delete process.env[ENV_KEY];
-    setPersistedPolicyCapabilities('api_knowledge');
+  it('captures classified rows without persisted capability config', () => {
     const { manager, session, step } = bootstrap();
     try {
       const raw = wrap(SAMPLE_BUNDLE);
@@ -442,13 +320,14 @@ describe('chromeNetworkCapturePostProcessor (B-017 integration)', () => {
 
       // Exactly one row — example.com was dropped at the classifier.
       expect(manager.knowledgeApi!.countAll()).toBe(1);
-      const rows = manager.knowledgeApi!.listBySite('api.github.com');
+      const rows = manager.knowledgeApi!.listBySite('api.code.example');
       expect(rows).toHaveLength(1);
       const row = rows[0];
 
-      // Useful, redacted shape:
-      expect(row.semanticTag).toBe('github.search_repositories');
-      expect(row.urlPattern).toBe('api.github.com/search/repositories');
+      // Useful, redacted generic observed shape:
+      expect(row.semanticTag).toBeNull();
+      expect(row.family).toBe('observed');
+      expect(row.urlPattern).toBe('api.code.example/search/repositories');
       expect(row.method).toBe('GET');
       expect(row.statusClass).toBe('2xx');
       expect(row.requestSummary.hasAuth).toBe(true);
@@ -484,29 +363,7 @@ describe('chromeNetworkCapturePostProcessor (B-017 integration)', () => {
     }
   });
 
-  it('gives shell env priority over persisted config when deciding capture enablement', () => {
-    setPersistedPolicyCapabilities('api_knowledge');
-    process.env[ENV_KEY] = 'experience_replay';
-    const { manager, session, step } = bootstrap();
-    try {
-      const raw = wrap(SAMPLE_BUNDLE);
-      runPostProcessor({
-        toolName: TOOL_NAMES.BROWSER.NETWORK_CAPTURE,
-        rawResult: raw,
-        stepId: step.stepId,
-        sessionId: session.sessionId,
-        sessionManager: manager,
-        args: {},
-      });
-
-      expect(manager.knowledgeApi!.countAll()).toBe(0);
-    } finally {
-      manager.close();
-    }
-  });
-
   it('does not mutate the MCP response on success (response stays byte-identical)', () => {
-    process.env[ENV_KEY] = 'all';
     const { manager, session, step } = bootstrap();
     try {
       const raw = wrap(SAMPLE_BUNDLE);
@@ -528,7 +385,6 @@ describe('chromeNetworkCapturePostProcessor (B-017 integration)', () => {
   });
 
   it('degrades silently on malformed bundle JSON', () => {
-    process.env[ENV_KEY] = 'api_knowledge';
     const { manager, session, step } = bootstrap();
     try {
       const raw: CallToolResult = { content: [{ type: 'text', text: 'not json' }] };
@@ -548,7 +404,6 @@ describe('chromeNetworkCapturePostProcessor (B-017 integration)', () => {
   });
 
   it('upsert dedup: re-running the same bundle does not double-count', () => {
-    process.env[ENV_KEY] = 'api_knowledge';
     const { manager, session, step } = bootstrap();
     try {
       const raw = wrap(SAMPLE_BUNDLE);
@@ -563,7 +418,7 @@ describe('chromeNetworkCapturePostProcessor (B-017 integration)', () => {
         });
       }
       expect(manager.knowledgeApi!.countAll()).toBe(1);
-      const [row] = manager.knowledgeApi!.listBySite('api.github.com');
+      const [row] = manager.knowledgeApi!.listBySite('api.code.example');
       expect(row.sampleCount).toBe(3);
       // First-seen provenance sticks to the first observation; even after
       // 3 hits, sourceSessionId is still the original session.
@@ -574,7 +429,6 @@ describe('chromeNetworkCapturePostProcessor (B-017 integration)', () => {
   });
 
   it('uses capture tabUrl as live observed relevance context when task currentUrl is absent', () => {
-    process.env[ENV_KEY] = 'api_knowledge';
     const { manager, session, step } = bootstrap();
     const taskContext = new TaskSessionContext();
     const raw = wrap({
@@ -627,6 +481,70 @@ describe('chromeNetworkCapturePostProcessor (B-017 integration)', () => {
         responseSummarySource: 'debugger_body_probe',
         responseBodySource: 'debugger_api',
         rowCount: 2,
+      });
+    } finally {
+      manager.close();
+    }
+  });
+
+  it('keeps shape-evidenced cross-origin POST search rows in task context', () => {
+    const { manager, session, step } = bootstrap();
+    const taskContext = new TaskSessionContext();
+    const raw = wrap({
+      tabUrl: 'https://hn.algolia.com/?q=browser%20automation',
+      observationMode: 'cdp_enhanced',
+      cdpUsed: true,
+      cdpReason: 'need_response_body',
+      cdpAttachDurationMs: 8,
+      cdpDetachSuccess: true,
+      debuggerConflict: false,
+      responseBodySource: 'debugger_api',
+      rawBodyPersisted: false,
+      bodyCompacted: true,
+      requests: [
+        {
+          url: 'https://search-provider.example.test/1/indexes/Item_dev/query',
+          method: 'POST',
+          type: 'xmlhttprequest',
+          statusCode: 200,
+          mimeType: 'application/json',
+          specificResponseHeaders: { 'Content-Type': 'application/json; charset=UTF-8' },
+          responseBody: JSON.stringify({
+            hits: [
+              {
+                title: 'browser automation tools',
+                points: 42,
+                comments: 7,
+              },
+            ],
+          }),
+          base64Encoded: false,
+          responseBodySource: 'debugger_api',
+          rawBodyPersisted: false,
+          bodyCompacted: true,
+        },
+      ],
+    });
+
+    try {
+      runPostProcessor({
+        toolName: TOOL_NAMES.BROWSER.NETWORK_CAPTURE,
+        rawResult: raw,
+        stepId: step.stepId,
+        sessionId: session.sessionId,
+        sessionManager: manager,
+        taskContext,
+        args: {},
+      });
+
+      expect(taskContext.peekLiveObservedApiData()).toMatchObject({
+        selectedDataSource: 'cdp_enhanced_api_rows',
+        semanticType: 'search',
+        endpointSource: 'observed',
+        pageRegion: 'task_query_network',
+        responseSummarySource: 'debugger_body_probe',
+        responseBodySource: 'debugger_api',
+        rowCount: 1,
       });
     } finally {
       manager.close();

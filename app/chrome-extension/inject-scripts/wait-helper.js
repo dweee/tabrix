@@ -11,7 +11,16 @@
   if (!window.__claudeElementMap) window.__claudeElementMap = {};
   if (!window.__claudeRefCounter) window.__claudeRefCounter = 0;
 
-  function isVisible(el) {
+  function describeError(error) {
+    return String(error && error.message ? error.message : error);
+  }
+
+  function recordDiagnostic(diagnostics, source, error) {
+    if (!Array.isArray(diagnostics) || diagnostics.length >= 5) return;
+    diagnostics.push({ source, message: describeError(error) });
+  }
+
+  function isVisible(el, diagnostics) {
     try {
       if (!(el instanceof Element)) return false;
       const style = getComputedStyle(el);
@@ -20,7 +29,8 @@
       const rect = el.getBoundingClientRect();
       if (rect.width <= 0 || rect.height <= 0) return false;
       return true;
-    } catch {
+    } catch (error) {
+      recordDiagnostic(diagnostics, 'visibility_check_failed', error);
       return false;
     }
   }
@@ -32,36 +42,42 @@
       .toLowerCase();
   }
 
-  function matchesText(el, needle) {
+  function candidateHasText(el, needle) {
     const t = normalize(needle);
     if (!t) return false;
+    const aria = el.getAttribute('aria-label');
+    if (aria && normalize(aria).includes(t)) return true;
+    const title = el.getAttribute('title');
+    if (title && normalize(title).includes(t)) return true;
+    const alt = el.getAttribute('alt');
+    if (alt && normalize(alt).includes(t)) return true;
+    const placeholder = el.getAttribute('placeholder');
+    if (placeholder && normalize(placeholder).includes(t)) return true;
+    // input/textarea value
+    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+      const value = el.value || el.getAttribute('value');
+      if (value && normalize(value).includes(t)) return true;
+    }
+    const text = el.innerText || el.textContent || '';
+    return normalize(text).includes(t);
+  }
+
+  function matchesText(el, needle, diagnostics) {
     try {
-      if (!isVisible(el)) return false;
-      const aria = el.getAttribute('aria-label');
-      if (aria && normalize(aria).includes(t)) return true;
-      const title = el.getAttribute('title');
-      if (title && normalize(title).includes(t)) return true;
-      const alt = el.getAttribute('alt');
-      if (alt && normalize(alt).includes(t)) return true;
-      const placeholder = el.getAttribute('placeholder');
-      if (placeholder && normalize(placeholder).includes(t)) return true;
-      // input/textarea value
-      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
-        const value = el.value || el.getAttribute('value');
-        if (value && normalize(value).includes(t)) return true;
-      }
-      const text = el.innerText || el.textContent || '';
-      if (normalize(text).includes(t)) return true;
-    } catch {}
+      if (!candidateHasText(el, needle)) return false;
+      return isVisible(el, diagnostics);
+    } catch (error) {
+      recordDiagnostic(diagnostics, 'matches_text_failed', error);
+    }
     return false;
   }
 
-  function findElementByText(text) {
+  function findElementByText(text, diagnostics) {
     // Fast path: query common interactive elements first
     const prioritized = Array.from(
       document.querySelectorAll('a,button,input,textarea,select,label,summary,[role]'),
     );
-    for (const el of prioritized) if (matchesText(el, text)) return el;
+    for (const el of prioritized) if (matchesText(el, text, diagnostics)) return el;
 
     // Fallback: broader scan with cap to avoid blocking on huge pages
     const walker = document.createTreeWalker(
@@ -71,7 +87,7 @@
     let count = 0;
     while (walker.nextNode()) {
       const el = /** @type {Element} */ (walker.currentNode);
-      if (matchesText(el, text)) return el;
+      if (matchesText(el, text, diagnostics)) return el;
       if (++count > 5000) break; // Hard cap to avoid long scans
     }
     return null;
@@ -97,10 +113,12 @@
     return new Promise((resolve) => {
       const start = Date.now();
       let resolved = false;
+      const diagnostics = [];
+      let timer = null;
 
       const check = () => {
         try {
-          const match = findElementByText(text);
+          const match = findElementByText(text, diagnostics);
           if (appear) {
             if (match) {
               const ref = ensureRefForElement(match);
@@ -109,18 +127,27 @@
             }
           } else {
             // wait for disappearance
-            if (!match) {
+            const hasInconclusiveTextProbe = diagnostics.some(
+              (entry) =>
+                entry &&
+                (entry.source === 'visibility_check_failed' ||
+                  entry.source === 'matches_text_failed' ||
+                  entry.source === 'wait_for_text_check_failed'),
+            );
+            if (!match && !hasInconclusiveTextProbe) {
               done({ success: true, matched: null, tookMs: Date.now() - start });
             }
           }
-        } catch {}
+        } catch (error) {
+          recordDiagnostic(diagnostics, 'wait_for_text_check_failed', error);
+        }
       };
 
       const done = (result) => {
         if (resolved) return;
         resolved = true;
         obs && obs.disconnect();
-        clearTimeout(timer);
+        if (timer) clearTimeout(timer);
         resolve(result);
       };
 
@@ -132,13 +159,20 @@
           characterData: true,
           attributes: true,
         });
-      } catch {}
+      } catch (error) {
+        recordDiagnostic(diagnostics, 'mutation_observer_failed', error);
+      }
 
       // Initial check
       check();
-      const timer = setTimeout(
+      timer = setTimeout(
         () => {
-          done({ success: false, reason: 'timeout', tookMs: Date.now() - start });
+          done({
+            success: false,
+            reason: 'timeout',
+            tookMs: Date.now() - start,
+            ...(diagnostics.length ? { diagnostics } : {}),
+          });
         },
         Math.max(0, timeout),
       );
@@ -149,15 +183,19 @@
     return new Promise((resolve) => {
       const start = Date.now();
       let resolved = false;
+      const diagnostics = [];
+      let timer = null;
 
       const isMatch = () => {
         try {
           const el = document.querySelector(selector);
-          if (!el) return null;
-          if (!visible) return el;
-          return isVisible(el) ? el : null;
-        } catch {
-          return null;
+          if (!el) return { el: null };
+          if (!visible) return { el };
+          return { el: isVisible(el) ? el : null };
+        } catch (error) {
+          const message = describeError(error);
+          recordDiagnostic(diagnostics, 'selector_query_failed', error);
+          return { el: null, error: message };
         }
       };
 
@@ -165,12 +203,23 @@
         if (resolved) return;
         resolved = true;
         obs && obs.disconnect();
-        clearTimeout(timer);
+        if (timer) clearTimeout(timer);
         resolve(result);
       };
 
       const check = () => {
-        const el = isMatch();
+        const result = isMatch();
+        if (result.error) {
+          done({
+            success: false,
+            reason: 'selector_error',
+            error: result.error,
+            tookMs: Date.now() - start,
+            diagnostics,
+          });
+          return;
+        }
+        const el = result.el;
         if (el) {
           const ref = ensureRefForElement(el);
           const center = centerOf(el);
@@ -186,12 +235,20 @@
           characterData: true,
           attributes: true,
         });
-      } catch {}
+      } catch (error) {
+        recordDiagnostic(diagnostics, 'mutation_observer_failed', error);
+      }
 
       // initial check
       check();
-      const timer = setTimeout(
-        () => done({ success: false, reason: 'timeout', tookMs: Date.now() - start }),
+      timer = setTimeout(
+        () =>
+          done({
+            success: false,
+            reason: 'timeout',
+            tookMs: Date.now() - start,
+            ...(diagnostics.length ? { diagnostics } : {}),
+          }),
         Math.max(0, timeout),
       );
     });

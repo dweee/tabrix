@@ -11,10 +11,6 @@
     "message": "原生伺服器設定",
     "description": "本機伺服器設定的主要區段標題"
   },
-  "semanticEngineLabel": {
-    "message": "語意引擎",
-    "description": "語意引擎的主要區段標題"
-  },
   "embeddingModelLabel": {
     "message": "Embedding 模型",
     "description": "模型選擇的主要區段標題"
@@ -148,26 +144,6 @@
   "downloadingStatus": {
     "message": "下載中...",
     "description": "下載進度訊息"
-  },
-  "semanticEngineReadyStatus": {
-    "message": "語意引擎已就緒",
-    "description": "語意引擎就緒狀態"
-  },
-  "semanticEngineInitializingStatus": {
-    "message": "語意引擎初始化中...",
-    "description": "語意引擎初始化狀態"
-  },
-  "semanticEngineInitFailedStatus": {
-    "message": "語意引擎初始化失敗",
-    "description": "語意引擎初始化失敗狀態"
-  },
-  "semanticEngineNotInitStatus": {
-    "message": "語意引擎未初始化",
-    "description": "語意引擎未初始化狀態"
-  },
-  "initSemanticEngineButton": {
-    "message": "初始化語意引擎",
-    "description": "初始化語意引擎按鈕文字"
   },
   "reinitializeButton": {
     "message": "重新初始化",

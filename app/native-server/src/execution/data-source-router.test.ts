@@ -40,6 +40,8 @@ describe('DataSourceRouter (V26-09 legacy back-compat)', () => {
       tokenEstimateFullRead: 4096,
       tokensSavedEstimate: 4032,
       apiCandidateAvailable: true,
+      factSnapshotVerdict: 'fresh',
+      readinessVerdict: 'ready',
       dispatcherInputSource: null,
     });
 
@@ -67,6 +69,28 @@ describe('DataSourceRouter (V26-09 legacy back-compat)', () => {
     expect(decision.decisionRuleId).toBe('R_KNOWLEDGE_SUPPORTED_LEGACY');
     expect(decision.selectedDataSource).toBe('api_list');
     expect(decision.publicSurfaceDelta).toBe('none');
+  });
+
+  it('does not route historical API knowledge without fresh current-page validation', () => {
+    const decision = routeDataSource({
+      strategy: 'knowledge_light',
+      sourceRoute: 'knowledge_supported_read',
+      chosenLayer: 'L0',
+      layerDispatchReason: 'knowledge_supports_summary',
+      tokenEstimateChosen: 64,
+      tokenEstimateFullRead: 4096,
+      tokensSavedEstimate: 4032,
+      apiCandidateAvailable: true,
+      dispatcherInputSource: null,
+    });
+
+    expect(decision).toMatchObject({
+      dataSource: 'dom_json',
+      chosenSource: 'dom_json',
+      decisionRuleId: 'R_DOM_DEFAULT',
+      factSnapshotVerdict: 'unknown',
+      readinessVerdict: 'unknown',
+    });
   });
 
   it('keeps markdown as a reading surface with compact DOM fallback', () => {
@@ -123,6 +147,8 @@ describe('DataSourceRouter (V26-09 legacy back-compat)', () => {
         chosenLayer: 'L0',
         layerDispatchReason: 'knowledge_supports_summary',
         apiCandidateAvailable: true,
+        factSnapshotVerdict: 'fresh',
+        readinessVerdict: 'ready',
         dispatcherInputSource: null,
       });
 
@@ -197,21 +223,6 @@ describe('DataSourceRouter (V26-09 legacy back-compat)', () => {
 });
 
 describe('DataSourceRouter — V27-09 truth table', () => {
-  it('experience replay route surfaces the dom_json execution envelope (R_EXPERIENCE_REPLAY)', () => {
-    const decision = routeDataSource({
-      strategy: 'experience_replay',
-      sourceRoute: 'experience_replay_skip_read',
-      chosenLayer: 'L0+L1',
-      dispatcherInputSource: null,
-    });
-    expect(decision.decisionRuleId).toBe('R_EXPERIENCE_REPLAY');
-    expect(decision.dataSource).toBe('experience_replay');
-    expect(decision.layerContract.dataSource).toBe('dom_json');
-    expect(decision.layerContract.allowedUses).toEqual(
-      expect.arrayContaining(['execution', 'locator']),
-    );
-  });
-
   it('click/fill intent forces dom_json even when api candidate is available (R_CLICK_FILL_DOM_AUTHORITY)', () => {
     const decision = routeDataSource({
       sourceRoute: 'knowledge_supported_read',
@@ -345,6 +356,21 @@ describe('DataSourceRouter — V27-09 truth table', () => {
       expect(decision.confidence).toBeLessThan(0.6);
     },
   );
+
+  it('knowledge_supported_read compatibility path demotes when caller supplies unknown current-page validation', () => {
+    const decision = routeDataSource({
+      sourceRoute: 'knowledge_supported_read',
+      chosenLayer: 'L0',
+      apiCandidateAvailable: true,
+      dispatcherInputSource: 'object_library_snapshot',
+      factSnapshotVerdict: 'unknown',
+      readinessVerdict: 'unknown',
+    });
+    expect(decision.decisionRuleId).toBe('R_FACTS_STALE_DEMOTE_DOM');
+    expect(decision.dataSource).toBe('dom_json');
+    expect(decision.decisionReason).toBe('facts_stale_or_missing_demote_to_dom');
+    expect(decision.readinessVerdict).toBe('unknown');
+  });
 
   it('readiness=empty + sufficient endpoint lineage marks empty-as-success api_list (R_EMPTY_RESULT_API_CONFIRMED)', () => {
     const decision = routeDataSource({
@@ -503,6 +529,31 @@ describe('DataSourceRouter — V27-09 truth table', () => {
     expect(decision.dataSource).toBe('dom_json');
   });
 
+  it('rejects DOM region rows when only one visible row is available', () => {
+    const decision = routeDataSource({
+      sourceRoute: 'knowledge_supported_read',
+      chosenLayer: 'L0+L1',
+      taskIntent: 'search_list',
+      factSnapshotVerdict: 'fresh',
+      readinessVerdict: 'ready',
+      complexityClass: 'list',
+      endpointEvidence: evidence({
+        inferredSemanticType: 'search',
+        lastFailureReason: 'semantic_mismatch',
+      }),
+      domRegionRowsEvidence: {
+        available: true,
+        rowCount: 1,
+        confidence: 0.86,
+        targetRefCoverageRate: 0.99,
+        regionQualityScore: 0.82,
+      },
+    });
+
+    expect(decision.decisionRuleId).not.toBe('R_DOM_REGION_ROWS_HIGH_CONFIDENCE');
+    expect(decision.dataSource).toBe('dom_json');
+  });
+
   it('keeps API rows ahead of DOM region rows when API evidence is high-confidence', () => {
     const decision = routeDataSource({
       sourceRoute: 'knowledge_supported_read',
@@ -557,15 +608,6 @@ describe('DataSourceRouter — V27-09 truth table', () => {
 
   it('publicSurfaceDelta defaults to "none" across every rule (no public MCP shape change)', () => {
     const cases: Array<{ ruleId: DataSourceRouterRuleId; build: () => unknown }> = [
-      {
-        ruleId: 'R_EXPERIENCE_REPLAY',
-        build: () =>
-          routeDataSource({
-            sourceRoute: 'experience_replay_skip_read',
-            chosenLayer: 'L0',
-            dispatcherInputSource: null,
-          }),
-      },
       {
         ruleId: 'R_CLICK_FILL_DOM_AUTHORITY',
         build: () =>
@@ -790,11 +832,6 @@ describe('DataSourceRouter — truth table coverage', () => {
   // index; if you add a new rule id, add a fixture here so the
   // suite refuses to ship a rule with zero coverage.
   const ruleFixtures: Record<DataSourceRouterRuleId, () => DataSourceRouterRuleId> = {
-    R_EXPERIENCE_REPLAY: () =>
-      routeDataSource({
-        sourceRoute: 'experience_replay_skip_read',
-        chosenLayer: 'L0',
-      }).decisionRuleId,
     R_CLICK_FILL_DOM_AUTHORITY: () =>
       routeDataSource({
         sourceRoute: 'read_page_required',
@@ -890,6 +927,8 @@ describe('DataSourceRouter — truth table coverage', () => {
         sourceRoute: 'knowledge_supported_read',
         chosenLayer: 'L0',
         apiCandidateAvailable: true,
+        factSnapshotVerdict: 'fresh',
+        readinessVerdict: 'ready',
       }).decisionRuleId,
     R_DOM_DEFAULT: () =>
       routeDataSource({

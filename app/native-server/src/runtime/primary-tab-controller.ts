@@ -46,12 +46,12 @@
  *   - `samePrimaryTabNavigations / expectedPrimaryTabNavigations`:
  *     numerator/denominator for `primaryTabReuseRate`. Allowlisted
  *     navigations are excluded from both. Mirrors the cjs helper.
- *   - `benchmarkOwnedTabCount`: number of distinct tabIds the
- *     controller has observed. The runtime does not track baseline
- *     tabs (those are a benchmark-runner concept), so this counter is
- *     "tabs Tabrix has driven" rather than "tabs the suite created".
- *     The bridge snapshot field name carries the historical spelling for
- *     report-consumer compatibility.
+ *   - `benchmarkOwnedTabCount`: number of distinct observed tabIds
+ *     that have not been reported as closed. The runtime does not
+ *     track baseline tabs (those are a benchmark-runner concept), so
+ *     this counter is "currently open tabs Tabrix has driven" rather
+ *     than "tabs the suite created". The bridge snapshot field name
+ *     carries the historical spelling for report-consumer compatibility.
  *   - `violations`: closed-enum kind list (mirrors the cjs).
  */
 
@@ -140,6 +140,12 @@ export interface PrimaryTabController {
    * reuse rate counters, observed-tabs count, violations).
    */
   recordNavigation(input: RecordNavigationInput): void;
+
+  /**
+   * Record successful tab cleanup outcomes so runtime status does not
+   * continue counting closed run-owned tabs as currently owned.
+   */
+  recordClosedTabs(tabIds: ReadonlyArray<number>): void;
 
   /**
    * If enforcement is on AND a primary tab has been seeded AND the
@@ -256,6 +262,16 @@ export function createPrimaryTabController(
         `chrome_navigate returned tabId=${returnedTabId} but primaryTabId=${primaryTabId}` +
         (typeof input.url === 'string' && input.url.length > 0 ? ` (url=${input.url})` : '');
       recordViolation(scenarioId, HYGIENE_VIOLATION_KINDS.TAB_ID_CHANGED, detail);
+    },
+
+    recordClosedTabs(tabIds: ReadonlyArray<number>): void {
+      for (const tabId of tabIds) {
+        if (!Number.isInteger(tabId) || tabId < 0) continue;
+        observedTabIds.delete(tabId);
+        if (primaryTabId === tabId) {
+          primaryTabId = null;
+        }
+      }
     },
 
     getInjectedTabId(

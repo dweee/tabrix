@@ -11,10 +11,6 @@
     "message": "네이티브 서버 설정",
     "description": "네이티브 서버 설정의 주 섹션 제목"
   },
-  "semanticEngineLabel": {
-    "message": "시맨틱 엔진",
-    "description": "시맨틱 엔진의 주 섹션 제목"
-  },
   "embeddingModelLabel": {
     "message": "임베딩 모델",
     "description": "모델 선택의 주 섹션 제목"
@@ -148,26 +144,6 @@
   "downloadingStatus": {
     "message": "다운로드 중...",
     "description": "다운로드 진행 메시지"
-  },
-  "semanticEngineReadyStatus": {
-    "message": "시맨틱 엔진 준비 완료",
-    "description": "시맨틱 엔진 준비 완료 상태"
-  },
-  "semanticEngineInitializingStatus": {
-    "message": "시맨틱 엔진 초기화 중...",
-    "description": "시맨틱 엔진 초기화 상태"
-  },
-  "semanticEngineInitFailedStatus": {
-    "message": "시맨틱 엔진 초기화 실패",
-    "description": "시맨틱 엔진 초기화 실패 상태"
-  },
-  "semanticEngineNotInitStatus": {
-    "message": "시맨틱 엔진이 초기화되지 않음",
-    "description": "시맨틱 엔진이 초기화되지 않은 상태"
-  },
-  "initSemanticEngineButton": {
-    "message": "시맨틱 엔진 초기화",
-    "description": "시맨틱 엔진 초기화 버튼 텍스트"
   },
   "reinitializeButton": {
     "message": "재초기화",

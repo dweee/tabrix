@@ -1,109 +1,207 @@
 /**
- * MKEP Memory read-side DTOs.
+ * MKEP storage read-side DTOs.
  *
  * These types describe the JSON shapes returned by the native-server's
  * read-only `GET /memory/*` routes (see `app/native-server/src/server/memory-routes.ts`).
  * They are shared between the native-server (canonical emitter) and the
- * Chrome extension's sidepanel (sole consumer) so the contract stays pinned
+ * Chrome extension read surfaces so the contract stays pinned
  * in a single place.
  *
- * Conventions:
- * - All timestamps are ISO-8601 strings in UTC.
- * - Fields marked optional mirror nullable columns in the Memory SQLite tables.
- * - No field is ever renamed across layers: the server emits the same keys
- *   the client consumes, and the extension never reshapes before display.
- * - This module intentionally does not include any writer-side types. Write
- *   paths live inside the native-server and must not leak onto the wire.
+ * These are the public browser-extension contracts for the four storage
+ * surfaces: Memory traces, Object Library, Knowledge models, and Experience
+ * recipes. Pre-launch `/memory/sessions` task/session/step DTOs were retired;
+ * execution session objects are now internal runtime wrappers only.
  */
 
 export type MemoryPersistenceMode = 'disk' | 'memory' | 'off';
 
-export type MemorySessionStatus = 'starting' | 'running' | 'completed' | 'failed' | 'aborted';
-
-export type MemoryTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
-
-export type MemoryStepStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
-
-export type MemoryStepType = 'tool_call' | 'flow_call' | 'verification' | 'retry' | 'recovery';
-
 /**
- * Flattened projection of `memory_sessions` joined with `memory_tasks` and
- * a `COUNT(memory_steps)` subquery. Backs the Sidepanel Memory tab list.
+ * Sanitized projection of `tabrix_memory_traces`.
+ *
+ * This intentionally omits raw request/response blobs, perception objects,
+ * post-observation payloads, and raw AI feedback bodies. The popup management
+ * UI only receives whitelisted AI feedback fields. Internal execution
+ * provenance stays inside the native DB and is not part of the product-facing
+ * Memory list contract.
  */
-export interface MemorySessionSummary {
-  sessionId: string;
-  taskId: string;
-  /** Task title (copied from `memory_tasks.title`). */
-  taskTitle: string;
-  /** Task intent (copied from `memory_tasks.intent`). */
-  taskIntent: string;
-  transport: string;
-  clientName: string;
-  status: MemorySessionStatus;
-  startedAt: string;
-  endedAt?: string;
-  summary?: string;
-  workspaceContext?: string;
-  browserContext?: string;
-  /** Number of `memory_steps` rows whose `session_id` equals `sessionId`. */
-  stepCount: number;
+export type MkeMemoryAiFeedbackScope = 'step' | 'task';
+
+export interface MkeMemoryAiFeedbackSummary {
+  businessStatus?: string | null;
+  confidence?: number | null;
+  reasonCode?: string | null;
+  summary?: string | null;
 }
 
-/**
- * Raw `memory_steps` row, emitted in index order ascending.
- */
-export interface MemoryExecutionStep {
-  stepId: string;
-  sessionId: string;
-  index: number;
-  toolName: string;
-  stepType: MemoryStepType;
-  status: MemoryStepStatus;
-  inputSummary?: string;
-  resultSummary?: string;
-  startedAt: string;
-  endedAt?: string;
-  errorCode?: string;
-  errorSummary?: string;
-  artifactRefs: string[];
+export type MkeMemoryAiFeedbackState = 'not_required' | 'pending' | 'recorded';
+
+export type MkePageIdentityKind =
+  | 'web'
+  | 'extension'
+  | 'local_file'
+  | 'browser_internal'
+  | 'unknown';
+
+export interface MkePageIdentitySummary {
+  kind: MkePageIdentityKind;
+  label: string | null;
+  url?: string | null;
+  host?: string | null;
+  source:
+    | 'result_payload'
+    | 'current_route'
+    | 'root_route'
+    | 'page_url_pattern'
+    | 'site_family'
+    | 'none';
 }
 
-/**
- * Raw `memory_tasks` row. Returned by `GET /memory/tasks/:taskId`.
- */
-export interface MemoryTaskRow {
-  taskId: string;
-  taskType: string;
+export interface MkeTraceDisplaySummary {
   title: string;
-  intent: string;
-  origin: string;
+  subtitle?: string | null;
+  methodLabel: string;
+  locationLabel?: string | null;
+}
+
+export interface MkeMemoryTraceSummary {
+  traceId: string;
+  taskIntent?: string | null;
+  toolName: string;
+  requestAt: string;
+  responseAt: string;
+  durationMs?: number | null;
+  aiFeedbackRequired?: boolean;
+  aiFeedbackState?: MkeMemoryAiFeedbackState;
+  aiFeedback?: MkeMemoryAiFeedbackSummary | null;
+  siteFamily?: string | null;
+  pageUrlPattern?: string | null;
+  pageRole?: string | null;
+  createdAt: string;
+  display?: MkeTraceDisplaySummary;
+  pageIdentity?: MkePageIdentitySummary;
+}
+
+export type MkeBrowserObjectType =
+  | 'window'
+  | 'tab'
+  | 'page'
+  | 'region'
+  | 'action_target'
+  | 'data_source'
+  | 'unknown'
+  | string;
+
+export type MkeBrowserPageStatus = 'foreground' | 'running' | 'loading' | 'closed' | 'restricted';
+
+/**
+ * Product projection of browser tab/page lifecycle records.
+ *
+ * The Object Library answers one product question: which browser pages can the
+ * AI reason about next? Internal object graph fields, source traces, evidence
+ * markers, raw facts, and action/API counts stay out of this public contract.
+ */
+export interface MkeBrowserObjectSummary {
+  objectId: string;
+  tabId?: string | null;
+  title: string;
+  url?: string | null;
+  location: string;
+  status: MkeBrowserPageStatus;
+  detailReason?: string | null;
+  lastObservedAt?: string | null;
   createdAt: string;
   updatedAt: string;
-  status: MemoryTaskStatus;
-  owner?: string;
-  projectId?: string;
-  labels: string[];
 }
 
-/** `GET /memory/sessions` response envelope body. */
-export interface MemorySessionsResponseData {
-  sessions: MemorySessionSummary[];
+/**
+ * Sanitized projection of `tabrix_knowledge_models`.
+ *
+ * Large model blobs and internal quality scores stay out of the list endpoint.
+ * The Knowledge Library list is a compact product surface for page knowledge.
+ */
+export interface MkeKnowledgeModelSummary {
+  knowledgeId: string;
+  siteFamily: string;
+  pageUrlPattern?: string | null;
+  pageRole: string;
+  pageModelKey: string;
+  modelVersion: number;
+  observationCount: number;
+  successfulUseCount: number;
+  failedUseCount: number;
+  sourceExperienceCount: number;
+  archivedAt?: string | null;
+  lastObservedAt?: string | null;
+  lastValidatedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Sanitized projection of `tabrix_experience_recipes`.
+ *
+ * Template steps, variables, preconditions, and internal score projections are
+ * intentionally not exposed by the list endpoint.
+ */
+export interface MkeExperienceRecipeSummary {
+  experienceId: string;
+  recipeName: string;
+  scenarioKey: string;
+  recipeVersion: number;
+  siteFamily?: string | null;
+  pageModelKey?: string | null;
+  pageRole?: string | null;
+  portabilityScope: string;
+  reuseState: 'candidate' | 'verified_reusable' | 'imported_unverified' | 'archived';
+  successfulUseCount: number;
+  failedUseCount: number;
+  archivedAt?: string | null;
+  lastUsedAt?: string | null;
+  lastVerifiedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** `GET /memory/mke/traces` response envelope body. */
+export interface MkeMemoryTracesResponseData {
+  traces: MkeMemoryTraceSummary[];
   total: number;
   limit: number;
   offset: number;
   persistenceMode: MemoryPersistenceMode;
 }
 
-/** `GET /memory/sessions/:sessionId/steps` response envelope body. */
-export interface MemorySessionStepsResponseData {
-  sessionId: string;
-  steps: MemoryExecutionStep[];
+/** `GET /memory/mke/browser-objects` response envelope body. */
+export interface MkeBrowserObjectsResponseData {
+  browserObjects: MkeBrowserObjectSummary[];
+  total: number;
+  limit: number;
+  offset: number;
   persistenceMode: MemoryPersistenceMode;
 }
 
-/** `GET /memory/tasks/:taskId` response envelope body. */
-export interface MemoryTaskResponseData {
-  task: MemoryTaskRow;
+/** `DELETE /memory/mke/browser-objects` response envelope body. */
+export interface MkeBrowserObjectsClearResponseData {
+  cleared: boolean;
+  total: number;
+  persistenceMode: MemoryPersistenceMode;
+}
+
+/** `GET /memory/mke/knowledge` response envelope body. */
+export interface MkeKnowledgeModelsResponseData {
+  knowledgeModels: MkeKnowledgeModelSummary[];
+  total: number;
+  limit: number;
+  offset: number;
+  persistenceMode: MemoryPersistenceMode;
+}
+
+/** `GET /memory/mke/experience` response envelope body. */
+export interface MkeExperienceRecipesResponseData {
+  experienceRecipes: MkeExperienceRecipeSummary[];
+  total: number;
+  limit: number;
+  offset: number;
   persistenceMode: MemoryPersistenceMode;
 }
 

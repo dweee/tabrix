@@ -33,9 +33,9 @@ describe('buildPublicSafeV27GateReport — V27-16', () => {
       runId: 'fixture-real-platform',
       generatedAt: '2026-04-29T00:00:00.000Z',
       realPlatformGate: {
-        xhsSearchTop10RowsPass: 'BLOCKED',
-        githubSearchRowsPass: 'PASS',
-        douyinSearchRowsPass: 'not_run',
+        contentSearchTop10RowsPass: 'BLOCKED',
+        structuredSearchRowsPass: 'PASS',
+        mediaSearchRowsPass: 'not_run',
         domRegionRowsUsedCount: 2,
         apiRowsUsedCount: 1,
         failureReasonDistribution: {
@@ -57,9 +57,9 @@ describe('buildPublicSafeV27GateReport — V27-16', () => {
     expect(report.releaseReadiness).toBe('not_assessed');
     expect(report.realPlatformGate).toEqual({
       scope: 'public_safe_real_platform_gate',
-      xhsSearchTop10RowsPass: 'BLOCKED',
-      githubSearchRowsPass: 'PASS',
-      douyinSearchRowsPass: 'not_run',
+      contentSearchTop10RowsPass: 'BLOCKED',
+      structuredSearchRowsPass: 'PASS',
+      mediaSearchRowsPass: 'not_run',
       domRegionRowsUsedCount: 2,
       apiRowsUsedCount: 1,
       failureReasonDistribution: {

@@ -2,33 +2,132 @@ import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import {
   TOOL_NAMES,
+  type BrowserPageStability,
   type ReadPageCompactSnapshot,
+  type ReadPageFrameContext,
   type ReadPageFullSnapshot,
   type ReadPageMode,
   type ReadPageNormalSnapshot,
   type ReadPagePageContext,
+  type ReadPageLoadReadiness,
   type ReadPagePageType,
   type ReadPagePrimaryRegionConfidence,
   type ReadPageRenderMode,
   type ReadPageRequestedLayer,
+  type ReadPageSearchSurface,
+  type ReadPageWindowRuntimeState,
+  type ReadPageBrowserPageObjectView,
+  type BrowserPageThingProjection,
+  type BrowserPageOwnerType,
+  type ReadPageAssistantGuidance,
+  type ReadPageFileInputBinding,
+  type ReadPagePublishFormReadiness,
   READ_PAGE_REQUESTED_LAYER_VALUES,
+  buildBrowserPageThingProjectionFromReadPage,
 } from '@tabrix/shared';
 import { TOOL_MESSAGE_TYPES } from '@/common/message-types';
 import { ERROR_MESSAGES } from '@/common/constants';
 import { inferPageUnderstanding, type PageRole } from './read-page-understanding';
-import {
-  recordStableTargetRefSnapshot,
-  type StableTargetRefEntry,
-} from './stable-target-ref-registry';
 import { inferSchemeGuard } from './read-page-scheme-guard';
 import { summarizePageContent } from './read-page-content-summary';
 import { buildInteractiveElements } from './read-page-interactive-elements';
 import { buildCandidateActions, type CandidateActionSeed } from './read-page-candidate-actions';
+import {
+  buildReadPagePageDeltaReport,
+  recordPendingActionBinding,
+  resetObjectLifecycleCacheForTests,
+} from './read-page-object-delta';
+import { buildAndRememberReadPageObjectSensingOutput } from './read-page-object-sensing-output';
+import { buildBrowserPageObjectPublication } from './read-page-browser-page-object-publication';
+import { buildModeOutput } from './read-page-output-assembler';
+import {
+  appendObjectSensingDiagnostic,
+  normalizeAccessibilityTreeDiagnostics,
+} from './read-page-sensing-diagnostics';
+import {
+  normalizeAssistantGuidance,
+  normalizeWindowRuntimeState,
+  readWindowInteger,
+} from './read-page-input-normalizers';
+import { buildLoadReadiness, inferPageStability, normalizeFrameContext } from './read-page-state';
+import {
+  buildSearchSurface,
+  extractFilterPanelLabelsFromVisibleText,
+  extractSearchToolbarLabelsFromVisibleText,
+} from './read-page-search-surface';
 import { buildArtifactRefs } from './read-page-artifact-refs';
-import { buildFallbackRefMap, formatElementsAsPageContent } from './read-page-fallback-format';
+import { buildFallbackRefMap } from './read-page-fallback-format';
+import { collectReadPageFileInputBindings } from './read-page-file-input-bindings';
+import { buildPageOperationMap } from './read-page-operation-map';
 import { buildExtensionLayer, buildStableSnapshotLayer } from './read-page-snapshot-builders';
+import {
+  attachInteractiveRects,
+  attachInteractiveValueState,
+} from './read-page-interactive-enrichment';
 import { buildReadPageModeResult } from './read-page-mode-result';
+import {
+  applyPublishFormReadinessToPageRegions,
+  buildPublishFormReadiness,
+} from './read-page-publish-form-readiness';
+import {
+  buildReadPageCDPSensingSummary,
+  captureReadPageCDPSensingSummary,
+} from './read-page-cdp-sensing';
+import {
+  buildEvidenceSources,
+  buildObservationCoverage,
+  buildObservationProfile,
+  deriveRegionAlignedPageUnderstanding,
+  type RegionAlignedPageUnderstanding,
+} from './read-page-observation';
+import {
+  completeVisibleRegionRows,
+  reconcilePageUnderstandingWithVisibleRows,
+  suppressVisibleRowsForContentDetail,
+} from './read-page-visible-region-postprocess';
+import {
+  applyInteractiveFallbackPayload,
+  repairVisibleRowsTargetRefs as repairVisibleRowsTargetRefsPayload,
+} from './read-page-visible-region-runtime';
+import { inferUserActivityLevel } from './read-page-user-activity';
+import { sampleVisibleTextContent } from './read-page-visible-text-content';
+import { shouldSampleVisibleText } from './read-page-visible-text-sampling';
+import { collectVisibleSearchSurfaceActions } from './read-page-visible-search-surface-actions';
+import {
+  buildAuthCollaborationState,
+  buildAuthQrArtifactRefs,
+  buildNotRequestedAuthArtifactStatus,
+} from './read-page-auth-artifacts';
+import { supplementAuthFormInteractiveControls as supplementAuthFormInteractiveControlsPayload } from './read-page-auth-form-controls';
+import {
+  browserWorldTabOpenedByToOwnerType,
+  buildReadPageOwnershipRuntimeSummary,
+} from './read-page-ownership-runtime';
 import { extractVisibleRegionRows, type VisibleRegionRowsResult } from './visible-region-rows';
+import type { ReadPageVisualElementHint } from './read-page-task-protocol';
+import { collectQrVisualElementHints } from './read-page-visual-elements';
+import {
+  attachFallbackRefs,
+  mergeHighValueObjectActionsIntoCandidateActions,
+  mergeVisibleSearchSurfaceActions,
+} from './read-page-target-recovery';
+import {
+  recoverFilterPanelTextTargets as recoverFilterPanelTextTargetsPayload,
+  recoverGlobalMenuTextTargets as recoverGlobalMenuTextTargetsPayload,
+  recoverSearchToolbarTextTargets as recoverSearchToolbarTextTargetsPayload,
+  recoverVisibleTextControlTargets as recoverVisibleTextControlTargetsPayload,
+} from './read-page-target-recovery-runtime';
+import {
+  getBrowserWorldSnapshot,
+  markBrowserWorldTabAiOperated,
+} from '../../browser-world-inventory';
+
+export {
+  buildReadPagePageDeltaReport,
+  consumePendingActionBinding,
+  recordPendingActionBinding,
+} from './read-page-object-delta';
+export { mergeHighValueObjectActionsIntoCandidateActions } from './read-page-target-recovery';
 
 interface ReadPageStats {
   processed: number;
@@ -46,237 +145,75 @@ interface ReadPageParams {
   refId?: string; // focus on subtree rooted at this refId
   tabId?: number; // target existing tab id
   windowId?: number; // when no tabId, pick active tab from this window
-  // Layer envelope. When omitted preserves the legacy full L0+L1+L2 payload.
+  // Layer envelope. When omitted, default to L0+L1; callers must explicitly
+  // request L0+L1+L2 for the full controlled expansion.
   // The stable HVO targetRef registry is ALWAYS written (even at 'L0') so
   // chrome_click_element resolution stays deterministic.
   requestedLayer?: ReadPageRequestedLayer;
+  includeAuthArtifacts?: boolean;
+  assistantGuidance?: ReadPageAssistantGuidance;
+  forceRefresh?: boolean;
+  frameId?: number;
 }
 
 const READ_PAGE_SPARSE_RETRY_DELAY_MS = 450;
+const READ_PAGE_PENDING_DOCUMENT_WAIT_MS = 5000;
+const READ_PAGE_CONTENT_MESSAGE_RETRY_DELAY_MS = 450;
+const READ_PAGE_DOM_SENSING_TIMEOUT_MS = 4000;
 const INTERACTIVE_ELEMENTS_HELPER_FILE = 'inject-scripts/interactive-elements-helper.js';
 const INTERACTIVE_ELEMENTS_HELPER_PING_TIMEOUT_MS = 300;
-const VISIBLE_TEXT_FALLBACK_MAX_CHARS = 12_000;
-const VISIBLE_ROWS_TARGET_REF_REPAIR_THRESHOLD = 0.95;
-
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function reconcilePageUnderstandingWithVisibleRows(payload: Record<string, any>): void {
-  const rows = payload.visibleRegionRows as VisibleRegionRowsResult | undefined;
-  if (payload.pageRole !== 'login_required' || !rows?.visibleRegionRowsUsed) {
-    return;
+class ReadPageDomSensingTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`DOM accessibility sensing timed out after ${timeoutMs}ms`);
+    this.name = 'ReadPageDomSensingTimeoutError';
   }
-
-  payload.pageRole = 'unknown';
-  payload.primaryRegion = 'visible_results';
-  payload.primaryRegionConfidence = 'medium';
-  payload.footerOnly = false;
-  payload.visibleRegionRows = {
-    ...rows,
-    sourceRegion: 'visible_results',
-    rows: rows.rows.map((row) => ({
-      ...row,
-      sourceRegion: 'visible_results',
-    })),
-  };
 }
 
-function completeVisibleRegionRows(params: {
-  rows: VisibleRegionRowsResult;
-  pageContent: string;
-  visibleTextContent?: string | null;
-  primaryRegion: string | null;
-  interactiveElements: Array<{ ref: string; role: string; name: string; href?: string }>;
-  currentUrl: string;
-  currentTitle: string;
-  viewport: { width: number | null; height: number | null; dpr: number | null };
-}): VisibleRegionRowsResult {
-  if (params.rows.visibleRegionRowsUsed) {
-    return params.rows;
+async function withReadPageDomSensingTimeout<T>(
+  operation: Promise<T>,
+  timeoutMs: number,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new ReadPageDomSensingTimeoutError(timeoutMs)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
   }
-  return extractVisibleRegionRows({
-    pageContent: params.pageContent,
-    visibleTextContent: params.visibleTextContent,
-    sourceRegion: params.primaryRegion,
-    fallbackInteractiveElements: params.interactiveElements,
-    url: params.currentUrl,
-    title: params.currentTitle,
-    viewport: params.viewport,
-  });
 }
 
-function shouldRepairVisibleRowsTargetRefs(rows: VisibleRegionRowsResult | undefined): boolean {
-  return (
-    rows?.visibleRegionRowsUsed === true &&
-    rows.rowCount >= 2 &&
-    rows.targetRefCoverageRate < VISIBLE_ROWS_TARGET_REF_REPAIR_THRESHOLD
-  );
-}
-
-function attachFallbackRefs(
-  elements: any[],
-  refMap: ReturnType<typeof buildFallbackRefMap>,
-): any[] {
-  return elements.map((element, index) => {
-    const ref = refMap[index]?.ref;
-    return typeof ref === 'string' ? { ...element, ref } : element;
-  });
-}
-
-function buildModeOutput(params: {
-  mode: ReadPageMode;
-  renderMode: ReadPageRenderMode;
-  tabId: number;
-  currentUrl: string;
-  currentTitle: string;
-  pageType: PageType;
-  scheme: string;
-  pageRole: PageRole;
-  primaryRegion: string | null;
-  primaryRegionConfidence: PrimaryRegionConfidence;
-  footerOnly: boolean;
-  anchorTexts: string[];
-  pageContent: string;
-  visibleTextContent?: string | null;
-  contentSummary: {
-    charCount: number;
-    normalizedLength: number;
-    lineCount: number;
-    quality: string;
-  };
-  stats: ReadPageStats | { processed: number; included: number; durationMs: number };
-  viewport: { width: number | null; height: number | null; dpr: number | null };
-  filter: string;
-  depth: number | null;
-  focus: { refId: string; found: boolean } | null;
-  sparse: boolean;
-  fallbackUsed: boolean;
-  fallbackSource: string | null;
-  refMapCount: number;
-  markedElements: any[];
-  elements: any[];
-  count: number;
-  reason: string | null;
-  tips: string;
-  refMap: any[];
-  candidateActions: CandidateActionSeed[];
-  visibleRegionRows: VisibleRegionRowsResult;
-  /** Layer envelope; defaults to 'L0+L1+L2' for legacy callers. */
-  requestedLayer: ReadPageRequestedLayer;
-}): ReadPageCompactSnapshot | ReadPageNormalSnapshot | ReadPageFullSnapshot {
-  const interactiveLimit = params.mode === 'compact' ? 24 : 80;
-  const interactiveElements = buildInteractiveElements(
-    params.pageContent,
-    params.elements,
-    interactiveLimit,
-    params.mode,
-    params.currentUrl,
-  );
-  const visibleRegionRows = completeVisibleRegionRows({
-    rows: params.visibleRegionRows,
-    pageContent: params.pageContent,
-    visibleTextContent: params.visibleTextContent,
-    primaryRegion: params.primaryRegion,
-    interactiveElements,
-    currentUrl: params.currentUrl,
-    currentTitle: params.currentTitle,
-    viewport: params.viewport,
-  });
-  const candidateActions =
-    params.candidateActions.length > 0
-      ? params.candidateActions
-      : buildCandidateActions(interactiveElements, params.refMap);
-  const artifactRefs = buildArtifactRefs(params.tabId, params.renderMode === 'markdown');
-  const pageContext: ReadPagePageContext = {
-    filter: params.filter,
-    depth: params.depth,
-    focus: params.focus,
-    scheme: params.scheme,
-    viewport: params.viewport,
-    sparse: params.sparse,
-    fallbackUsed: params.fallbackUsed,
-    fallbackSource: params.fallbackSource,
-    refMapCount: params.refMapCount,
-    markedElementsCount: params.markedElements.length,
-  };
-
-  const stableLayer = buildStableSnapshotLayer({
-    mode: params.mode,
-    currentUrl: params.currentUrl,
-    currentTitle: params.currentTitle,
-    pageType: params.pageType,
-    pageRole: params.pageRole,
-    primaryRegion: params.primaryRegion,
-    quality: params.contentSummary.quality,
-    interactiveElements,
-    artifactRefs,
-  });
-
-  const extensionLayer = buildExtensionLayer({
-    mode: params.mode,
-    renderMode: params.renderMode,
-    currentUrl: params.currentUrl,
-    currentTitle: params.currentTitle,
-    pageType: params.pageType,
-    pageRole: params.pageRole,
-    primaryRegion: params.primaryRegion,
-    contentSummary: params.contentSummary,
-    artifactRefs,
-    candidateActions,
-    interactiveElements,
-    pageContext,
-    visibleRegionRows,
-    requestedLayer: params.requestedLayer,
-  });
-
-  // Feed the per-tab stable-targetRef registry so the click bridge can
-  // translate `tgt_*` from prior turns back into the live per-snapshot
-  // `ref_*` for this exact tab. We do this exactly once per snapshot, after
-  // the extension layer is built but before serializing the response, so
-  // every successful read replaces the previous mapping atomically.
-  if (Array.isArray(extensionLayer.highValueObjects)) {
-    const entries: StableTargetRefEntry[] = [];
-    for (const highValueObject of extensionLayer.highValueObjects) {
-      if (highValueObject.targetRef && highValueObject.ref) {
-        entries.push({ targetRef: highValueObject.targetRef, ref: highValueObject.ref });
-      }
-    }
-    recordStableTargetRefSnapshot(params.tabId, entries);
-  }
-
-  const sharedPayload: ReadPageCompactSnapshot = {
-    ...stableLayer,
-    ...extensionLayer,
-  };
-
-  return buildReadPageModeResult({
-    sharedPayload,
-    mode: params.mode,
-    primaryRegionConfidence: params.primaryRegionConfidence,
-    footerOnly: params.footerOnly,
-    anchorTexts: params.anchorTexts,
-    pageContent: params.pageContent,
-    contentSummary: params.contentSummary,
-    stats: params.stats,
-    elements: params.elements,
-    count: params.count,
-    markedElements: params.markedElements,
-    refMap: params.refMap,
-    reason: params.reason,
-    tips: params.tips,
-  });
+function getTabNavigationUrl(tab: Pick<chrome.tabs.Tab, 'url' | 'pendingUrl'>): string {
+  return String(tab.url || tab.pendingUrl || '');
 }
 
 class ReadPageTool extends BaseBrowserToolExecutor {
   name = TOOL_NAMES.BROWSER.READ_PAGE;
 
-  private async ensureInteractiveElementsHelper(tabId: number): Promise<void> {
+  __resetObjectLifecycleCacheForTests(): void {
+    resetObjectLifecycleCacheForTests();
+  }
+
+  private getDomSensingTimeoutMs(): number {
+    return READ_PAGE_DOM_SENSING_TIMEOUT_MS;
+  }
+
+  private async ensureInteractiveElementsHelper(tabId: number, frameId?: number): Promise<void> {
     try {
+      const pingMessage = {
+        action: `${TOOL_NAMES.BROWSER.GET_INTERACTIVE_ELEMENTS}_ping`,
+      };
       const response = await Promise.race([
-        chrome.tabs.sendMessage(tabId, {
-          action: `${TOOL_NAMES.BROWSER.GET_INTERACTIVE_ELEMENTS}_ping`,
-        }),
+        typeof frameId === 'number'
+          ? chrome.tabs.sendMessage(tabId, pingMessage, { frameId })
+          : chrome.tabs.sendMessage(tabId, pingMessage),
         new Promise((_, reject) =>
           setTimeout(
             () => reject(new Error('interactive elements helper ping timed out')),
@@ -288,50 +225,128 @@ class ReadPageTool extends BaseBrowserToolExecutor {
       if (response && (response as any).status === 'pong') {
         return;
       }
-    } catch {
+    } catch (error) {
+      void error;
       // Expected when the fallback helper has not been injected on this page yet.
     }
 
     await chrome.scripting.executeScript({
-      target: { tabId },
+      target: { tabId, ...(typeof frameId === 'number' ? { frameIds: [frameId] } : {}) },
       files: [INTERACTIVE_ELEMENTS_HELPER_FILE],
       world: 'ISOLATED',
     } as any);
   }
 
-  private async sampleVisibleTextContent(tabId: number): Promise<string | null> {
-    try {
-      const result = await chrome.scripting.executeScript({
-        target: { tabId },
-        func: (maxChars: number) => {
-          try {
-            const text = document.body?.innerText || '';
-            return typeof text === 'string' ? text.slice(0, maxChars) : '';
-          } catch {
-            return '';
-          }
-        },
-        args: [VISIBLE_TEXT_FALLBACK_MAX_CHARS],
-      } as any);
-      const text = result?.[0]?.result;
-      return typeof text === 'string' && text.trim() ? text : null;
-    } catch {
-      return null;
-    }
+  private async sampleVisibleTextContent(tabId: number, frameId?: number): Promise<string | null> {
+    return sampleVisibleTextContent({ tabId, frameId });
   }
 
-  private async collectInteractiveElementsFallback(tabId: number): Promise<any | null> {
+  private async collectInteractiveElementsFallback(
+    tabId: number,
+    options: {
+      textQuery?: string;
+      selector?: string;
+      includeCoordinates?: boolean;
+      frameId?: number;
+    } = {},
+  ): Promise<any | null> {
     let fallback: any = null;
     for (let attempt = 0; attempt < 2; attempt += 1) {
       if (attempt > 0) await delay(READ_PAGE_SPARSE_RETRY_DELAY_MS);
-      await this.ensureInteractiveElementsHelper(tabId);
-      fallback = await this.sendMessageToTab(tabId, {
-        action: TOOL_MESSAGE_TYPES.GET_INTERACTIVE_ELEMENTS,
-        includeCoordinates: true,
-      });
+      await this.ensureInteractiveElementsHelper(tabId, options.frameId);
+      fallback = await this.sendMessageToTab(
+        tabId,
+        {
+          action: TOOL_MESSAGE_TYPES.GET_INTERACTIVE_ELEMENTS,
+          includeCoordinates: options.includeCoordinates !== false,
+          ...(options.selector ? { selector: options.selector } : {}),
+          ...(options.textQuery ? { textQuery: options.textQuery } : {}),
+        },
+        options.frameId,
+      );
       if (fallback && fallback.success && Array.isArray(fallback.elements)) break;
     }
     return fallback && fallback.success && Array.isArray(fallback.elements) ? fallback : null;
+  }
+
+  private async supplementAuthFormInteractiveControls(
+    tabId: number,
+    basePayload: Record<string, any>,
+    frameId?: number,
+  ): Promise<void> {
+    await supplementAuthFormInteractiveControlsPayload({
+      tabId,
+      basePayload,
+      frameId,
+      collectInteractiveElementsFallback: this.collectInteractiveElementsFallback.bind(this),
+    });
+  }
+
+  private async recoverGlobalMenuTextTargets(params: {
+    tabId: number;
+    basePayload: any;
+    frameId?: number;
+  }): Promise<boolean> {
+    return recoverGlobalMenuTextTargetsPayload({
+      ...params,
+      collectInteractiveElementsFallback: this.collectInteractiveElementsFallback.bind(this),
+    });
+  }
+
+  private async recoverVisibleTextControlTargets(params: {
+    tabId: number;
+    basePayload: any;
+    frameId?: number;
+  }): Promise<boolean> {
+    return recoverVisibleTextControlTargetsPayload({
+      ...params,
+      collectInteractiveElementsFallback: this.collectInteractiveElementsFallback.bind(this),
+    });
+  }
+
+  private async recoverSearchToolbarTextTargets(params: {
+    tabId: number;
+    basePayload: any;
+    assistantGuidance?: ReadPageAssistantGuidance;
+    frameId?: number;
+  }): Promise<boolean> {
+    return recoverSearchToolbarTextTargetsPayload({
+      ...params,
+      collectInteractiveElementsFallback: this.collectInteractiveElementsFallback.bind(this),
+    });
+  }
+
+  private async recoverFilterPanelTextTargets(params: {
+    tabId: number;
+    basePayload: any;
+    assistantGuidance?: ReadPageAssistantGuidance;
+    frameId?: number;
+  }): Promise<boolean> {
+    return recoverFilterPanelTextTargetsPayload({
+      ...params,
+      collectInteractiveElementsFallback: this.collectInteractiveElementsFallback.bind(this),
+    });
+  }
+
+  private async generateAccessibilityTreeWithRetry(
+    tabId: number,
+    message: unknown,
+    frameId?: number,
+  ): Promise<any> {
+    try {
+      return await this.sendMessageToTab(tabId, message, frameId);
+    } catch (error) {
+      await delay(READ_PAGE_CONTENT_MESSAGE_RETRY_DELAY_MS);
+      await this.injectContentScript(
+        tabId,
+        ['inject-scripts/accessibility-tree-helper.js'],
+        false,
+        'ISOLATED',
+        typeof frameId === 'number' ? false : true,
+        typeof frameId === 'number' ? [frameId] : undefined,
+      );
+      return await this.sendMessageToTab(tabId, message, frameId);
+    }
   }
 
   private async repairVisibleRowsTargetRefs(params: {
@@ -340,55 +355,22 @@ class ReadPageTool extends BaseBrowserToolExecutor {
     pageUnderstanding: ReturnType<typeof inferPageUnderstanding>;
     currentUrl: string;
     currentTitle: string;
+    frameId?: number;
   }): Promise<boolean> {
-    if (!shouldRepairVisibleRowsTargetRefs(params.basePayload.visibleRegionRows)) return false;
-
-    const fallback = await this.collectInteractiveElementsFallback(params.tabId);
-    if (!fallback) return false;
-    const merged = fallback.elements.slice(0, 150);
-    const fallbackRefMap = buildFallbackRefMap(merged);
-    const mergedWithRefs = attachFallbackRefs(merged, fallbackRefMap);
-    const visibleTextContent =
-      typeof params.basePayload.visibleTextContent === 'string' &&
-      params.basePayload.visibleTextContent.trim()
-        ? params.basePayload.visibleTextContent
-        : await this.sampleVisibleTextContent(params.tabId);
-    if (!visibleTextContent) return false;
-
-    const repairedRows = extractVisibleRegionRows({
-      pageContent: String(params.basePayload.pageContent || ''),
-      visibleTextContent,
-      sourceRegion: params.pageUnderstanding.primaryRegion,
-      fallbackInteractiveElements: mergedWithRefs,
-      url: params.currentUrl,
-      title: params.currentTitle,
-      viewport: params.basePayload.viewport,
-      scrollY: typeof fallback?.scrollY === 'number' ? fallback.scrollY : null,
-      pixelsBelow: typeof fallback?.pixelsBelow === 'number' ? fallback.pixelsBelow : null,
+    return repairVisibleRowsTargetRefsPayload({
+      ...params,
+      collectInteractiveElementsFallback: this.collectInteractiveElementsFallback.bind(this),
+      sampleVisibleTextContent: this.sampleVisibleTextContent.bind(this),
     });
-    if (
-      !repairedRows.visibleRegionRowsUsed ||
-      repairedRows.targetRefCoverageRate <=
-        params.basePayload.visibleRegionRows.targetRefCoverageRate
-    ) {
-      return false;
-    }
-
-    params.basePayload.visibleTextContent = visibleTextContent;
-    params.basePayload.visibleRegionRows = repairedRows;
-    params.basePayload.fallbackUsed = true;
-    params.basePayload.fallbackSource = 'get_interactive_elements_target_ref_repair';
-    params.basePayload.elements = mergedWithRefs;
-    params.basePayload.count = fallback.elements.length;
-    params.basePayload.refMap = fallbackRefMap;
-    params.basePayload.refMapCount = fallbackRefMap.filter((entry) => entry != null).length;
-    reconcilePageUnderstandingWithVisibleRows(params.basePayload);
-    return true;
   }
 
   // Execute read page
   async execute(args: ReadPageParams): Promise<ToolResult> {
     const { filter, depth, refId, mode, render, requestedLayer } = args || {};
+    const includeAuthArtifacts = args?.includeAuthArtifacts === true;
+    const assistantGuidance = normalizeAssistantGuidance(args?.assistantGuidance);
+    const requestedFrameId =
+      typeof args?.frameId === 'number' && Number.isFinite(args.frameId) ? args.frameId : undefined;
 
     // Validate refId parameter
     const focusRefId = typeof refId === 'string' ? refId.trim() : '';
@@ -427,11 +409,11 @@ class ReadPageTool extends BaseBrowserToolExecutor {
     }
     const selectedRender = selectedRenderRaw as ReadPageRenderMode;
 
-    // Validate requestedLayer. Default to the legacy `'L0+L1+L2'` envelope
-    // so older callers see byte-identical payloads. Unknown values fail
-    // closed for the same reason `render` does: the upstream client almost
-    // certainly speaks a newer contract than this extension can satisfy.
-    let selectedLayer: ReadPageRequestedLayer = 'L0+L1+L2';
+    // Validate requestedLayer. Default to `L0+L1`; callers must explicitly
+    // request `L0+L1+L2` for full detail expansion. Unknown values fail closed
+    // for the same reason `render` does: the upstream client almost certainly
+    // speaks a newer contract than this extension can satisfy.
+    let selectedLayer: ReadPageRequestedLayer = 'L0+L1';
     if (requestedLayer !== undefined) {
       if (
         typeof requestedLayer !== 'string' ||
@@ -450,28 +432,226 @@ class ReadPageTool extends BaseBrowserToolExecutor {
     try {
       // Tip text returned to callers to guide next action
       const standardTips =
-        "Stay on the safe path first: prefer ref-based actions from chrome_read_page or chrome_get_interactive_elements. If the specific element you need is still missing, use chrome_screenshot for visual confirmation and coordinates. Reserve chrome_computer or chrome_javascript for explicit fallback/debug cases only. Also note: 'markedElements' are user-marked elements and have the highest priority when choosing targets.";
+        'Stay on the safe path first: prefer candidate actions and stable refs from chrome_read_page or chrome_get_interactive_elements. If the specific element you need is still missing, use chrome_screenshot for visual confirmation and coordinates. Reserve chrome_computer or chrome_javascript for explicit fallback/debug cases only.';
 
-      const explicit = await this.tryGetTab(args?.tabId);
-      const tab = explicit || (await this.getActiveTabOrThrowInWindow(args?.windowId));
+      const hasExplicitTabId =
+        args !== null &&
+        typeof args === 'object' &&
+        Object.prototype.hasOwnProperty.call(args, 'tabId') &&
+        (args as ReadPageParams).tabId !== undefined &&
+        (args as ReadPageParams).tabId !== null;
+      const requestedTabId =
+        hasExplicitTabId && Number.isInteger((args as ReadPageParams).tabId)
+          ? ((args as ReadPageParams).tabId as number)
+          : null;
+      if (hasExplicitTabId && (requestedTabId === null || requestedTabId <= 0)) {
+        return createErrorResponse(
+          `${ERROR_MESSAGES.INVALID_PARAMETERS}: tabId must be a positive integer when provided`,
+        );
+      }
+      const explicit = await this.tryGetTab(requestedTabId ?? undefined);
+      if (requestedTabId !== null && explicit === null) {
+        return createErrorResponse(
+          `${ERROR_MESSAGES.TAB_NOT_FOUND}: requested tabId ${requestedTabId} was not found; read_page will not fall back to the active tab`,
+        );
+      }
+      let tab = explicit || (await this.getActiveTabOrThrowInWindow(args?.windowId));
       if (!tab.id)
         return createErrorResponse(ERROR_MESSAGES.TAB_NOT_FOUND + ': Active tab has no ID');
+      const tabId = tab.id;
+      markBrowserWorldTabAiOperated(tabId, 'read_page');
 
-      const currentUrl = String(tab.url || '');
+      const initialNavigationUrl = getTabNavigationUrl(tab);
+      const initialTabStatus = typeof tab.status === 'string' ? tab.status : null;
+      let pendingDocumentSettleResult: {
+        settled: boolean;
+        timedOut: boolean;
+        reason: string;
+        waitedMs: number;
+        readyState: string | null;
+      } | null = null;
+      let waitedForPendingDocument = false;
+      if (
+        explicit &&
+        /^https?:\/\//i.test(initialNavigationUrl) &&
+        (!tab.url || tab.status === 'loading')
+      ) {
+        waitedForPendingDocument = true;
+        const settleResult = await this.waitForTabSettled(tabId, {
+          timeoutMs: READ_PAGE_PENDING_DOCUMENT_WAIT_MS,
+        });
+        pendingDocumentSettleResult = {
+          settled: settleResult.settled,
+          timedOut: settleResult.timedOut,
+          reason: settleResult.reason,
+          waitedMs: settleResult.waitedMs,
+          readyState: settleResult.readyState,
+        };
+        tab = settleResult.tab;
+      }
+
+      const currentUrl = getTabNavigationUrl(tab);
       const currentTitle = String(tab.title || '');
+      const currentWindowId = Number.isInteger(tab.windowId) ? tab.windowId : null;
+      const isCurrentTabActive = typeof tab.active === 'boolean' ? tab.active : null;
+      let isCurrentWindowFocused: boolean | null = null;
+      let currentWindowState: ReadPageWindowRuntimeState | null = null;
+      let currentWindowWidth: number | null = null;
+      let currentWindowHeight: number | null = null;
+      let currentWindowLeft: number | null = null;
+      let currentWindowTop: number | null = null;
+      let browserActiveTabId: number | null = null;
+      let browserActiveTabIdKnown = false;
+      let isReadTargetBrowserActiveTab: boolean | null = null;
+      if (currentWindowId !== null && typeof chrome.windows?.get === 'function') {
+        try {
+          const currentWindow = await chrome.windows.get(currentWindowId, { populate: true });
+          isCurrentWindowFocused =
+            currentWindow && typeof currentWindow.focused === 'boolean'
+              ? currentWindow.focused
+              : null;
+          currentWindowState = normalizeWindowRuntimeState(currentWindow?.state);
+          currentWindowWidth = readWindowInteger(currentWindow?.width);
+          currentWindowHeight = readWindowInteger(currentWindow?.height);
+          currentWindowLeft = readWindowInteger(currentWindow?.left);
+          currentWindowTop = readWindowInteger(currentWindow?.top);
+          const activeWindowTab = Array.isArray(currentWindow?.tabs)
+            ? currentWindow.tabs.find((windowTab) => windowTab.active === true)
+            : null;
+          browserActiveTabId =
+            activeWindowTab && Number.isInteger(activeWindowTab.id) ? activeWindowTab.id! : null;
+          browserActiveTabIdKnown = browserActiveTabId !== null;
+          isReadTargetBrowserActiveTab =
+            browserActiveTabIdKnown && Number.isInteger(tabId)
+              ? browserActiveTabId === tabId
+              : null;
+        } catch {
+          isCurrentWindowFocused = null;
+          currentWindowState = null;
+          currentWindowWidth = null;
+          currentWindowHeight = null;
+          currentWindowLeft = null;
+          currentWindowTop = null;
+          browserActiveTabId = null;
+          browserActiveTabIdKnown = false;
+          isReadTargetBrowserActiveTab = null;
+        }
+      }
+      const pageStability = inferPageStability(tab);
       const schemeGuard = inferSchemeGuard(currentUrl);
+      const cdpSensingSnapshot = await captureReadPageCDPSensingSummary({
+        tabId,
+        currentUrl,
+        supportedForContentScript: schemeGuard.supportedForContentScript,
+      });
+      const cdpSensing = cdpSensingSnapshot
+        ? buildReadPageCDPSensingSummary(cdpSensingSnapshot)
+        : undefined;
+      const loadReadiness = buildLoadReadiness({
+        pageStability,
+        initialTabStatus,
+        finalTabStatus: typeof tab.status === 'string' ? tab.status : null,
+        waitedForPendingDocument,
+        settleResult: pendingDocumentSettleResult,
+        cdpSensing,
+        cdpStabilityHint: cdpSensingSnapshot?.stabilityHint,
+      });
 
       if (!schemeGuard.supportedForContentScript) {
+        const operabilityReason = schemeGuard.unsupportedPageType || schemeGuard.pageType;
+        const nextStepHint =
+          'restricted_page; switch to a regular http or https tab before attempting structured reads or browser actions';
         const guardPageContent = [
           '- generic "Current tab is not a regular web page"',
           currentTitle ? `- generic "title: ${currentTitle.replace(/\s+/g, ' ').trim()}"` : '',
           currentUrl ? `- generic "url: ${currentUrl}"` : '',
           `- generic "pageType: ${schemeGuard.pageType}"`,
           `- generic "unsupportedPageType: ${schemeGuard.unsupportedPageType || 'none'}"`,
+          '- generic "canTabrixOperate: false"',
+          `- generic "operabilityReason: ${operabilityReason}"`,
           `- generic "recommendedAction: ${schemeGuard.recommendedAction || 'none'}"`,
         ]
           .filter(Boolean)
           .join('\n');
+
+        const unsupportedModeOutput = await buildModeOutput({
+          mode: selectedMode,
+          renderMode: selectedRender,
+          tabId,
+          currentWindowId,
+          currentWindowState,
+          currentWindowWidth,
+          currentWindowHeight,
+          currentWindowLeft,
+          currentWindowTop,
+          isCurrentTabActive,
+          isCurrentWindowFocused,
+          browserActiveTabId,
+          browserActiveTabIdKnown,
+          isReadTargetBrowserActiveTab,
+          pageStability,
+          loadReadiness,
+          currentUrl,
+          currentTitle,
+          pageType: schemeGuard.pageType,
+          scheme: schemeGuard.scheme,
+          pageRole: 'unknown',
+          primaryRegion: null,
+          primaryRegionConfidence: null,
+          footerOnly: false,
+          anchorTexts: [],
+          pageContent: guardPageContent,
+          visibleTextContent: null,
+          contentSummary: summarizePageContent(guardPageContent),
+          frameContext: {
+            ...(typeof requestedFrameId === 'number' ? { frameId: requestedFrameId } : {}),
+            frameScope: 'unknown',
+            isTopFrame: null,
+            source: 'unsupported_page',
+            coverage: 'not_available',
+            claimBoundary:
+              'content scripts cannot inspect frame context on this unsupported browser page',
+          },
+          stats: { processed: 0, included: 0, durationMs: 0 },
+          viewport: { width: null, height: null, dpr: null },
+          filter: filter || 'all',
+          depth: requestedDepth ?? null,
+          focus: focusRefId ? { refId: focusRefId, found: false } : null,
+          sparse: true,
+          fallbackUsed: false,
+          fallbackSource: null,
+          refMapCount: 0,
+          markedElements: [],
+          elements: [],
+          count: 0,
+          reason: 'unsupported_page_type',
+          tips: standardTips,
+          refMap: [],
+          candidateActions: [],
+          fileInputBindings: [],
+          visualElements: [],
+          visibleRegionRows: extractVisibleRegionRows({
+            pageContent: '',
+            sourceRegion: 'unsupported_page',
+          }),
+          includeAuthArtifacts,
+          assistantGuidance,
+          requestedLayer: selectedLayer,
+        });
+        const unsupportedPageContext = {
+          ...((unsupportedModeOutput as any).pageContext || {}),
+          canTabrixOperate: false,
+          operabilityReason,
+          unsupportedPageType: schemeGuard.unsupportedPageType,
+          nextStepHint,
+        };
+        const unsupportedOwnershipRuntime = (unsupportedModeOutput as any).ownershipRuntime
+          ? {
+              ...(unsupportedModeOutput as any).ownershipRuntime,
+              currentTabCanTabrixOperate: false,
+              currentTabOperabilityReason: operabilityReason,
+            }
+          : undefined;
 
         return {
           content: [
@@ -479,49 +659,19 @@ class ReadPageTool extends BaseBrowserToolExecutor {
               type: 'text',
               text: JSON.stringify({
                 success: false,
-                ...buildModeOutput({
-                  mode: selectedMode,
-                  renderMode: selectedRender,
-                  tabId: tab.id,
-                  currentUrl,
-                  currentTitle,
-                  pageType: schemeGuard.pageType,
-                  scheme: schemeGuard.scheme,
-                  pageRole: 'unknown',
-                  primaryRegion: null,
-                  primaryRegionConfidence: null,
-                  footerOnly: false,
-                  anchorTexts: [],
-                  pageContent: guardPageContent,
-                  visibleTextContent: null,
-                  contentSummary: summarizePageContent(guardPageContent),
-                  stats: { processed: 0, included: 0, durationMs: 0 },
-                  viewport: { width: null, height: null, dpr: null },
-                  filter: filter || 'all',
-                  depth: requestedDepth ?? null,
-                  focus: focusRefId ? { refId: focusRefId, found: false } : null,
-                  sparse: true,
-                  fallbackUsed: false,
-                  fallbackSource: null,
-                  refMapCount: 0,
-                  markedElements: [],
-                  elements: [],
-                  count: 0,
-                  reason: 'unsupported_page_type',
-                  tips: standardTips,
-                  refMap: [],
-                  candidateActions: [],
-                  visibleRegionRows: extractVisibleRegionRows({
-                    pageContent: '',
-                    sourceRegion: 'unsupported_page',
-                  }),
-                  requestedLayer: selectedLayer,
-                }),
+                ...unsupportedModeOutput,
+                canTabrixOperate: false,
+                operabilityReason,
                 reason: 'unsupported_page_type',
                 pageType: schemeGuard.pageType,
                 scheme: schemeGuard.scheme,
                 unsupportedPageType: schemeGuard.unsupportedPageType,
                 recommendedAction: schemeGuard.recommendedAction,
+                pageContext: unsupportedPageContext,
+                ...(unsupportedOwnershipRuntime
+                  ? { ownershipRuntime: unsupportedOwnershipRuntime }
+                  : {}),
+                nextStepHint,
               }),
             },
           ],
@@ -529,23 +679,42 @@ class ReadPageTool extends BaseBrowserToolExecutor {
         };
       }
 
-      // Inject helper in ISOLATED world to enable chrome.runtime messaging
-      // Inject into all frames to support same-origin iframe operations
-      await this.injectContentScript(
-        tab.id,
-        ['inject-scripts/accessibility-tree-helper.js'],
-        false,
-        'ISOLATED',
-        true,
-      );
-
-      // Ask content script to generate accessibility tree
-      let resp = await this.sendMessageToTab(tab.id, {
-        action: TOOL_MESSAGE_TYPES.GENERATE_ACCESSIBILITY_TREE,
-        filter: filter || null,
-        depth: requestedDepth,
-        refId: focusRefId || undefined,
-      });
+      let domSensingFailure: Error | null = null;
+      let domSensingTimedOut = false;
+      let resp: any = null;
+      try {
+        resp = await withReadPageDomSensingTimeout(
+          (async () => {
+            // Inject into all frames to support same-origin iframe operations.
+            await this.injectContentScript(
+              tabId,
+              ['inject-scripts/accessibility-tree-helper.js'],
+              false,
+              'ISOLATED',
+              typeof requestedFrameId === 'number' ? false : true,
+              typeof requestedFrameId === 'number' ? [requestedFrameId] : undefined,
+            );
+            return this.generateAccessibilityTreeWithRetry(
+              tabId,
+              {
+                action: TOOL_MESSAGE_TYPES.GENERATE_ACCESSIBILITY_TREE,
+                filter: filter || null,
+                depth: requestedDepth,
+                refId: focusRefId || undefined,
+              },
+              requestedFrameId,
+            );
+          })(),
+          this.getDomSensingTimeoutMs(),
+        );
+      } catch (error) {
+        domSensingFailure = error instanceof Error ? error : new Error(String(error));
+        domSensingTimedOut = domSensingFailure instanceof ReadPageDomSensingTimeoutError;
+        resp = {
+          success: false,
+          error: domSensingFailure.message,
+        };
+      }
 
       // Evaluate tree result and decide whether to fallback
       const treeOk = resp && resp.success === true;
@@ -556,27 +725,39 @@ class ReadPageTool extends BaseBrowserToolExecutor {
         : 0;
       let refCount = Array.isArray(resp?.refMap) ? resp.refMap.length : 0;
       let isSparse = !userControlled && lines < 10 && refCount < 3;
+      let sparseRetryFailure: Error | null = null;
 
       if (treeOk && isSparse) {
         await delay(READ_PAGE_SPARSE_RETRY_DELAY_MS);
-        const retryResp = await this.sendMessageToTab(tab.id, {
-          action: TOOL_MESSAGE_TYPES.GENERATE_ACCESSIBILITY_TREE,
-          filter: filter || null,
-          depth: requestedDepth,
-          refId: focusRefId || undefined,
-        });
-        const retryContent =
-          retryResp && typeof retryResp.pageContent === 'string' ? retryResp.pageContent : '';
-        const retryLines = retryContent
-          ? retryContent.split('\n').filter((l: string) => l.trim().length > 0).length
-          : 0;
-        const retryRefCount = Array.isArray(retryResp?.refMap) ? retryResp.refMap.length : 0;
-        if (retryResp?.success === true && retryLines + retryRefCount > lines + refCount) {
-          resp = retryResp;
-          pageContent = retryContent;
-          lines = retryLines;
-          refCount = retryRefCount;
-          isSparse = !userControlled && lines < 10 && refCount < 3;
+        try {
+          const retryResp = await withReadPageDomSensingTimeout(
+            this.generateAccessibilityTreeWithRetry(
+              tabId,
+              {
+                action: TOOL_MESSAGE_TYPES.GENERATE_ACCESSIBILITY_TREE,
+                filter: filter || null,
+                depth: requestedDepth,
+                refId: focusRefId || undefined,
+              },
+              requestedFrameId,
+            ),
+            this.getDomSensingTimeoutMs(),
+          );
+          const retryContent =
+            retryResp && typeof retryResp.pageContent === 'string' ? retryResp.pageContent : '';
+          const retryLines = retryContent
+            ? retryContent.split('\n').filter((l: string) => l.trim().length > 0).length
+            : 0;
+          const retryRefCount = Array.isArray(retryResp?.refMap) ? retryResp.refMap.length : 0;
+          if (retryResp?.success === true && retryLines + retryRefCount > lines + refCount) {
+            resp = retryResp;
+            pageContent = retryContent;
+            lines = retryLines;
+            refCount = retryRefCount;
+            isSparse = !userControlled && lines < 10 && refCount < 3;
+          }
+        } catch (error) {
+          sparseRetryFailure = error instanceof Error ? error : new Error(String(error));
         }
       }
 
@@ -604,6 +785,19 @@ class ReadPageTool extends BaseBrowserToolExecutor {
           : null;
 
       const contentSummary = summarizePageContent(pageContent);
+      let sensingDiagnostics = treeOk
+        ? normalizeAccessibilityTreeDiagnostics(resp?.diagnostics, resp?.stats)
+        : undefined;
+      if (sparseRetryFailure) {
+        sensingDiagnostics = appendObjectSensingDiagnostic(sensingDiagnostics, {
+          source:
+            sparseRetryFailure instanceof ReadPageDomSensingTimeoutError
+              ? 'read_page.sparse_retry_timeout'
+              : 'read_page.sparse_retry_unavailable',
+          message:
+            'the initial DOM accessibility snapshot remained usable, but its bounded sparse-content retry did not complete',
+        });
+      }
 
       // User markers have been removed with the Element Marker surface
       // (MKEP pruning §P7). Keep the field on the payload as an empty
@@ -641,6 +835,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
         reason: null,
         refMap: Array.isArray(resp?.refMap) ? resp.refMap : [],
         candidateActions: [],
+        visualElements: [],
         visibleRegionRows: extractVisibleRegionRows({
           pageContent,
           sourceRegion: pageUnderstanding.primaryRegion,
@@ -651,46 +846,48 @@ class ReadPageTool extends BaseBrowserToolExecutor {
           scrollY: typeof resp?.scrollY === 'number' ? resp.scrollY : null,
           pixelsBelow: typeof resp?.pixelsBelow === 'number' ? resp.pixelsBelow : null,
         }),
+        frameContext: treeOk ? normalizeFrameContext(resp?.frameContext, requestedFrameId) : null,
+        sensingDiagnostics,
       };
       reconcilePageUnderstandingWithVisibleRows(basePayload);
 
-      if (treeOk && !userControlled && !basePayload.visibleRegionRows.visibleRegionRowsUsed) {
-        const visibleTextContent = await this.sampleVisibleTextContent(tab.id);
-        if (visibleTextContent) {
-          const visibleTextRows = extractVisibleRegionRows({
-            pageContent: String(basePayload.pageContent || ''),
-            visibleTextContent,
-            sourceRegion: pageUnderstanding.primaryRegion,
-            fallbackInteractiveElements: rowLinkingInteractiveElements,
-            url: currentUrl,
-            title: currentTitle,
-            viewport: basePayload.viewport,
-            scrollY: typeof resp?.scrollY === 'number' ? resp.scrollY : null,
-            pixelsBelow: typeof resp?.pixelsBelow === 'number' ? resp.pixelsBelow : null,
-          });
-          if (visibleTextRows.visibleRegionRowsUsed) {
-            basePayload.visibleTextContent = visibleTextContent;
-            basePayload.visibleRegionRows = visibleTextRows;
-            basePayload.fallbackSource = 'visible_text';
-            reconcilePageUnderstandingWithVisibleRows(basePayload);
-          }
-        }
-      }
-      await this.repairVisibleRowsTargetRefs({
-        tabId: tab.id,
-        basePayload,
-        pageUnderstanding,
-        currentUrl,
-        currentTitle,
-      });
+      if (!treeOk && !focusRefId && cdpSensing) {
+        basePayload.fallbackUsed = true;
+        basePayload.fallbackSource = 'cdp_ax_dom_unavailable';
+        basePayload.reason = domSensingTimedOut
+          ? 'dom_accessibility_timeout'
+          : 'dom_accessibility_unavailable';
+        basePayload.sensingDiagnostics = appendObjectSensingDiagnostic(
+          basePayload.sensingDiagnostics,
+          {
+            source: domSensingTimedOut
+              ? 'read_page.dom_accessibility_timeout'
+              : 'read_page.dom_accessibility_unavailable',
+            message: domSensingTimedOut
+              ? 'DOM accessibility sensing exceeded its bounded wait; CDP and AX objects were returned as partial evidence'
+              : `DOM accessibility sensing was unavailable; CDP and AX objects were returned as partial evidence${
+                  domSensingFailure?.message ? ` (${domSensingFailure.message.slice(0, 96)})` : ''
+                }`,
+          },
+        );
 
-      // Normal path: return tree when the tree is sufficiently rich or the
-      // visible-text fallback has already recovered business rows.
-      if (treeOk && (!isSparse || basePayload.visibleRegionRows.visibleRegionRowsUsed)) {
-        const modePayload = buildModeOutput({
+        const modePayload = await buildModeOutput({
           mode: selectedMode,
           renderMode: selectedRender,
-          tabId: tab.id,
+          tabId,
+          currentWindowId,
+          currentWindowState,
+          currentWindowWidth,
+          currentWindowHeight,
+          currentWindowLeft,
+          currentWindowTop,
+          isCurrentTabActive,
+          isCurrentWindowFocused,
+          browserActiveTabId,
+          browserActiveTabIdKnown,
+          isReadTargetBrowserActiveTab,
+          pageStability,
+          loadReadiness,
           currentUrl,
           currentTitle,
           pageType: schemeGuard.pageType,
@@ -703,6 +900,203 @@ class ReadPageTool extends BaseBrowserToolExecutor {
           pageContent: basePayload.pageContent,
           visibleTextContent: basePayload.visibleTextContent,
           contentSummary: basePayload.contentSummary,
+          frameContext: basePayload.frameContext,
+          stats: basePayload.stats,
+          viewport: basePayload.viewport,
+          filter: basePayload.filter,
+          depth: basePayload.depth,
+          focus: basePayload.focus,
+          sparse: true,
+          fallbackUsed: basePayload.fallbackUsed,
+          fallbackSource: basePayload.fallbackSource,
+          refMapCount: basePayload.refMapCount,
+          markedElements: basePayload.markedElements,
+          elements: basePayload.elements,
+          count: basePayload.count,
+          reason: basePayload.reason,
+          tips: basePayload.tips,
+          refMap: basePayload.refMap,
+          candidateActions: basePayload.candidateActions,
+          visibleSearchFilterState: basePayload.visibleSearchFilterState,
+          fileInputBindings: [],
+          visualElements: basePayload.visualElements,
+          visibleRegionRows: basePayload.visibleRegionRows,
+          sensingDiagnostics: basePayload.sensingDiagnostics,
+          includeAuthArtifacts,
+          assistantGuidance,
+          requestedLayer: selectedLayer,
+        });
+        return {
+          content: [{ type: 'text', text: JSON.stringify(modePayload) }],
+          isError: false,
+        };
+      }
+
+      if (!treeOk && domSensingTimedOut) {
+        return createErrorResponse(resp.error);
+      }
+
+      if (
+        shouldSampleVisibleText({
+          treeOk,
+          userControlled,
+          mode: selectedMode,
+          requestedDepth,
+          focusRefId,
+          rows: basePayload.visibleRegionRows,
+          pageRole: pageUnderstanding.pageRole,
+          assistantGuidance,
+        }) &&
+        !basePayload.visibleTextContent
+      ) {
+        const visibleTextContent = await this.sampleVisibleTextContent(tabId, requestedFrameId);
+        if (visibleTextContent) {
+          basePayload.visibleTextContent = visibleTextContent;
+          if (!basePayload.visibleRegionRows.visibleRegionRowsUsed) {
+            const visibleTextRows = extractVisibleRegionRows({
+              pageContent: String(basePayload.pageContent || ''),
+              visibleTextContent,
+              sourceRegion: pageUnderstanding.primaryRegion,
+              fallbackInteractiveElements: rowLinkingInteractiveElements,
+              url: currentUrl,
+              title: currentTitle,
+              viewport: basePayload.viewport,
+              scrollY: typeof resp?.scrollY === 'number' ? resp.scrollY : null,
+              pixelsBelow: typeof resp?.pixelsBelow === 'number' ? resp.pixelsBelow : null,
+            });
+            if (visibleTextRows.visibleRegionRowsUsed) {
+              basePayload.visibleRegionRows = visibleTextRows;
+              basePayload.fallbackSource = 'visible_text';
+              reconcilePageUnderstandingWithVisibleRows(basePayload);
+            }
+          }
+        }
+      }
+      await this.repairVisibleRowsTargetRefs({
+        tabId,
+        basePayload,
+        pageUnderstanding,
+        currentUrl,
+        currentTitle,
+        frameId: requestedFrameId,
+      });
+
+      if (
+        treeOk &&
+        !focusRefId &&
+        !isSparse &&
+        treeInteractiveElements.length < 3 &&
+        !basePayload.fallbackUsed
+      ) {
+        const fallback = await this.collectInteractiveElementsFallback(tabId, {
+          frameId: requestedFrameId,
+        });
+        if (fallback && fallback.elements.length > treeInteractiveElements.length) {
+          const merged = fallback.elements.slice(0, 150);
+          const fallbackRefMap = buildFallbackRefMap(merged);
+          const mergedWithRefs = attachFallbackRefs(merged, fallbackRefMap);
+          basePayload.fallbackUsed = true;
+          basePayload.fallbackSource = 'interactive_shell_supplement';
+          basePayload.elements = mergedWithRefs;
+          basePayload.count = fallback.elements.length;
+          basePayload.refMap =
+            Array.isArray(basePayload.refMap) && basePayload.refMap.length > 0
+              ? [...basePayload.refMap, ...fallbackRefMap]
+              : fallbackRefMap;
+          basePayload.refMapCount = basePayload.refMap.filter(
+            (entry: unknown) => entry != null,
+          ).length;
+        }
+      }
+
+      await this.recoverGlobalMenuTextTargets({ tabId, basePayload, frameId: requestedFrameId });
+      await this.recoverVisibleTextControlTargets({
+        tabId,
+        basePayload,
+        frameId: requestedFrameId,
+      });
+      await this.recoverSearchToolbarTextTargets({
+        tabId,
+        basePayload,
+        assistantGuidance,
+        frameId: requestedFrameId,
+      });
+      await this.recoverFilterPanelTextTargets({
+        tabId,
+        basePayload,
+        assistantGuidance,
+        frameId: requestedFrameId,
+      });
+      const visibleSearchSurfaceActions = await collectVisibleSearchSurfaceActions({
+        tabId,
+        currentUrl,
+        assistantGuidance,
+        pageRole: basePayload.pageRole,
+        forceScan: basePayload.visibleRegionRows?.visibleRegionRowsUsed === true,
+      });
+      if (visibleSearchSurfaceActions.sensingDiagnostic) {
+        basePayload.sensingDiagnostics = appendObjectSensingDiagnostic(
+          basePayload.sensingDiagnostics,
+          visibleSearchSurfaceActions.sensingDiagnostic,
+        );
+      }
+      if (visibleSearchSurfaceActions.actions.length > 0) {
+        basePayload.candidateActions = mergeVisibleSearchSurfaceActions(
+          basePayload.candidateActions,
+          visibleSearchSurfaceActions.actions,
+        );
+        basePayload.fallbackSource = basePayload.fallbackSource
+          ? `${basePayload.fallbackSource}+visible_search_surface_actions`
+          : 'visible_search_surface_actions';
+      }
+      if (visibleSearchSurfaceActions.filterState) {
+        basePayload.visibleSearchFilterState = visibleSearchSurfaceActions.filterState;
+      }
+      await this.supplementAuthFormInteractiveControls(tabId, basePayload, requestedFrameId);
+      basePayload.visualElements = await collectQrVisualElementHints({
+        pageContent: String(basePayload.pageContent || ''),
+        visibleTextContent: basePayload.visibleTextContent,
+        frameId: requestedFrameId,
+        collectFallback: (options) => this.collectInteractiveElementsFallback(tabId, options),
+      });
+      basePayload.fileInputBindings = await collectReadPageFileInputBindings(
+        tabId,
+        requestedFrameId,
+      );
+
+      // Normal path: return tree when the tree is sufficiently rich or the
+      // visible-text fallback has already recovered business rows.
+      if (treeOk && (!isSparse || basePayload.visibleRegionRows.visibleRegionRowsUsed)) {
+        const modePayload = await buildModeOutput({
+          mode: selectedMode,
+          renderMode: selectedRender,
+          tabId,
+          currentWindowId,
+          currentWindowState,
+          currentWindowWidth,
+          currentWindowHeight,
+          currentWindowLeft,
+          currentWindowTop,
+          isCurrentTabActive,
+          isCurrentWindowFocused,
+          browserActiveTabId,
+          browserActiveTabIdKnown,
+          isReadTargetBrowserActiveTab,
+          pageStability,
+          loadReadiness,
+          currentUrl,
+          currentTitle,
+          pageType: schemeGuard.pageType,
+          scheme: schemeGuard.scheme,
+          pageRole: basePayload.pageRole,
+          primaryRegion: basePayload.primaryRegion,
+          primaryRegionConfidence: basePayload.primaryRegionConfidence,
+          footerOnly: basePayload.footerOnly,
+          anchorTexts: basePayload.anchorTexts,
+          pageContent: basePayload.pageContent,
+          visibleTextContent: basePayload.visibleTextContent,
+          contentSummary: basePayload.contentSummary,
+          frameContext: basePayload.frameContext,
           stats: basePayload.stats,
           viewport: basePayload.viewport,
           filter: basePayload.filter,
@@ -719,11 +1113,40 @@ class ReadPageTool extends BaseBrowserToolExecutor {
           tips: basePayload.tips,
           refMap: basePayload.refMap,
           candidateActions: basePayload.candidateActions,
+          visibleSearchFilterState: basePayload.visibleSearchFilterState,
+          fileInputBindings: basePayload.fileInputBindings,
+          visualElements: basePayload.visualElements,
           visibleRegionRows: basePayload.visibleRegionRows,
+          sensingDiagnostics: basePayload.sensingDiagnostics,
+          includeAuthArtifacts,
+          assistantGuidance,
           requestedLayer: selectedLayer,
         });
         return {
           content: [{ type: 'text', text: JSON.stringify(modePayload) }],
+          isError: false,
+        };
+      }
+
+      const classifiedDomSensingFailure = domSensingFailure
+        ? this.classifyContentScriptError(domSensingFailure)
+        : null;
+      if (classifiedDomSensingFailure) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                success: false,
+                reason: classifiedDomSensingFailure.reason,
+                pageType: 'browser_error_page',
+                recommendedAction: classifiedDomSensingFailure.recommendedAction,
+                error: classifiedDomSensingFailure.message,
+                nextStepHint:
+                  'page_unreadable; return BLOCKED or retry navigation before attempting structured reads',
+              }),
+            },
+          ],
           isError: false,
         };
       }
@@ -742,68 +1165,98 @@ class ReadPageTool extends BaseBrowserToolExecutor {
       // Newly opened MV3 pages can report document complete before the
       // injected helper is ready to answer its first runtime message.
       try {
-        const fallback = await this.collectInteractiveElementsFallback(tab.id);
+        const fallback = await this.collectInteractiveElementsFallback(tabId, {
+          frameId: requestedFrameId,
+        });
 
         if (fallback) {
-          const merged = fallback.elements.slice(0, 150);
-          const fallbackRefMap = buildFallbackRefMap(merged);
-          const mergedWithRefs = attachFallbackRefs(merged, fallbackRefMap);
-          const fallbackRefEntryCount = fallbackRefMap.filter((entry) => entry != null).length;
-
-          basePayload.fallbackUsed = true;
-          basePayload.fallbackSource = 'get_interactive_elements';
-          basePayload.reason = treeOk ? 'sparse_tree' : resp?.error || 'tree_failed';
-          basePayload.elements = mergedWithRefs;
-          basePayload.count = fallback.elements.length;
-          basePayload.refMap = fallbackRefMap;
-          basePayload.refMapCount = fallbackRefEntryCount;
-          if (mergedWithRefs.length > 0 || !basePayload.pageContent) {
-            basePayload.pageContent = formatElementsAsPageContent(mergedWithRefs, fallbackRefMap);
-          }
-          const fallbackUnderstanding = inferPageUnderstanding(
+          await applyInteractiveFallbackPayload({
+            tabId,
+            basePayload,
+            fallback,
+            treeOk,
+            treeError: resp?.error,
             currentUrl,
             currentTitle,
-            String(basePayload.pageContent || ''),
-          );
-          basePayload.pageRole = fallbackUnderstanding.pageRole;
-          basePayload.primaryRegion = fallbackUnderstanding.primaryRegion;
-          basePayload.primaryRegionConfidence = fallbackUnderstanding.primaryRegionConfidence;
-          basePayload.footerOnly = fallbackUnderstanding.footerOnly;
-          basePayload.anchorTexts = fallbackUnderstanding.anchorTexts;
-          basePayload.visibleRegionRows = extractVisibleRegionRows({
-            pageContent: String(basePayload.pageContent || ''),
-            sourceRegion: fallbackUnderstanding.primaryRegion,
-            fallbackInteractiveElements: mergedWithRefs,
-            url: currentUrl,
-            title: currentTitle,
-            viewport: basePayload.viewport,
-            scrollY: typeof fallback?.scrollY === 'number' ? fallback.scrollY : null,
-            pixelsBelow: typeof fallback?.pixelsBelow === 'number' ? fallback.pixelsBelow : null,
+            frameId: requestedFrameId,
+            collectInteractiveElementsFallback: this.collectInteractiveElementsFallback.bind(this),
+            sampleVisibleTextContent: this.sampleVisibleTextContent.bind(this),
           });
-          if (!basePayload.visibleRegionRows.visibleRegionRowsUsed) {
-            const visibleTextContent = await this.sampleVisibleTextContent(tab.id);
-            if (visibleTextContent) {
-              basePayload.visibleTextContent = visibleTextContent;
-              basePayload.visibleRegionRows = extractVisibleRegionRows({
-                pageContent: String(basePayload.pageContent || ''),
-                visibleTextContent,
-                sourceRegion: fallbackUnderstanding.primaryRegion,
-                fallbackInteractiveElements: mergedWithRefs,
-                url: currentUrl,
-                title: currentTitle,
-                viewport: basePayload.viewport,
-                scrollY: typeof fallback?.scrollY === 'number' ? fallback.scrollY : null,
-                pixelsBelow:
-                  typeof fallback?.pixelsBelow === 'number' ? fallback.pixelsBelow : null,
-              });
-            }
+          await this.recoverGlobalMenuTextTargets({
+            tabId,
+            basePayload,
+            frameId: requestedFrameId,
+          });
+          await this.recoverVisibleTextControlTargets({
+            tabId,
+            basePayload,
+            frameId: requestedFrameId,
+          });
+          await this.recoverSearchToolbarTextTargets({
+            tabId,
+            basePayload,
+            assistantGuidance,
+            frameId: requestedFrameId,
+          });
+          await this.recoverFilterPanelTextTargets({
+            tabId,
+            basePayload,
+            assistantGuidance,
+            frameId: requestedFrameId,
+          });
+          const visibleSearchSurfaceActions = await collectVisibleSearchSurfaceActions({
+            tabId,
+            currentUrl,
+            assistantGuidance,
+            pageRole: basePayload.pageRole,
+            forceScan: basePayload.visibleRegionRows?.visibleRegionRowsUsed === true,
+          });
+          if (visibleSearchSurfaceActions.sensingDiagnostic) {
+            basePayload.sensingDiagnostics = appendObjectSensingDiagnostic(
+              basePayload.sensingDiagnostics,
+              visibleSearchSurfaceActions.sensingDiagnostic,
+            );
           }
-          reconcilePageUnderstandingWithVisibleRows(basePayload);
+          if (visibleSearchSurfaceActions.actions.length > 0) {
+            basePayload.candidateActions = mergeVisibleSearchSurfaceActions(
+              basePayload.candidateActions,
+              visibleSearchSurfaceActions.actions,
+            );
+            basePayload.fallbackSource = basePayload.fallbackSource
+              ? `${basePayload.fallbackSource}+visible_search_surface_actions`
+              : 'visible_search_surface_actions';
+          }
+          if (visibleSearchSurfaceActions.filterState) {
+            basePayload.visibleSearchFilterState = visibleSearchSurfaceActions.filterState;
+          }
+          basePayload.visualElements = await collectQrVisualElementHints({
+            pageContent: String(basePayload.pageContent || ''),
+            visibleTextContent: basePayload.visibleTextContent,
+            frameId: requestedFrameId,
+            collectFallback: (options) => this.collectInteractiveElementsFallback(tabId, options),
+          });
+          basePayload.fileInputBindings = await collectReadPageFileInputBindings(
+            tabId,
+            requestedFrameId,
+          );
 
-          const modePayload = buildModeOutput({
+          const modePayload = await buildModeOutput({
             mode: selectedMode,
             renderMode: selectedRender,
-            tabId: tab.id,
+            tabId,
+            currentWindowId,
+            currentWindowState,
+            currentWindowWidth,
+            currentWindowHeight,
+            currentWindowLeft,
+            currentWindowTop,
+            isCurrentTabActive,
+            isCurrentWindowFocused,
+            browserActiveTabId,
+            browserActiveTabIdKnown,
+            isReadTargetBrowserActiveTab,
+            pageStability,
+            loadReadiness,
             currentUrl,
             currentTitle,
             pageType: schemeGuard.pageType,
@@ -816,6 +1269,7 @@ class ReadPageTool extends BaseBrowserToolExecutor {
             pageContent: basePayload.pageContent,
             visibleTextContent: basePayload.visibleTextContent,
             contentSummary: summarizePageContent(String(basePayload.pageContent || '')),
+            frameContext: basePayload.frameContext,
             stats: basePayload.stats,
             viewport: basePayload.viewport,
             filter: basePayload.filter,
@@ -832,7 +1286,13 @@ class ReadPageTool extends BaseBrowserToolExecutor {
             tips: basePayload.tips,
             refMap: basePayload.refMap,
             candidateActions: basePayload.candidateActions,
+            visibleSearchFilterState: basePayload.visibleSearchFilterState,
+            fileInputBindings: basePayload.fileInputBindings,
+            visualElements: basePayload.visualElements,
             visibleRegionRows: basePayload.visibleRegionRows,
+            sensingDiagnostics: basePayload.sensingDiagnostics,
+            includeAuthArtifacts,
+            assistantGuidance,
             requestedLayer: selectedLayer,
           });
 

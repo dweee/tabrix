@@ -245,14 +245,14 @@ function requireReleaseNotesSummaryV26(notesPath) {
   if (/\bDRAFT\b|Status:\s*Draft|TBD|DO NOT/i.test(text)) {
     reasons.push('release notes still contain draft/TBD/do-not-ship language');
   }
-  if (!/Gate B strict PASS/i.test(text)) {
-    reasons.push('release notes must include public-safe Gate B strict PASS summary');
+  if (!/^##\s+Validation Summary\b/im.test(text)) {
+    reasons.push('release notes must include a public validation summary');
   }
-  if (!/seed_adapter/i.test(text)) {
-    reasons.push('release notes must disclose seed_adapter transitional source lineage');
+  if (!/real[- ]browser/i.test(text)) {
+    reasons.push('release notes validation summary must mention real-browser validation');
   }
-  if (!/v2\.7/i.test(text)) {
-    reasons.push('release notes must state broader observed-endpoint reuse remains v2.7 scope');
+  if (!/raw[\s\S]{0,240}not published|not published[\s\S]{0,240}raw/i.test(text)) {
+    reasons.push('release notes must state that raw private validation artifacts are not published');
   }
 
   return { ok: reasons.length === 0, reasons };

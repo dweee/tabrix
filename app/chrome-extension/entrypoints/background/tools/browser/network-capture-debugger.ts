@@ -1,8 +1,18 @@
 import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from '@tabrix/shared';
-import { cdpSessionManager } from '@/utils/cdp-session-manager';
+import {
+  cdpSessionManager,
+  type CDPDebuggee,
+  type CDPDetachListener,
+  type CDPEventListener,
+} from '@/utils/cdp-session-manager';
 import { NETWORK_FILTERS } from '@/common/constants';
+import {
+  buildSafeResponseSummaryFromJsonText,
+  type BrowserContextSafeResponseSummary,
+} from './response-summary-sampler';
+import { markBrowserWorldTabAiCreated } from '../../browser-world-inventory';
 
 interface NetworkDebuggerStartToolParams {
   url?: string; // URL to navigate to or focus. If not provided, uses active tab.
@@ -36,6 +46,7 @@ interface NetworkRequestInfo {
   responseBodySource?: 'debugger_api';
   rawBodyPersisted?: false;
   bodyCompacted?: boolean;
+  safeResponseSummary?: BrowserContextSafeResponseSummary;
   base64Encoded?: boolean; // For responseBody
   encodedDataLength?: number; // Actual bytes received
   errorText?: string; // If loading failed
@@ -65,6 +76,7 @@ const DEBUGGER_PROTOCOL_VERSION = '1.3';
 const MAX_RESPONSE_BODY_SIZE_BYTES = 1 * 1024 * 1024; // 1MB
 const DEFAULT_MAX_CAPTURE_TIME_MS = 3 * 60 * 1000; // 3 minutes
 const DEFAULT_INACTIVITY_TIMEOUT_MS = 60 * 1000; // 1 minute
+const STOP_PENDING_BODY_WAIT_MS = 1_500;
 
 /**
  * Network capture start tool - uses Chrome Debugger API to start capturing network requests
@@ -77,6 +89,8 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
   private lastActivityTime: Map<number, number> = new Map(); // tabId -> timestamp of last network activity
   private pendingResponseBodies: Map<string, Promise<any>> = new Map(); // requestId -> promise for getResponseBody
   private requestCounters: Map<number, number> = new Map(); // tabId -> count of captured requests (after filtering)
+  private readonly cdpEventListener: CDPEventListener = this.handleDebuggerEvent.bind(this);
+  private readonly cdpDetachListener: CDPDetachListener = this.handleDebuggerDetach.bind(this);
   private static MAX_REQUESTS_PER_CAPTURE = 100; // Max requests to store to prevent memory issues
   public static instance: NetworkDebuggerStartTool | null = null;
 
@@ -87,8 +101,8 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
     }
     NetworkDebuggerStartTool.instance = this;
 
-    chrome.debugger.onEvent.addListener(this.handleDebuggerEvent.bind(this));
-    chrome.debugger.onDetach.addListener(this.handleDebuggerDetach.bind(this));
+    cdpSessionManager.addEventListener(this.cdpEventListener);
+    cdpSessionManager.addDetachListener(this.cdpDetachListener);
     chrome.tabs.onRemoved.addListener(this.handleTabRemoved.bind(this));
     chrome.tabs.onCreated.addListener(this.handleTabCreated.bind(this));
   }
@@ -245,7 +259,7 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
     }
   }
 
-  private handleDebuggerEvent(source: chrome.debugger.Debuggee, method: string, params?: any) {
+  private handleDebuggerEvent(source: CDPDebuggee, method: string, params?: any) {
     if (!source.tabId) return;
 
     const tabId = source.tabId;
@@ -272,7 +286,7 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
     }
   }
 
-  private handleDebuggerDetach(source: chrome.debugger.Debuggee, reason: string) {
+  private handleDebuggerDetach(source: CDPDebuggee, reason: string) {
     if (source.tabId && this.captureData.has(source.tabId)) {
       console.log(
         `NetworkDebuggerStartTool: Debugger detached from tab ${source.tabId}, reason: ${reason}. Cleaning up.`,
@@ -332,7 +346,7 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
 
   /**
    * Check if URL should be filtered based on EXCLUDED_DOMAINS patterns.
-   * Uses full URL substring match to support patterns like 'facebook.com/tr'.
+   * Uses full URL substring match so generic tracking paths can be filtered.
    */
   private shouldFilterRequestByUrl(url: string): boolean {
     const normalizedUrl = String(url || '').toLowerCase();
@@ -500,6 +514,18 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
           requestInfo.responseBodySource = 'debugger_api';
           requestInfo.rawBodyPersisted = false;
           requestInfo.bodyCompacted = responseBodyData.base64Encoded !== true;
+          requestInfo.safeResponseSummary =
+            buildSafeResponseSummaryFromJsonText({
+              url: requestInfo.url,
+              method: requestInfo.method,
+              status: requestInfo.statusCode ?? null,
+              contentType: requestInfo.mimeType ?? null,
+              body: responseBodyData.body ?? null,
+              base64Encoded: responseBodyData.base64Encoded,
+              capturedAfterArm: true,
+              samplerArmedAt: captureInfo.startTime,
+              capturedAt: Date.now(),
+            }) ?? undefined;
           captureInfo.responseBodySource = 'debugger_api';
           captureInfo.bodyCompacted =
             captureInfo.bodyCompacted || responseBodyData.base64Encoded !== true;
@@ -591,6 +617,19 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
     return responseBodyPromise;
   }
 
+  private async waitForPendingResponseBodies(tabId: number): Promise<void> {
+    const pendingPrefix = `${tabId}_`;
+    const pending = Array.from(this.pendingResponseBodies.entries())
+      .filter(([key]) => key.startsWith(pendingPrefix))
+      .map(([, promise]) => promise.catch(() => null));
+    if (pending.length === 0) return;
+
+    await Promise.race([
+      Promise.allSettled(pending),
+      new Promise((resolve) => setTimeout(resolve, STOP_PENDING_BODY_WAIT_MS)),
+    ]);
+  }
+
   private cleanupCapture(tabId: number) {
     if (this.captureTimers.has(tabId)) {
       clearTimeout(this.captureTimers.get(tabId)!);
@@ -632,6 +671,8 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
     );
 
     try {
+      await this.waitForPendingResponseBodies(tabId);
+
       let cdpDetachSuccess = false;
       // Attempt to disable network and detach via manager; it will no-op if others own the session
       try {
@@ -863,6 +904,7 @@ class NetworkDebuggerStartTool extends BaseBrowserToolExecutor {
           await chrome.tabs.update(tabToOperateOn.id!, { active: true });
         } else {
           tabToOperateOn = await chrome.tabs.create({ url: targetUrl, active: true });
+          markBrowserWorldTabAiCreated(tabToOperateOn.id);
           // Wait for tab to be somewhat ready. A better way is to listen to tabs.onUpdated status='complete'
           // but for debugger attachment, it just needs the tabId.
           await new Promise((resolve) => setTimeout(resolve, 500)); // Short delay

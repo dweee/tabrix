@@ -9,12 +9,12 @@ import {
   ListResourcesRequestSchema,
   ListPromptsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { TOOL_SCHEMAS } from '@tabrix/shared';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import { logger } from '../logging/logger';
+import { buildMcpToolListResponse } from './mcp-tool-list';
 
 const stdioLogger = logger.child('stdio-mcp');
 
@@ -91,7 +91,7 @@ export const ensureMcpClient = async () => {
 
 export const setupTools = (server: Server) => {
   // List tools handler
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOL_SCHEMAS }));
+  server.setRequestHandler(ListToolsRequestSchema, async () => buildMcpToolListResponse());
 
   // Call tool handler
   server.setRequestHandler(CallToolRequestSchema, async (request) =>
@@ -183,8 +183,12 @@ async function shutdownGracefully(reason: string): Promise<void> {
       await mcpClient.close();
       mcpClient = null;
     }
-  } catch {
-    // ignore close errors
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    stdioLogger.warn('failed to close stdio MCP client during shutdown', {
+      reason,
+      errorMessage: message,
+    });
   }
   try {
     await stdioMcpServer?.close();

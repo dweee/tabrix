@@ -15,34 +15,6 @@ import {
   NEW_TAB_OBSERVE_DRAIN_VERIFIER_MS,
 } from '@/entrypoints/background/tools/browser/interaction';
 
-/**
- * Test strategy for B-024 (Click V2 · verifier hook v1).
- *
- * These tests target the narrow mechanical contract from
- * `docs/CLICK_V2_EXECUTION_BRIEF_V1.md` §10:
- *
- *   1. verifier not requested  → current generic click path still works
- *   2. verifier requested + destination matches → `success: true`
- *   3. verifier requested + URL changes but role mismatches → `success: false`
- *   4. verifier requested + no matching destination → `success: false`
- *   5. response includes `postClickState`
- *
- * We exercise the pure evaluator directly (tests 2/3/4) and use the thin
- * IO wrapper `runClickVerifier` to cover the plumbing (tests 1/5).
- *
- * `interaction.ts` projects `ClickVerifierResult` 1:1 into the public
- * `postClickState` object, so a field-shape assertion here is sufficient
- * to keep the public contract honest — the projection itself is a
- * mechanical copy covered by the TypeScript compiler.
- */
-
-const GITHUB_ISSUES_BODY =
-  'New issue Assignee Labels Milestone — bug reports and feature requests for octocat/hello.';
-const GITHUB_ACTIONS_BODY =
-  'Filter workflow runs · run 42 · completed successfully · workflow run entries';
-const GITHUB_REPO_HOME_BODY =
-  'Code Issues Pull requests Actions — go to file · main branch · readme';
-
 describe('isVerifierContextRequested', () => {
   it('returns false when context is missing or key is empty', () => {
     expect(isVerifierContextRequested(undefined)).toBe(false);
@@ -51,220 +23,58 @@ describe('isVerifierContextRequested', () => {
     expect(isVerifierContextRequested({ verifierKey: '' })).toBe(false);
   });
 
-  it('returns true for both known and unknown non-empty keys', () => {
-    expect(isVerifierContextRequested({ verifierKey: 'github.repo_nav.issues' })).toBe(true);
-    expect(isVerifierContextRequested({ verifierKey: 'github.repo_nav.nope' })).toBe(true);
+  it('returns true for any non-empty verifier key', () => {
+    expect(isVerifierContextRequested({ verifierKey: 'site.nav.details' })).toBe(true);
   });
 });
 
 describe('isVerifierContextActive', () => {
-  it('returns false when context is missing, empty, or key is unknown', () => {
+  it('does not activate verifier contexts without an explicit generic verifier registry', () => {
     expect(isVerifierContextActive(undefined)).toBe(false);
     expect(isVerifierContextActive(null)).toBe(false);
     expect(isVerifierContextActive({})).toBe(false);
     expect(isVerifierContextActive({ verifierKey: '' })).toBe(false);
-    expect(isVerifierContextActive({ verifierKey: 'nope.not_a_real_key' })).toBe(false);
-  });
-
-  it('returns true for all three v1 GitHub repo-nav keys', () => {
-    expect(isVerifierContextActive({ verifierKey: 'github.repo_nav.issues' })).toBe(true);
-    expect(isVerifierContextActive({ verifierKey: 'github.repo_nav.pull_requests' })).toBe(true);
-    expect(isVerifierContextActive({ verifierKey: 'github.repo_nav.actions' })).toBe(true);
+    expect(isVerifierContextActive({ verifierKey: 'site.nav.details' })).toBe(false);
   });
 });
 
-describe('evaluateClickVerifier (pure)', () => {
-  it('issues: URL + role match → passed', () => {
+describe('evaluateClickVerifier', () => {
+  it('fails closed for unknown verifier keys without applying site-specific logic', () => {
     const result = evaluateClickVerifier(
-      { family: 'github', verifierKey: 'github.repo_nav.issues' },
-      'https://github.com/octocat/hello',
+      { verifierKey: 'site.nav.details' },
+      'https://example.test/list',
       {
-        url: 'https://github.com/octocat/hello/issues',
-        title: 'Issues · octocat/hello',
-        bodyText: GITHUB_ISSUES_BODY,
+        url: 'https://example.test/detail/123',
+        title: 'Detail',
+        bodyText: 'Detail page content',
       },
     );
-    expect(result.passed).toBe(true);
-    expect(result.reason).toBe('github.repo_nav.issues');
-    expect(result.pageRoleAfter).toBe('issues_list');
-    expect(result.beforeUrl).toBe('https://github.com/octocat/hello');
-    expect(result.afterUrl).toBe('https://github.com/octocat/hello/issues');
+    expect(result).toEqual({
+      passed: false,
+      reason: 'verifier_key_unknown:site.nav.details',
+      beforeUrl: 'https://example.test/list',
+      afterUrl: 'https://example.test/detail/123',
+      pageRoleAfter: null,
+    });
   });
 
-  it('actions: URL + role match → passed', () => {
+  it('keeps the public postClickState field shape stable', () => {
     const result = evaluateClickVerifier(
-      { family: 'github', verifierKey: 'github.repo_nav.actions' },
-      'https://github.com/octocat/hello',
+      { verifierKey: 'site.nav.details' },
+      'https://example.test/list',
       {
-        url: 'https://github.com/octocat/hello/actions',
-        title: 'Actions · octocat/hello',
-        bodyText: GITHUB_ACTIONS_BODY,
+        url: 'https://example.test/detail/123',
+        title: 'Detail',
+        bodyText: 'Detail page content',
       },
     );
-    expect(result.passed).toBe(true);
-    expect(result.reason).toBe('github.repo_nav.actions');
-    expect(result.pageRoleAfter).toBe('actions_list');
-  });
-
-  it('URL matches but role mismatches → failed with role_mismatch', () => {
-    // Brief §10 case 3. The GitHub family adapter decides `pageRole`
-    // from URL path, not body, so we use a repo-scoped `/issues/<id>`
-    // URL — my verifier's pathRegex still matches (guarding against
-    // stale refs that land on a specific issue page), but the adapter's
-    // narrow `/^\/issues(?:\/?$|[?#])/` dispatcher does NOT, so it falls
-    // through to the legacy fallback (`pageRole: 'unknown'`). That's
-    // the realistic "looked like the right destination by URL shape but
-    // the page understanding never confirmed it" case.
-    const result = evaluateClickVerifier(
-      { family: 'github', verifierKey: 'github.repo_nav.issues' },
-      'https://github.com/octocat/hello',
-      {
-        url: 'https://github.com/octocat/hello/issues/42',
-        title: 'Something is broken · Issue #42 · octocat/hello',
-        bodyText: 'Issue 42 comment thread · open · labels · assignees',
-      },
-    );
-    expect(result.passed).toBe(false);
-    expect(result.reason).toBe('github.repo_nav.issues:role_mismatch');
-    expect(result.afterUrl).toBe('https://github.com/octocat/hello/issues/42');
-    expect(result.pageRoleAfter).not.toBe('issues_list');
-  });
-
-  it('URL does not match the verifier path regex → failed with url_mismatch', () => {
-    // Brief §10 case 4 — the SPA stayed on repo_home (verifier was
-    // requested for issues, but click did nothing observable).
-    const result = evaluateClickVerifier(
-      { family: 'github', verifierKey: 'github.repo_nav.issues' },
-      'https://github.com/octocat/hello',
-      {
-        url: 'https://github.com/octocat/hello',
-        title: 'octocat/hello',
-        bodyText: GITHUB_REPO_HOME_BODY,
-      },
-    );
-    expect(result.passed).toBe(false);
-    expect(result.reason).toBe('github.repo_nav.issues:url_mismatch');
-  });
-
-  it('pull_requests: URL match but pageRoleAfter falls back to "unknown" → fails closed (A3 hardening)', () => {
-    // The GitHub family adapter has no `/pulls` branch, so even with
-    // a fully-loaded readback (url + title + bodyText all present)
-    // `inferPageUnderstanding` will report `pageRole: 'unknown'`.
-    // The brief §7 "URL + left repo_home" compromise must NOT accept
-    // an `'unknown'` role as evidence that the page successfully left
-    // repo_home — `'unknown'` is degraded readback, not a navigation
-    // signal. This test pins the fail-closed behaviour so a future
-    // refactor cannot silently re-introduce the false-success path.
-    const result = evaluateClickVerifier(
-      { family: 'github', verifierKey: 'github.repo_nav.pull_requests' },
-      'https://github.com/octocat/hello',
-      {
-        url: 'https://github.com/octocat/hello/pulls',
-        title: 'Pull requests · octocat/hello',
-        bodyText: 'Open Closed Author Label Projects Milestones Reviews',
-      },
-    );
-    expect(result.passed).toBe(false);
-    expect(result.reason).toBe('github.repo_nav.pull_requests:page_understanding_unavailable');
-    expect(result.pageRoleAfter).toBe('unknown');
-  });
-
-  it('pull_requests: stable non-degenerate, non-repo_home role → passed (acceptLeftRepoHome happy path)', () => {
-    // Synthetic positive case. The GitHub family adapter has no
-    // `/pulls` branch, so under real production traffic
-    // `inferPageUnderstanding` falls back to `pageRole: 'unknown'`
-    // and the verifier fails closed (covered by the test above). To
-    // prove the verifier code path can still return `passed: true`
-    // when page understanding genuinely resolves to a stable,
-    // non-`repo_home`, non-`'unknown'` role, we feed login-shaped
-    // body text so `inferLoginRequired` deliberately returns
-    // `pageRole: 'login_required'`. As soon as a stable
-    // `pull_requests_list` role lands in the GitHub family adapter,
-    // rewrite this test to use the real role.
-    const result = evaluateClickVerifier(
-      { family: 'github', verifierKey: 'github.repo_nav.pull_requests' },
-      'https://github.com/octocat/hello',
-      {
-        url: 'https://github.com/octocat/hello/pulls',
-        title: 'Login · GitHub',
-        bodyText: 'Login to GitHub. Enter your username and password to continue.',
-      },
-    );
-    expect(result.passed).toBe(true);
-    expect(result.reason).toBe('github.repo_nav.pull_requests');
-    expect(result.pageRoleAfter).toBe('login_required');
-  });
-
-  it('pull_requests: incomplete page understanding fails closed', () => {
-    const result = evaluateClickVerifier(
-      { family: 'github', verifierKey: 'github.repo_nav.pull_requests' },
-      'https://github.com/octocat/hello',
-      {
-        url: 'https://github.com/octocat/hello/pulls',
-        title: 'Pull requests · octocat/hello',
-        bodyText: null,
-      },
-    );
-    expect(result.passed).toBe(false);
-    expect(result.reason).toBe('github.repo_nav.pull_requests:page_understanding_unavailable');
-    expect(result.pageRoleAfter).toBeNull();
-  });
-
-  it('pull_requests: repo-home-shaped readback under /pulls URL → fails closed (unknown role)', () => {
-    // Same shape as the A3-hardening test above, but with the body
-    // text that previously made the adapter fall back through the
-    // `'unknown'` branch in a way that used to pass. Now that
-    // `'unknown'` is rejected explicitly, this case must also fail
-    // closed. If the GitHub family adapter ever gains a `/pulls`
-    // branch that emits a stable `pull_requests_list` role, swap the
-    // rule to `expectedRole` and rewrite this test.
-    const result = evaluateClickVerifier(
-      { family: 'github', verifierKey: 'github.repo_nav.pull_requests' },
-      'https://github.com/octocat/hello',
-      {
-        url: 'https://github.com/octocat/hello/pulls',
-        title: 'octocat/hello',
-        bodyText: GITHUB_REPO_HOME_BODY,
-      },
-    );
-    expect(result.passed).toBe(false);
-    expect(result.reason).toBe('github.repo_nav.pull_requests:page_understanding_unavailable');
-    expect(result.pageRoleAfter).toBe('unknown');
-  });
-
-  it('unknown verifier key → failed with explicit diagnostic', () => {
-    const result = evaluateClickVerifier(
-      { verifierKey: 'github.repo_nav.nope' },
-      'https://github.com/octocat/hello',
-      {
-        url: 'https://github.com/octocat/hello/issues',
-        title: 'Issues · octocat/hello',
-        bodyText: GITHUB_ISSUES_BODY,
-      },
-    );
-    expect(result.passed).toBe(false);
-    expect(result.reason).toBe('verifier_key_unknown:github.repo_nav.nope');
-  });
-
-  it('produces the five fields required by brief §5 postClickState projection', () => {
-    const result = evaluateClickVerifier(
-      { verifierKey: 'github.repo_nav.issues' },
-      'https://github.com/octocat/hello',
-      {
-        url: 'https://github.com/octocat/hello/issues',
-        title: 'Issues · octocat/hello',
-        bodyText: GITHUB_ISSUES_BODY,
-      },
-    );
-    // These five keys get copied as-is into the public `postClickState`
-    // object by interaction.ts (brief §5 minimum required fields).
     expect(Object.keys(result).sort()).toEqual(
       ['passed', 'reason', 'beforeUrl', 'afterUrl', 'pageRoleAfter'].sort(),
     );
   });
 });
 
-describe('runClickVerifier (IO wrapper)', () => {
+describe('runClickVerifier', () => {
   const mockChrome = globalThis.chrome as unknown as {
     tabs: { get: ReturnType<typeof vi.fn> };
     scripting?: { executeScript: ReturnType<typeof vi.fn> };
@@ -287,11 +97,8 @@ describe('runClickVerifier (IO wrapper)', () => {
     };
   });
 
-  it('returns null when verifier context is inactive (no verifier requested)', async () => {
-    // Brief §10 case 1 — caller passes no verifierKey, the whole
-    // verifier path must short-circuit with null so interaction.ts keeps
-    // the B-023 contract unchanged.
-    const promise = runClickVerifier(1, { family: 'github' }, 'https://github.com/a/b');
+  it('returns null when no verifier context is requested', async () => {
+    const promise = runClickVerifier(1, {}, 'https://example.test/list');
     await vi.runAllTimersAsync();
     const result = await promise;
     expect(result).toBeNull();
@@ -299,51 +106,18 @@ describe('runClickVerifier (IO wrapper)', () => {
     expect(mockChrome.scripting!.executeScript).not.toHaveBeenCalled();
   });
 
-  it('reads tab state + injects body-text sample, then passes verifier on match', async () => {
-    mockChrome.tabs.get.mockResolvedValueOnce({
-      id: 1,
-      url: 'https://github.com/octocat/hello/issues',
-      title: 'Issues · octocat/hello',
-    } as chrome.tabs.Tab);
-    mockChrome.scripting!.executeScript.mockResolvedValueOnce([{ result: GITHUB_ISSUES_BODY }]);
-
-    const promise = runClickVerifier(
-      1,
-      { family: 'github', verifierKey: 'github.repo_nav.issues' },
-      'https://github.com/octocat/hello',
-    );
-    await vi.runAllTimersAsync();
-    const result = await promise;
-
-    expect(result).not.toBeNull();
-    expect(result!.passed).toBe(true);
-    expect(result!.reason).toBe('github.repo_nav.issues');
-    expect(result!.beforeUrl).toBe('https://github.com/octocat/hello');
-    expect(result!.afterUrl).toBe('https://github.com/octocat/hello/issues');
-    expect(result!.pageRoleAfter).toBe('issues_list');
-    // Brief §9 "at most one compact post-click verification read in the
-    // v1 path" — enforce it here so a future refactor can't silently
-    // turn this into a poll.
-    expect(mockChrome.scripting!.executeScript).toHaveBeenCalledTimes(1);
-    expect(mockChrome.tabs.get).toHaveBeenCalledTimes(1);
-    expect(result!.waitDiagnostics?.postClickReadback.reason).toBe('url_changed');
-    expect(result!.waitDiagnostics?.postClickReadback.waitedMs).toBeLessThan(
-      CLICK_VERIFIER_READBACK_MAX_MS,
-    );
-  });
-
   it('does not treat an initial complete tab with an unchanged URL as ready', async () => {
     const unchangedComplete = {
       id: 1,
-      url: 'https://github.com/octocat/hello',
-      title: 'Repo',
+      url: 'https://example.test/list',
+      title: 'List',
       status: 'complete',
     } as chrome.tabs.Tab;
     mockChrome.tabs.get
       .mockResolvedValueOnce(unchangedComplete)
       .mockResolvedValueOnce(unchangedComplete);
 
-    const promise = waitForPostClickReadbackReady(1, 'https://github.com/octocat/hello', {
+    const promise = waitForPostClickReadbackReady(1, 'https://example.test/list', {
       maxMs: 250,
     });
     await Promise.resolve();
@@ -359,12 +133,12 @@ describe('runClickVerifier (IO wrapper)', () => {
   it('returns tab_complete only after an onUpdated complete event', async () => {
     mockChrome.tabs.get.mockResolvedValueOnce({
       id: 1,
-      url: 'https://github.com/octocat/hello',
-      title: 'Repo',
+      url: 'https://example.test/list',
+      title: 'List',
       status: 'complete',
     } as chrome.tabs.Tab);
 
-    const promise = waitForPostClickReadbackReady(1, 'https://github.com/octocat/hello', {
+    const promise = waitForPostClickReadbackReady(1, 'https://example.test/list', {
       maxMs: 250,
     });
     await Promise.resolve();
@@ -372,8 +146,8 @@ describe('runClickVerifier (IO wrapper)', () => {
 
     updatedListeners[0]!(1, { status: 'complete' }, {
       id: 1,
-      url: 'https://github.com/octocat/hello',
-      title: 'Repo',
+      url: 'https://example.test/list',
+      title: 'List',
       status: 'complete',
     } as chrome.tabs.Tab);
 
@@ -383,12 +157,12 @@ describe('runClickVerifier (IO wrapper)', () => {
   it('returns url_changed immediately when the initial tab URL differs', async () => {
     mockChrome.tabs.get.mockResolvedValueOnce({
       id: 1,
-      url: 'https://github.com/octocat/hello/issues',
-      title: 'Issues',
+      url: 'https://example.test/detail/123',
+      title: 'Detail',
       status: 'complete',
     } as chrome.tabs.Tab);
 
-    const readiness = await waitForPostClickReadbackReady(1, 'https://github.com/octocat/hello', {
+    const readiness = await waitForPostClickReadbackReady(1, 'https://example.test/list', {
       maxMs: 250,
     });
 
@@ -400,13 +174,13 @@ describe('runClickVerifier (IO wrapper)', () => {
   it('uses the max cap only when no observable tab condition appears', async () => {
     const loadingTab = {
       id: 1,
-      url: 'https://github.com/octocat/hello',
-      title: 'Repo',
+      url: 'https://example.test/list',
+      title: 'List',
       status: 'loading',
     } as chrome.tabs.Tab;
     mockChrome.tabs.get.mockResolvedValueOnce(loadingTab).mockResolvedValueOnce(loadingTab);
 
-    const promise = waitForPostClickReadbackReady(1, 'https://github.com/octocat/hello', {
+    const promise = waitForPostClickReadbackReady(1, 'https://example.test/list', {
       maxMs: 250,
     });
     await Promise.resolve();
@@ -416,75 +190,6 @@ describe('runClickVerifier (IO wrapper)', () => {
     await expect(promise).resolves.toMatchObject({ reason: 'timeout', tab: loadingTab });
     expect(chrome.tabs.onUpdated.removeListener).toHaveBeenCalledTimes(1);
   });
-
-  it('falls back gracefully when scripting injection throws', async () => {
-    mockChrome.tabs.get.mockResolvedValueOnce({
-      id: 1,
-      url: 'https://github.com/octocat/hello/issues',
-      title: 'Issues',
-    } as chrome.tabs.Tab);
-    mockChrome.scripting!.executeScript.mockRejectedValueOnce(new Error('no permission'));
-
-    const promise = runClickVerifier(
-      1,
-      { verifierKey: 'github.repo_nav.issues' },
-      'https://github.com/octocat/hello',
-    );
-    await vi.runAllTimersAsync();
-    const result = await promise;
-
-    // Verifier must still produce a structured verdict — the caller's
-    // `success` should collapse to false, but the tool should not throw.
-    expect(result).not.toBeNull();
-    expect(result!.passed).toBe(false);
-    expect(result!.afterUrl).toBe('https://github.com/octocat/hello/issues');
-    expect(result!.pageRoleAfter).toBeNull();
-  });
-
-  it('pull_requests: scripting failure does not pass via URL-only fallback', async () => {
-    mockChrome.tabs.get.mockResolvedValueOnce({
-      id: 1,
-      url: 'https://github.com/octocat/hello/pulls',
-      title: 'Pull requests · octocat/hello',
-    } as chrome.tabs.Tab);
-    mockChrome.scripting!.executeScript.mockRejectedValueOnce(new Error('no permission'));
-
-    const promise = runClickVerifier(
-      1,
-      { verifierKey: 'github.repo_nav.pull_requests' },
-      'https://github.com/octocat/hello',
-    );
-    await vi.runAllTimersAsync();
-    const result = await promise;
-
-    expect(result).not.toBeNull();
-    expect(result!.passed).toBe(false);
-    expect(result!.reason).toBe('github.repo_nav.pull_requests:page_understanding_unavailable');
-    expect(result!.afterUrl).toBe('https://github.com/octocat/hello/pulls');
-    expect(result!.pageRoleAfter).toBeNull();
-  });
-
-  it('returns a structured failure for unknown verifier keys instead of null', async () => {
-    mockChrome.tabs.get.mockResolvedValueOnce({
-      id: 1,
-      url: 'https://github.com/octocat/hello/issues',
-      title: 'Issues · octocat/hello',
-    } as chrome.tabs.Tab);
-    mockChrome.scripting!.executeScript.mockResolvedValueOnce([{ result: GITHUB_ISSUES_BODY }]);
-
-    const promise = runClickVerifier(
-      1,
-      { verifierKey: 'github.repo_nav.nope' },
-      'https://github.com/octocat/hello',
-    );
-    await vi.runAllTimersAsync();
-    const result = await promise;
-
-    expect(result).not.toBeNull();
-    expect(result!.passed).toBe(false);
-    expect(result!.reason).toBe('verifier_key_unknown:github.repo_nav.nope');
-    expect(result!.afterUrl).toBe('https://github.com/octocat/hello/issues');
-  });
 });
 
 describe('clickTool integration', () => {
@@ -493,68 +198,11 @@ describe('clickTool integration', () => {
     vi.useRealTimers();
   });
 
-  it('fails closed with postClickState when verifierKey is unknown', async () => {
-    vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
-      id: 4105,
-      title: 'Repo',
-      url: 'https://github.com/octocat/hello',
-      windowId: 7,
-    });
-    vi.spyOn(clickTool as any, 'injectContentScript').mockResolvedValue(undefined);
-    vi.spyOn(clickTool as any, 'sendMessageToTab').mockResolvedValue({
-      dispatchSucceeded: true,
-      elementInfo: { tagName: 'A' },
-      signals: {
-        beforeUnloadFired: false,
-        urlBefore: 'https://github.com/octocat/hello',
-        urlAfter: 'https://github.com/octocat/hello/issues',
-        hashBefore: '',
-        hashAfter: '',
-        domChanged: false,
-        domAddedDialog: false,
-        domAddedMenu: false,
-        focusChanged: false,
-        targetStateDelta: null,
-      },
-    });
-    chrome.tabs.get = vi.fn().mockResolvedValue({
-      id: 4105,
-      url: 'https://github.com/octocat/hello/issues',
-      title: 'Issues · octocat/hello',
-      windowId: 7,
-    } as chrome.tabs.Tab);
-    chrome.scripting.executeScript = vi.fn().mockResolvedValue([{ result: GITHUB_ISSUES_BODY }]);
-
-    const result = await clickTool.execute({
-      tabId: 4105,
-      selector: '#issues-tab',
-      verifierContext: { verifierKey: 'github.repo_nav.nope' },
-    } as any);
-    const payload = JSON.parse((result.content[0] as { text: string }).text);
-
-    expect(result.isError).toBe(false);
-    expect(payload.success).toBe(false);
-    expect(payload.observedOutcome).toBe('spa_route_change');
-    expect(payload.postClickState).toEqual({
-      beforeUrl: 'https://github.com/octocat/hello',
-      afterUrl: 'https://github.com/octocat/hello/issues',
-      pageRoleAfter: 'issues_list',
-      verifierPassed: false,
-      verifierReason: 'verifier_key_unknown:github.repo_nav.nope',
-    });
-  });
-
-  /**
-   * V23-01: every click response carries an explicit `lane` field so
-   * that lane-integrity metrics can detect a future silent fallback to
-   * a non-Tabrix browser-control path. The extension-first path is
-   * always `tabrix_owned`.
-   */
-  it('emits lane="tabrix_owned" on the click response (V23-01)', async () => {
+  it('emits lane="tabrix_owned" on the click response', async () => {
     vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
       id: 4106,
-      title: 'Repo',
-      url: 'https://github.com/octocat/hello',
+      title: 'List',
+      url: 'https://example.test/list',
       windowId: 7,
     });
     vi.spyOn(clickTool as any, 'injectContentScript').mockResolvedValue(undefined);
@@ -563,8 +211,8 @@ describe('clickTool integration', () => {
       elementInfo: { tagName: 'A' },
       signals: {
         beforeUnloadFired: false,
-        urlBefore: 'https://github.com/octocat/hello',
-        urlAfter: 'https://github.com/octocat/hello',
+        urlBefore: 'https://example.test/list',
+        urlAfter: 'https://example.test/list',
         hashBefore: '',
         hashAfter: '',
         domChanged: true,
@@ -588,8 +236,8 @@ describe('clickTool integration', () => {
   it('emits clickDiff=no_change when no click facts changed', async () => {
     vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
       id: 4107,
-      title: 'Repo',
-      url: 'https://github.com/octocat/hello',
+      title: 'List',
+      url: 'https://example.test/list',
       windowId: 7,
     });
     vi.spyOn(clickTool as any, 'injectContentScript').mockResolvedValue(undefined);
@@ -598,8 +246,8 @@ describe('clickTool integration', () => {
       elementInfo: { tagName: 'BUTTON' },
       signals: {
         beforeUnloadFired: false,
-        urlBefore: 'https://github.com/octocat/hello',
-        urlAfter: 'https://github.com/octocat/hello',
+        urlBefore: 'https://example.test/list',
+        urlAfter: 'https://example.test/list',
         hashBefore: '',
         hashAfter: '',
         domChanged: false,
@@ -618,13 +266,28 @@ describe('clickTool integration', () => {
 
     expect(result.isError).toBe(false);
     expect(payload.clickDiff).toEqual({ kind: 'no_change' });
+    expect(payload.postActionDelta).toMatchObject({
+      deltaKind: 'post_action_tool_delta',
+      actionKind: 'click',
+      tabId: 4107,
+      observedOutcome: 'no_observed_change',
+      changed: false,
+      changedSignals: [],
+      urlDelta: null,
+      readbackStatus: 'not_proven',
+      recommendation: 'stop_or_retry_after_fresh_read',
+      businessSuccessProven: false,
+    });
+    expect(payload.postActionDelta.claimBoundary).toContain(
+      'This is browser-observed post-action change evidence, not AI business evaluation.',
+    );
   });
 
   it('emits clickDiff=change with facts-only signal deltas', async () => {
     vi.spyOn(clickTool as any, 'tryGetTab').mockResolvedValue({
       id: 4108,
-      title: 'Repo',
-      url: 'https://github.com/octocat/hello',
+      title: 'List',
+      url: 'https://example.test/list',
       windowId: 7,
     });
     vi.spyOn(clickTool as any, 'injectContentScript').mockResolvedValue(undefined);
@@ -633,8 +296,8 @@ describe('clickTool integration', () => {
       elementInfo: { tagName: 'A' },
       signals: {
         beforeUnloadFired: false,
-        urlBefore: 'https://github.com/octocat/hello',
-        urlAfter: 'https://github.com/octocat/hello/issues',
+        urlBefore: 'https://example.test/list',
+        urlAfter: 'https://example.test/detail/123',
         hashBefore: '',
         hashAfter: '',
         domChanged: false,
@@ -647,7 +310,7 @@ describe('clickTool integration', () => {
 
     const result = await clickTool.execute({
       tabId: 4108,
-      selector: '#issues-tab',
+      selector: '#details-link',
     } as any);
     const payload = JSON.parse((result.content[0] as { text: string }).text);
 
@@ -664,21 +327,25 @@ describe('clickTool integration', () => {
       focusChanged: false,
       stateChanged: false,
     });
+    expect(payload.postActionDelta).toMatchObject({
+      deltaKind: 'post_action_tool_delta',
+      actionKind: 'click',
+      tabId: 4108,
+      observedOutcome: 'spa_route_change',
+      changed: true,
+      changedSignals: ['url_changed'],
+      urlDelta: 'same_origin',
+      hashChanged: false,
+      beforeUnloadFired: false,
+      readbackStatus: 'fresh_read_required',
+      recommendation: 'chrome_read_page_force_refresh_same_tab',
+      businessSuccessProven: false,
+    });
+    expect(payload.postActionDelta.actionId).toMatch(/^click-4108-/);
   });
 });
 
-/**
- * V23-01: window-alignment guard. Before V23-01, the post-dispatch
- * new-tab observation drained 75 ms after the click-helper resolved,
- * but the verifier waited another 250 ms on top — leaving a window
- * where a `_blank` click that opened its tab during the verifier
- * settle delay would be missed by `verification.newTabOpened` even
- * though the verifier itself saw the URL change. The fix exposes one
- * shared constant and consumes it from the click pipeline; this test
- * just pins the contract so a future refactor cannot silently let the
- * windows drift apart again.
- */
-describe('V23-01 window alignment', () => {
+describe('verifier timing contract', () => {
   it('NEW_TAB_OBSERVE_DRAIN_VERIFIER_MS covers the verifier settle delay', () => {
     expect(NEW_TAB_OBSERVE_DRAIN_VERIFIER_MS).toBeGreaterThanOrEqual(
       CLICK_VERIFIER_SETTLE_DELAY_MS,
@@ -688,5 +355,13 @@ describe('V23-01 window alignment', () => {
   it('CLICK_VERIFIER_SETTLE_DELAY_MS is a positive number', () => {
     expect(typeof CLICK_VERIFIER_SETTLE_DELAY_MS).toBe('number');
     expect(CLICK_VERIFIER_SETTLE_DELAY_MS).toBeGreaterThan(0);
+  });
+
+  it('CLICK_VERIFIER_SETTLE_DELAY_MS covers the action-outcome settle window', () => {
+    expect(CLICK_VERIFIER_SETTLE_DELAY_MS).toBeGreaterThanOrEqual(1500);
+  });
+
+  it('CLICK_VERIFIER_READBACK_MAX_MS remains bounded', () => {
+    expect(CLICK_VERIFIER_READBACK_MAX_MS).toBeGreaterThanOrEqual(CLICK_VERIFIER_SETTLE_DELAY_MS);
   });
 });

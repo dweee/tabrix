@@ -2,11 +2,9 @@
  * V26-PGB-01 — focused tests for the generic observed-endpoint
  * branch of `readKnowledgeDrivenEndpoint`.
  *
- * The seed-family branch already has full coverage via
- * `api-knowledge.test.ts`; here we only verify the generic branch
- * carries the same `emptyResult` envelope so observed endpoints —
- * the v2.6 mainline — never silently surface `rowCount:0` without
- * the closed empty-result evidence.
+ * These tests verify the generic observed-endpoint branch. Tabrix does not
+ * bundle platform-specific seed adapters; direct reads must come from
+ * observed Knowledge rows.
  */
 import { readKnowledgeDrivenEndpoint } from './knowledge-driven-reader';
 import type { EndpointMatch, SafeRequestPlan } from './types';
@@ -52,23 +50,6 @@ function makePlan(overrides?: Partial<SafeRequestPlan>): SafeRequestPlan {
     requestShapeUsed: [],
     ...overrides,
   } as SafeRequestPlan;
-}
-
-function makeWorkflowSeedMatch(): EndpointMatch {
-  return {
-    endpoint: {
-      ...makeMatch().endpoint,
-      endpointId: 'seed-workflow-runs',
-      site: 'api.github.com',
-      family: 'github',
-      urlPattern: 'api.github.com/repos/:owner/:repo/actions/runs',
-      endpointSignature: 'GET api.github.com/repos/:owner/:repo/actions/runs',
-      semanticType: 'list',
-      confidence: 0.9,
-    },
-    score: 0.9,
-    semanticValidation: 'pass',
-  } as unknown as EndpointMatch;
 }
 
 function jsonFetchOnce(status: number, body: unknown) {
@@ -128,40 +109,33 @@ describe('V26-PGB-01 knowledge-driven-reader emptyResult', () => {
     expect((result as { emptyResult?: unknown }).emptyResult).toBeUndefined();
   });
 
-  it('honours the task-derived seed request plan limit when delegating workflow runs', async () => {
+  it('honours the generic observed request plan limit', async () => {
     let requestedUrl = '';
     const result = await readKnowledgeDrivenEndpoint({
-      match: makeWorkflowSeedMatch(),
+      match: makeMatch(),
       plan: makePlan({
-        url: 'https://api.github.com/repos/guodaxia103/tabrix/actions/runs?per_page=1',
-        dataPurpose: 'workflow_runs_list',
-        builderHint: 'seed_adapter',
-        requestShapeUsed: ['per_page'],
+        url: 'https://api.example.com/v1/widgets?limit=1',
+        dataPurpose: 'observed_list',
+        builderHint: 'generic',
+        requestShapeUsed: ['limit'],
       }),
-      seedParams: { owner: 'guodaxia103', repo: 'tabrix' },
       fetchFn: async (url) => {
         requestedUrl = String(url);
         return {
           status: 200,
           headers: { get: jest.fn().mockReturnValue('application/json') },
           json: jest.fn().mockResolvedValue({
-            workflow_runs: Array.from({ length: 10 }, (_, index) => ({
-              name: 'CI',
-              status: 'completed',
-              conclusion: 'success',
-              head_branch: 'main',
-              event: 'push',
-              display_title: `Run ${index}`,
-              created_at: '2026-04-27T00:00:00Z',
-              html_url: `https://github.com/guodaxia103/tabrix/actions/runs/${index}`,
+            items: Array.from({ length: 10 }, (_, index) => ({
+              id: index,
+              title: `Widget ${index}`,
             })),
           }),
         } as any;
       },
     });
 
-    expect(requestedUrl).toContain('per_page=1');
+    expect(requestedUrl).toContain('limit=1');
     expect(result.status).toBe('ok');
-    expect(result.rowCount).toBe(1);
+    expect(result.rowCount).toBe(10);
   });
 });

@@ -12,6 +12,25 @@
   const MAX_NODES = 4000; // hard limit to avoid long blocking on huge DOMs
   const MAX_LINE_LABEL = 100; // max characters for a single label in output
   const REF_MAP_LIMIT = 1000; // limit size of the ref map to keep payload small
+  const DYNAMIC_SURFACE_REF_PREFIX = 'ref_dynamic_surface_';
+  const DYNAMIC_SURFACE_TARGET_LIMIT = 32;
+  const DIAGNOSTICS_KEY = '__TABRIX_INJECT_SCRIPT_DIAGNOSTICS__';
+
+  function recordDiagnostic(source, error) {
+    try {
+      const bucket = (window[DIAGNOSTICS_KEY] = Array.isArray(window[DIAGNOSTICS_KEY])
+        ? window[DIAGNOSTICS_KEY]
+        : []);
+      bucket.push({
+        source,
+        message: String(error && error.message ? error.message : error),
+        at: Date.now(),
+      });
+      if (bucket.length > 25) bucket.splice(0, bucket.length - 25);
+    } catch (_diagnosticError) {
+      return;
+    }
+  }
 
   // Keep a weak map from ref id to elements
   if (!window.__claudeElementMap) window.__claudeElementMap = {};
@@ -27,6 +46,14 @@
     if (role) return role;
     const tag = el.tagName.toLowerCase();
     const type = el.getAttribute('type') || '';
+    const authActionRole = inferAuthActionRole(el);
+    if (authActionRole) return authActionRole;
+    if (el.getAttribute('contenteditable') === 'true') {
+      const identity = `${el.getAttribute('aria-label') || ''} ${el.getAttribute('placeholder') || ''} ${
+        el.getAttribute('title') || ''
+      } ${/** @type {HTMLElement} */ (el).id || ''} ${classNameOf(el)}`;
+      return /\b(search|query)\b|搜索|查找/i.test(identity) ? 'searchbox' : 'textbox';
+    }
     const map = {
       a: 'link',
       button: 'button',
@@ -39,7 +66,9 @@
               ? 'radio'
               : type === 'file'
                 ? 'button'
-                : 'textbox',
+                : type === 'search'
+                  ? 'searchbox'
+                  : 'textbox',
       select: 'combobox',
       textarea: 'textbox',
       h1: 'heading',
@@ -94,8 +123,9 @@
       const input = /** @type {HTMLInputElement} */ (el);
       const type = input.getAttribute('type') || '';
       const val = input.getAttribute('value');
-      if (type === 'submit' && val && val.trim()) return val.trim();
-      if (input.value && input.value.length < 50 && input.value.trim()) return input.value.trim();
+      if ((type === 'submit' || type === 'button' || type === 'reset') && val && val.trim()) {
+        return val.trim();
+      }
     }
     if (['button', 'a', 'summary'].includes(tag)) {
       let text = '';
@@ -125,7 +155,469 @@
       const v = agg.trim();
       return v.length > 50 ? v.substring(0, 50) + '...' : v;
     }
+    const nearbyAuthLabel = inferNearbyAuthLabel(el);
+    if (nearbyAuthLabel) return nearbyAuthLabel;
     return '';
+  }
+
+  function inferValueState(el) {
+    if (!el || !el.tagName) return null;
+    const tag = el.tagName.toLowerCase();
+    const role = String((el.getAttribute && el.getAttribute('role')) || '').toLowerCase();
+    if (
+      tag === 'input' ||
+      tag === 'textarea' ||
+      tag === 'select' ||
+      el.getAttribute('contenteditable') === 'true'
+    ) {
+      const rawValue =
+        tag === 'select'
+          ? /** @type {HTMLSelectElement} */ (el).value
+          : tag === 'textarea'
+            ? /** @type {HTMLTextAreaElement} */ (el).value
+            : tag === 'input'
+              ? /** @type {HTMLInputElement} */ (el).value
+              : el.textContent || '';
+      return String(rawValue || '').length > 0 ? 'non_empty' : 'empty';
+    }
+    if (
+      role === 'textbox' ||
+      role === 'searchbox' ||
+      role === 'combobox' ||
+      role === 'spinbutton'
+    ) {
+      const ariaValue =
+        el.getAttribute('aria-valuetext') ||
+        el.getAttribute('aria-valuenow') ||
+        el.getAttribute('data-value') ||
+        '';
+      if (ariaValue) return 'non_empty';
+      return 'unknown';
+    }
+    return null;
+  }
+
+  const AUTH_ACTION_TEXT_PATTERN =
+    /获取验证码|发送验证码|重新发送|重发验证码|阅读并同意|我已阅读|用户协议|隐私政策|同意并继续|确认同意|我同意|登录|get code|send code|request code|resend code|agree and continue|accept and continue|log\s*in|sign\s*in/i;
+  const AGREEMENT_TEXT_PATTERN =
+    /阅读并同意|我已阅读|用户协议|隐私政策|服务协议|terms|privacy|policy|agreement/i;
+  const AGREEMENT_CONFIRM_TEXT_PATTERN =
+    /同意并继续|确认同意|我同意|agree and continue|accept and continue/i;
+  const AUTH_CONTEXT_PATTERN =
+    /登录|手机号|手机号码|验证码|短信|用户协议|隐私政策|login|sign in|phone|mobile|otp|verification code|sms|terms|privacy/i;
+  const OTP_ACTION_TEXT_PATTERN =
+    /获取验证码|发送验证码|重新发送|重发验证码|get code|send code|request code|resend code/i;
+  const OTP_ACTION_SIGNATURE_PATTERN =
+    /\b(code|otp|sms|verify|verification|captcha|send|resend|auth-code|code-button)\b/i;
+
+  function classNameOf(el) {
+    try {
+      const attr = el.getAttribute && el.getAttribute('class');
+      if (typeof attr === 'string') return attr;
+      const cn = /** @type {any} */ (el).className;
+      if (typeof cn === 'string') return cn;
+      if (cn && typeof cn.baseVal === 'string') return cn.baseVal;
+    } catch (error) {
+      recordDiagnostic('accessibility_tree.class_name', error);
+    }
+    return '';
+  }
+
+  function ownVisibleText(el) {
+    let text = '';
+    try {
+      for (let i = 0; i < el.childNodes.length; i++) {
+        const node = el.childNodes[i];
+        if (node.nodeType === Node.TEXT_NODE) text += node.textContent || '';
+      }
+    } catch (error) {
+      recordDiagnostic('accessibility_tree.own_visible_text', error);
+    }
+    return text.replace(/\s+/g, ' ').trim();
+  }
+
+  function nearbyText(el) {
+    const pieces = [ownVisibleText(el)];
+    try {
+      const parent = el.parentElement;
+      if (parent) pieces.push((parent.textContent || '').replace(/\s+/g, ' ').trim());
+      const grandparent = parent?.parentElement;
+      if (grandparent) pieces.push((grandparent.textContent || '').replace(/\s+/g, ' ').trim());
+    } catch (error) {
+      recordDiagnostic('accessibility_tree.nearby_text', error);
+    }
+    return pieces.filter(Boolean).join(' ').slice(0, 600);
+  }
+
+  function isHugeContainer(el) {
+    try {
+      const rect = /** @type {HTMLElement} */ (el).getBoundingClientRect();
+      const viewportArea = Math.max(1, window.innerWidth * window.innerHeight);
+      const area = Math.max(1, rect.width * rect.height);
+      return area > viewportArea * 0.35;
+    } catch (error) {
+      recordDiagnostic('accessibility_tree.huge_container_rect', error);
+      return false;
+    }
+  }
+
+  function isViewportVisibleRect(rect) {
+    return (
+      rect &&
+      rect.top < window.innerHeight &&
+      rect.bottom > 0 &&
+      rect.left < window.innerWidth &&
+      rect.right > 0 &&
+      rect.width > 0 &&
+      rect.height > 0
+    );
+  }
+
+  function isStaticPageLandmark(el) {
+    try {
+      let current = el;
+      while (current && current !== document.body) {
+        const tag = String(current.tagName || '').toLowerCase();
+        const role = String(current.getAttribute?.('role') || '').toLowerCase();
+        if (
+          ['footer', 'header', 'nav'].includes(tag) ||
+          ['contentinfo', 'banner', 'navigation'].includes(role)
+        ) {
+          return true;
+        }
+        current = current.parentElement;
+      }
+    } catch (error) {
+      recordDiagnostic('accessibility_tree.static_landmark', error);
+    }
+    return false;
+  }
+
+  function isDynamicSurfaceRoot(el) {
+    if (!isVisible(el) || isStaticPageLandmark(el)) return false;
+    const role = String(el.getAttribute('role') || '').toLowerCase();
+    if (['dialog', 'menu', 'listbox'].includes(role)) return true;
+    try {
+      if (el.matches && el.matches(':popover-open, dialog[open], [popover][open]')) return true;
+    } catch (error) {
+      recordDiagnostic('accessibility_tree.dynamic_surface_root.selector', error);
+      if (
+        (el.tagName.toLowerCase() === 'dialog' && el.hasAttribute('open')) ||
+        (el.hasAttribute('popover') && el.hasAttribute('open'))
+      ) {
+        return true;
+      }
+    }
+    try {
+      const rect = /** @type {HTMLElement} */ (el).getBoundingClientRect();
+      if (!isViewportVisibleRect(rect) || isHugeContainer(el)) return false;
+      const cs = window.getComputedStyle(/** @type {HTMLElement} */ (el));
+      const position = String(cs.position || '').toLowerCase();
+      const zIndex = Number.parseInt(String(cs.zIndex || ''), 10);
+      const viewportArea = Math.max(1, window.innerWidth * window.innerHeight);
+      const area = Math.max(1, rect.width * rect.height);
+      const isFloatingPosition =
+        position === 'absolute' || position === 'fixed' || position === 'sticky';
+      if (!isFloatingPosition || area > viewportArea * 0.2) return false;
+      if (Number.isFinite(zIndex) && zIndex >= 10) return true;
+      return hasDynamicSurfaceDescendantEvidence(el);
+    } catch (error) {
+      recordDiagnostic('accessibility_tree.dynamic_surface_root.geometry', error);
+      return false;
+    }
+  }
+
+  function hasDynamicSurfaceActionEvidence(el) {
+    const tag = el.tagName.toLowerCase();
+    if (['button', 'summary'].includes(tag)) return true;
+    if (tag === 'a' && el.getAttribute('href')) return true;
+    const role = String(el.getAttribute('role') || '').toLowerCase();
+    if (
+      [
+        'button',
+        'link',
+        'option',
+        'menuitem',
+        'menuitemcheckbox',
+        'menuitemradio',
+        'tab',
+        'checkbox',
+        'radio',
+        'switch',
+      ].includes(role)
+    ) {
+      return true;
+    }
+    const tabindex = String(el.getAttribute('tabindex') || '').trim();
+    if (tabindex && !tabindex.startsWith('-')) return true;
+    if (el.getAttribute('onclick') != null) return true;
+    if (
+      el.hasAttribute('aria-selected') ||
+      el.hasAttribute('aria-checked') ||
+      el.hasAttribute('aria-pressed')
+    ) {
+      return true;
+    }
+    try {
+      const cs = window.getComputedStyle(/** @type {HTMLElement} */ (el));
+      if (String(cs.cursor || '').toLowerCase() === 'pointer') return true;
+      const parent = el.parentElement;
+      if (parent) {
+        const parentCursor = String(
+          window.getComputedStyle(/** @type {HTMLElement} */ (parent)).cursor || '',
+        ).toLowerCase();
+        if (parentCursor === 'pointer') return true;
+      }
+    } catch (error) {
+      recordDiagnostic('accessibility_tree.dynamic_surface_action.style', error);
+    }
+    return false;
+  }
+
+  function hasDynamicSurfaceDescendantEvidence(root) {
+    try {
+      const descendants = Array.from(root.querySelectorAll('*')).slice(0, 80);
+      return descendants.some((el) => {
+        if (!isVisible(el)) return false;
+        if (hasDynamicSurfaceActionEvidence(el)) return true;
+        const text = compactDynamicSurfaceText(el);
+        if (!text) return false;
+        const parent = el.parentElement;
+        return !!parent && parent !== root && hasDynamicSurfaceActionEvidence(parent);
+      });
+    } catch (error) {
+      recordDiagnostic('accessibility_tree.dynamic_surface_descendant_evidence', error);
+      return false;
+    }
+  }
+
+  function compactDynamicSurfaceText(el) {
+    const direct =
+      ownVisibleText(el) || el.getAttribute('aria-label') || el.getAttribute('title') || '';
+    if (direct) return direct.replace(/\s+/g, ' ').trim();
+    try {
+      const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
+      if (!text || text.length > 48) return '';
+      const visibleChildLabels = Array.from(el.querySelectorAll('*'))
+        .map((child) => (isVisible(child) ? ownVisibleText(child) : ''))
+        .map((value) => value.replace(/\s+/g, ' ').trim())
+        .filter(Boolean);
+      const uniqueChildLabels = Array.from(new Set(visibleChildLabels));
+      if (uniqueChildLabels.length > 2) return '';
+      return text;
+    } catch (error) {
+      recordDiagnostic('accessibility_tree.dynamic_surface_compact_text', error);
+      return '';
+    }
+  }
+
+  function hasNativeInteractiveAncestorBeforeRoot(el, root) {
+    let current = el;
+    while (current && current !== root) {
+      const tag = current.tagName?.toLowerCase?.() || '';
+      if (['a', 'button', 'summary', 'input', 'textarea', 'select'].includes(tag)) return true;
+      current = current.parentElement;
+    }
+    return false;
+  }
+
+  function isDynamicSurfaceLeafTarget(el, root) {
+    if (!isVisible(el) || el === root) return false;
+    const tag = el.tagName.toLowerCase();
+    if (
+      [
+        'script',
+        'style',
+        'meta',
+        'link',
+        'title',
+        'noscript',
+        'a',
+        'button',
+        'summary',
+        'input',
+        'textarea',
+        'select',
+        'svg',
+        'img',
+      ].includes(tag)
+    )
+      return false;
+    if (el.getAttribute('aria-hidden') === 'true') return false;
+    if (hasNativeInteractiveAncestorBeforeRoot(el, root)) return false;
+    if (!hasDynamicSurfaceActionEvidence(el)) return false;
+    const text = compactDynamicSurfaceText(el);
+    if (!text || text.length > 48) return false;
+    try {
+      const rect = /** @type {HTMLElement} */ (el).getBoundingClientRect();
+      if (!isViewportVisibleRect(rect)) return false;
+      const viewportArea = Math.max(1, window.innerWidth * window.innerHeight);
+      if (rect.width * rect.height > viewportArea * 0.08) return false;
+      const children = Array.from(el.children || []);
+      const childLabels = children
+        .map((child) => (isVisible(child) ? ownVisibleText(child) : ''))
+        .map((value) => value.replace(/\s+/g, ' ').trim())
+        .filter(Boolean);
+      if (childLabels.length > 1) return false;
+    } catch (error) {
+      recordDiagnostic('accessibility_tree.dynamic_surface_leaf.geometry', error);
+      return false;
+    }
+    return true;
+  }
+
+  function appendDynamicSurfaceTargets(out, refMap, state) {
+    const roots = Array.from(document.querySelectorAll('body *')).filter(isDynamicSurfaceRoot);
+    if (roots.length === 0) return;
+    const seenTextAndSelector = new Set();
+    let added = 0;
+    for (const root of roots) {
+      const candidates = Array.from(root.querySelectorAll('*')).filter((el) =>
+        isDynamicSurfaceLeafTarget(el, root),
+      );
+      for (const el of candidates) {
+        if (added >= DYNAMIC_SURFACE_TARGET_LIMIT || refMap.length >= REF_MAP_LIMIT) return;
+        const selector = generateSelector(el);
+        const text = compactDynamicSurfaceText(el).replace(/\s+/g, ' ').trim();
+        const key = `${text.toLowerCase()}|${selector}`;
+        if (!text || seenTextAndSelector.has(key)) continue;
+        seenTextAndSelector.add(key);
+        const refId = `${DYNAMIC_SURFACE_REF_PREFIX}${++window.__claudeRefCounter}`;
+        window.__claudeElementMap[refId] = new WeakRef(el);
+        const rect = /** @type {HTMLElement} */ (el).getBoundingClientRect();
+        const cx = Math.round(rect.left + rect.width / 2);
+        const cy = Math.round(rect.top + rect.height / 2);
+        const label = text.substring(0, MAX_LINE_LABEL).replace(/"/g, '\\"');
+        out.push(
+          `- button "${label}" [ref=${refId}] (x=${cx},y=${cy}) matchSource="dynamic_surface_visible_text" actionability="actionable"`,
+        );
+        refMap.push({
+          ref: refId,
+          selector,
+          rect: {
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+          },
+          matchSource: 'dynamic_surface_visible_text',
+          actionability: 'actionable',
+        });
+        state.included++;
+        state.processed++;
+        added++;
+      }
+    }
+  }
+
+  function looksLikeAgreementGlyph(el) {
+    const signature = `${/** @type {HTMLElement} */ (el).id || ''} ${classNameOf(el)} ${
+      el.getAttribute('aria-label') || ''
+    }`;
+    if (/\b(check|checkbox|agree|agreement|terms|privacy|select|tick|radio)\b/i.test(signature)) {
+      return AGREEMENT_TEXT_PATTERN.test(nearbyText(el));
+    }
+    return false;
+  }
+
+  function looksLikeOtpActionControl(el) {
+    const tag = el.tagName.toLowerCase();
+    if (['input', 'textarea', 'select', 'button', 'a'].includes(tag)) return false;
+    if (isHugeContainer(el)) return false;
+    const labelText =
+      ownVisibleText(el) || el.getAttribute('aria-label') || el.getAttribute('title') || '';
+    if (!OTP_ACTION_TEXT_PATTERN.test(labelText)) return false;
+    const signature = `${/** @type {HTMLElement} */ (el).id || ''} ${classNameOf(el)} ${
+      el.getAttribute('role') || ''
+    } ${el.getAttribute('data-testid') || ''}`;
+    const nearby = nearbyText(el);
+    return OTP_ACTION_SIGNATURE_PATTERN.test(signature) || AUTH_CONTEXT_PATTERN.test(nearby);
+  }
+
+  function compactAuthActionText(el) {
+    if (isHugeContainer(el)) return '';
+    const direct =
+      ownVisibleText(el) || el.getAttribute('aria-label') || el.getAttribute('title') || '';
+    if (direct) return direct;
+    try {
+      const rect = /** @type {HTMLElement} */ (el).getBoundingClientRect();
+      const viewportArea = Math.max(1, window.innerWidth * window.innerHeight);
+      const area = Math.max(1, rect.width * rect.height);
+      if (area > viewportArea * 0.08) return '';
+    } catch (error) {
+      recordDiagnostic('accessibility_tree.auth_action.geometry', error);
+      return '';
+    }
+    return (el.textContent || '').replace(/\s+/g, ' ').trim();
+  }
+
+  function inferAuthActionRole(el) {
+    const tag = el.tagName.toLowerCase();
+    if (['input', 'textarea', 'select', 'button', 'a'].includes(tag)) return null;
+    const labelText = compactAuthActionText(el);
+    const nearby = nearbyText(el);
+    if (looksLikeOtpActionControl(el)) return 'button';
+    if (looksLikeAgreementGlyph(el)) return 'checkbox';
+    if (!AUTH_CONTEXT_PATTERN.test(nearby)) return null;
+    if (AGREEMENT_TEXT_PATTERN.test(labelText) && !AGREEMENT_CONFIRM_TEXT_PATTERN.test(labelText)) {
+      return 'checkbox';
+    }
+    if (AUTH_ACTION_TEXT_PATTERN.test(labelText)) return 'button';
+    return null;
+  }
+
+  function isAuthActionTextElement(el) {
+    if (!isVisible(el)) return false;
+    const tag = el.tagName.toLowerCase();
+    if (['input', 'textarea', 'select', 'button', 'a'].includes(tag)) return false;
+    if (isHugeContainer(el)) return false;
+    return inferAuthActionRole(el) != null;
+  }
+
+  function inferCheckedState(el) {
+    const tag = el.tagName.toLowerCase();
+    const role = String(el.getAttribute('role') || inferAuthActionRole(el) || '').toLowerCase();
+    if (tag === 'input' && String(el.getAttribute('type') || '').toLowerCase() === 'checkbox') {
+      return /** @type {HTMLInputElement} */ (el).checked ? 'true' : 'false';
+    }
+    const ariaChecked = el.getAttribute('aria-checked');
+    if (ariaChecked === 'true' || ariaChecked === 'false' || ariaChecked === 'mixed') {
+      return ariaChecked;
+    }
+    if (role !== 'checkbox') return null;
+    const signature = `${/** @type {HTMLElement} */ (el).id || ''} ${classNameOf(el)} ${
+      el.getAttribute('data-state') || ''
+    }`;
+    if (/\b(checked|active|selected|is-on|on)\b/i.test(signature)) return 'true';
+    if (/\b(unchecked|inactive|off)\b/i.test(signature)) return 'false';
+    return 'unknown';
+  }
+
+  function inferMatchSource(el) {
+    if (ownVisibleText(el)) return 'visible_text';
+    if (el.getAttribute('aria-label')) return 'aria';
+    if (el.getAttribute('placeholder')) return 'placeholder';
+    if (el.getAttribute('title')) return 'title';
+    if (looksLikeAgreementGlyph(el)) return 'nearby_text';
+    return null;
+  }
+
+  function inferActionability(el) {
+    const tag = el.tagName.toLowerCase();
+    if (
+      ['input', 'textarea', 'select'].includes(tag) &&
+      AUTH_ACTION_TEXT_PATTERN.test(el.getAttribute('placeholder') || '')
+    ) {
+      return 'not_actionable';
+    }
+    if (isInteractive(el)) return 'actionable';
+    return null;
+  }
+
+  function inferNearbyAuthLabel(el) {
+    if (!looksLikeAgreementGlyph(el)) return '';
+    const text = nearbyText(el);
+    return text.length > 50 ? text.substring(0, 50) + '...' : text;
   }
 
   /**
@@ -178,6 +670,7 @@
       'treeitem',
     ]);
     if (role && interactiveRoles.has(role.toLowerCase())) return true;
+    if (isAuthActionTextElement(el)) return true;
 
     // Shadow host case: treat host as interactive if its open shadow root contains
     // an interactive control (textarea/input/select/button/a or contenteditable).
@@ -190,8 +683,8 @@
         );
         if (inner) return true;
       }
-    } catch (_) {
-      /* ignore */
+    } catch (error) {
+      recordDiagnostic('accessibility_tree.shadow_interactive_probe', error);
     }
     return false;
   }
@@ -271,7 +764,9 @@
       // Fast path
       const direct = document.querySelector(selector);
       if (direct) return direct;
-    } catch (_) {}
+    } catch (error) {
+      recordDiagnostic('accessibility_tree.query_deep_first.document_query', error);
+    }
     const visited = new Set();
     const stack = [document.documentElement];
     while (stack.length) {
@@ -284,9 +779,13 @@
           try {
             const hit = root.querySelector(selector);
             if (hit) return hit;
-          } catch (_) {}
+          } catch (error) {
+            recordDiagnostic('accessibility_tree.query_deep_first.shadow_query', error);
+          }
         }
-      } catch (_) {}
+      } catch (error) {
+        recordDiagnostic('accessibility_tree.query_deep_first.shadow_root', error);
+      }
       // Traverse DOM and shadow roots
       try {
         const children = /** @type {Element} */ (node).children || [];
@@ -295,7 +794,9 @@
         if (sr && sr.children) {
           for (let i = 0; i < sr.children.length; i++) stack.push(sr.children[i]);
         }
-      } catch (_) {}
+      } catch (error) {
+        recordDiagnostic('accessibility_tree.query_deep_first.traverse', error);
+      }
     }
     return null;
   }
@@ -385,9 +886,13 @@
             for (let i = 0; i < shadowChildren.length; i++) {
               stack.push(shadowChildren[i]);
             }
-          } catch (_) {}
+          } catch (error) {
+            recordDiagnostic('accessibility_tree.uniqueness.shadow_children', error);
+          }
         }
-      } catch (_) {}
+      } catch (error) {
+        recordDiagnostic('accessibility_tree.uniqueness.shadow_root', error);
+      }
 
       // Add regular children to stack
       try {
@@ -395,10 +900,30 @@
         for (let i = 0; i < children.length; i++) {
           stack.push(children[i]);
         }
-      } catch (_) {}
+      } catch (error) {
+        recordDiagnostic('accessibility_tree.uniqueness.children', error);
+      }
     }
 
     return { element: firstMatch, matchCount: Math.min(matchCount, 2) };
+  }
+
+  function isVisibleSelectorMatch(el) {
+    if (!(el instanceof Element) || !isVisible(el)) return false;
+    let current = el;
+    while (current && current instanceof Element) {
+      if (current.getAttribute('aria-hidden') === 'true') return false;
+      try {
+        const style = window.getComputedStyle(/** @type {HTMLElement} */ (current));
+        if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+          return false;
+        }
+      } catch (_) {
+        /* ignore */
+      }
+      current = current.parentElement;
+    }
+    return true;
   }
 
   /**
@@ -439,6 +964,16 @@
           null,
         );
         const totalMatches = snapshot.snapshotLength;
+        const visibleMatches = [];
+        const visibleLimit = Math.min(totalMatches, 20);
+        for (let i = 0; i < visibleLimit; i += 1) {
+          const node = snapshot.snapshotItem(i);
+          if (node instanceof Element && isVisibleSelectorMatch(node)) visibleMatches.push(node);
+          if (visibleMatches.length > 1) break;
+        }
+        if (totalMatches > 1 && visibleMatches.length === 1) {
+          return { element: visibleMatches[0], matchCount: 1 };
+        }
         // Cap at 2 for performance (2 means "2 or more")
         const matchCount = Math.min(totalMatches, 2);
         const firstMatch =
@@ -528,8 +1063,15 @@
    */
   function traverse(el, depth, cfg, out, refMap, state) {
     const maxDepth = cfg && typeof cfg.maxDepth === 'number' ? cfg.maxDepth : MAX_DEPTH;
-    if (depth > maxDepth || !el || !el.tagName) return;
-    if (state.processed >= MAX_NODES) return;
+    if (depth > maxDepth) {
+      state.depthLimitReached = true;
+      return;
+    }
+    if (!el || !el.tagName) return;
+    if (state.processed >= MAX_NODES) {
+      state.nodeLimitReached = true;
+      return;
+    }
     if (state.visited.has(el)) return;
     state.visited.add(el);
     const include = shouldInclude(el, cfg) || depth === 0;
@@ -563,14 +1105,23 @@
       if (type) line += ` type="${type}"`;
       const placeholder = el.getAttribute('placeholder');
       if (placeholder) line += ` placeholder="${placeholder}"`;
+      const valueState = inferValueState(el);
+      if (valueState) line += ` valueState="${valueState}"`;
+      const checkedState = inferCheckedState(el);
+      if (checkedState) line += ` checked="${checkedState}"`;
+      const matchSource = inferMatchSource(el);
+      if (matchSource) line += ` matchSource="${matchSource}"`;
+      const actionability = inferActionability(el);
+      if (actionability) line += ` actionability="${actionability}"`;
       // Surface disabled/pointer-events for better agent judgement
       try {
         const disabled = el.hasAttribute('disabled') || el.getAttribute('aria-disabled') === 'true';
         if (disabled) line += ` disabled`;
         const cs = window.getComputedStyle(/** @type {HTMLElement} */ (el));
         if (cs && cs.pointerEvents === 'none') line += ` pe=none`;
-      } catch (_) {
-        /* ignore style issues */
+      } catch (error) {
+        state.styleProbeErrorCount = (state.styleProbeErrorCount || 0) + 1;
+        recordDiagnostic('accessibility_tree.style_state', error);
       }
       out.push(line);
       state.included++;
@@ -578,7 +1129,7 @@
 
       // Only collect ref mapping for interactive elements to limit cost
       if (isInteractive(el) && refMap.length < REF_MAP_LIMIT) {
-        refMap.push({
+        const refEntry = {
           ref: /** @type {string} */ (refId),
           selector: generateSelector(el),
           rect: {
@@ -587,17 +1138,32 @@
             width: rect.width,
             height: rect.height,
           },
-        });
+        };
+        if (valueState) refEntry.valueState = valueState;
+        if (checkedState) refEntry.checked = checkedState;
+        if (matchSource) refEntry.matchSource = matchSource;
+        if (actionability) refEntry.actionability = actionability;
+        refMap.push(refEntry);
+      } else if (isInteractive(el) && refMap.length >= REF_MAP_LIMIT) {
+        state.refMapLimitReached = true;
       }
     }
-    if (state.processed >= MAX_NODES) return;
+    if (state.processed >= MAX_NODES) {
+      state.nodeLimitReached = true;
+      return;
+    }
     // Traverse light DOM children
     if (/** @type {HTMLElement} */ (el).children && depth < maxDepth) {
       const children = /** @type {HTMLElement} */ (el).children;
       for (let i = 0; i < children.length; i++) {
-        if (state.processed >= MAX_NODES) break;
+        if (state.processed >= MAX_NODES) {
+          state.nodeLimitReached = true;
+          break;
+        }
         traverse(children[i], include ? depth + 1 : depth, cfg, out, refMap, state);
       }
+    } else if (/** @type {HTMLElement} */ (el).children?.length > 0 && depth >= maxDepth) {
+      state.depthLimitReached = true;
     }
     // Traverse shadow DOM roots (limited by maxDepth and MAX_NODES)
     try {
@@ -605,12 +1171,16 @@
       if (anyEl && anyEl.shadowRoot && depth < maxDepth) {
         const srChildren = anyEl.shadowRoot.children || [];
         for (let i = 0; i < srChildren.length; i++) {
-          if (state.processed >= MAX_NODES) break;
+          if (state.processed >= MAX_NODES) {
+            state.nodeLimitReached = true;
+            break;
+          }
           traverse(srChildren[i], include ? depth + 1 : depth, cfg, out, refMap, state);
         }
       }
-    } catch (_) {
-      /* ignore shadow errors */
+    } catch (error) {
+      state.shadowTraversalErrorCount = (state.shadowTraversalErrorCount || 0) + 1;
+      recordDiagnostic('accessibility_tree.shadow_traversal', error);
     }
   }
 
@@ -621,9 +1191,11 @@
    */
   function __generateAccessibilityTree(filter, options) {
     try {
+      window[DIAGNOSTICS_KEY] = [];
       const start = performance && performance.now ? performance.now() : Date.now();
       const out = [];
       const cfg = { filter: filter || undefined };
+      const isTopFrame = window.self === window.top;
 
       // Clamp maxDepth to MAX_DEPTH to keep costs bounded
       if (options && Number.isFinite(options.maxDepth)) {
@@ -632,7 +1204,16 @@
       }
 
       const refMap = [];
-      const state = { processed: 0, included: 0, visited: new WeakSet() };
+      const state = {
+        processed: 0,
+        included: 0,
+        visited: new WeakSet(),
+        nodeLimitReached: false,
+        refMapLimitReached: false,
+        depthLimitReached: false,
+        styleProbeErrorCount: 0,
+        shadowTraversalErrorCount: 0,
+      };
 
       // Determine root element (body or refId-specified element)
       let focus = null;
@@ -650,6 +1231,9 @@
       }
 
       if (root) traverse(root, 0, cfg, out, refMap, state);
+      if (root === document.body && cfg.filter === 'interactive') {
+        appendDynamicSurfaceTargets(out, refMap, state);
+      }
       for (const k in window.__claudeElementMap) {
         if (!window.__claudeElementMap[k].deref || !window.__claudeElementMap[k].deref())
           delete window.__claudeElementMap[k];
@@ -660,6 +1244,16 @@
       const end = performance && performance.now ? performance.now() : Date.now();
       return {
         pageContent,
+        frameContext: {
+          frameUrl: window.location && window.location.href ? String(window.location.href) : '',
+          frameName: window.name ? String(window.name) : '',
+          frameScope: isTopFrame ? 'top' : 'subframe',
+          isTopFrame,
+          source: 'content_script_runtime',
+          coverage: 'responding_frame_only',
+          claimBoundary:
+            'this read_page snapshot describes the frame that answered the content-script request; it does not prove every iframe was fully covered',
+        },
         focus,
         viewport: {
           width: window.innerWidth,
@@ -670,7 +1264,23 @@
           processed: state.processed,
           included: state.included,
           durationMs: Math.round(end - start),
+          coverageStatus:
+            state.nodeLimitReached ||
+            state.refMapLimitReached ||
+            state.depthLimitReached ||
+            state.styleProbeErrorCount > 0 ||
+            state.shadowTraversalErrorCount > 0
+              ? 'partial'
+              : 'complete',
+          nodeLimitReached: state.nodeLimitReached,
+          refMapLimitReached: state.refMapLimitReached,
+          depthLimitReached: state.depthLimitReached,
+          styleProbeErrorCount: state.styleProbeErrorCount,
+          shadowTraversalErrorCount: state.shadowTraversalErrorCount,
         },
+        diagnostics: Array.isArray(window[DIAGNOSTICS_KEY])
+          ? window[DIAGNOSTICS_KEY].slice(-25)
+          : [],
         refMap,
       };
     } catch (err) {
@@ -692,8 +1302,23 @@
     if (!ref) return { success: false, error: 'ref is required' };
     const el = resolveRef(ref);
     if (el) {
+      const rect = el.getBoundingClientRect();
+      const center = {
+        x: Math.round(rect.left + rect.width / 2),
+        y: Math.round(rect.top + rect.height / 2),
+      };
       dispatchHoverEvents(el);
-      return { success: true, target: summarizeElement(el) };
+      return {
+        success: true,
+        target: summarizeElement(el),
+        center,
+        coordinateSpace: window === window.top ? 'top_viewport' : 'current_viewport',
+        frameDepth: 0,
+        viewport: {
+          width: window.innerWidth,
+          height: window.innerHeight,
+        },
+      };
     }
     return await forwardHoverRefToChildren(ref);
   }
@@ -710,17 +1335,47 @@
       x: Math.round(rect.left + rect.width / 2),
       y: Math.round(rect.top + rect.height / 2),
     };
-    ['mousemove', 'mouseover', 'mouseenter'].forEach((type) => {
-      el.dispatchEvent(
-        new MouseEvent(type, {
-          bubbles: true,
-          cancelable: true,
-          clientX: center.x,
-          clientY: center.y,
-          view: window,
-        }),
-      );
+    const baseInit = {
+      bubbles: true,
+      cancelable: true,
+      clientX: center.x,
+      clientY: center.y,
+    };
+    const targets = hoverEventTargets(el);
+    if (typeof PointerEvent === 'function') {
+      targets.forEach((target) => {
+        ['pointerover', 'pointerenter', 'pointermove'].forEach((type) => {
+          target.dispatchEvent(
+            new PointerEvent(type, {
+              ...baseInit,
+              pointerId: 1,
+              pointerType: 'mouse',
+              isPrimary: true,
+            }),
+          );
+        });
+      });
+    }
+    targets.forEach((target) => {
+      ['mouseover', 'mouseenter', 'mousemove'].forEach((type) => {
+        target.dispatchEvent(
+          new MouseEvent(type, {
+            ...baseInit,
+          }),
+        );
+      });
     });
+  }
+
+  function hoverEventTargets(el) {
+    const targets = [];
+    let current = el;
+    while (current instanceof Element && targets.length < 8) {
+      targets.push(current);
+      if (current === document.body || current === document.documentElement) break;
+      current = current.parentElement;
+    }
+    return targets;
   }
 
   function summarizeElement(el) {
@@ -740,23 +1395,77 @@
         return;
       }
       const reqId = `hover_ref_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const frameByWindow = new Map();
+      frames.forEach((frame) => {
+        if (frame.contentWindow) frameByWindow.set(frame.contentWindow, frame);
+      });
+      const pendingWindows = new Set(frameByWindow.keys());
+      let settled = false;
+      let timeoutId = null;
+      const finish = (result) => {
+        if (settled) return;
+        settled = true;
+        window.removeEventListener('message', listener, true);
+        if (timeoutId !== null) clearTimeout(timeoutId);
+        resolve(result);
+      };
       const listener = (ev) => {
         const data = ev?.data;
-        if (!data || data.type !== 'rr-bridge-hover-ref-result' || data.reqId !== reqId) return;
-        window.removeEventListener('message', listener, true);
-        resolve(data.result);
+        if (!data || data.type !== 'tabrix-bridge-hover-ref-result' || data.reqId !== reqId) return;
+        const sourceFrame = frameByWindow.get(ev.source);
+        if (!sourceFrame || !pendingWindows.has(ev.source)) return;
+        pendingWindows.delete(ev.source);
+        if (data.result?.success) {
+          finish(translateChildHoverResult(data.result, sourceFrame));
+          return;
+        }
+        if (pendingWindows.size === 0) {
+          finish({ success: false, error: `ref "${ref}" not found in child frames` });
+        }
       };
       window.addEventListener('message', listener, true);
-      setTimeout(() => {
-        window.removeEventListener('message', listener, true);
-        resolve({ success: false, error: `ref "${ref}" not found in child frames` });
+      timeoutId = setTimeout(() => {
+        finish({ success: false, error: `ref "${ref}" not found in child frames` });
       }, 1500);
       for (const frame of frames) {
         try {
-          frame.contentWindow?.postMessage({ type: 'rr-bridge-hover-ref', reqId, ref }, '*');
-        } catch {}
+          frame.contentWindow?.postMessage({ type: 'tabrix-bridge-hover-ref', reqId, ref }, '*');
+        } catch {
+          /* best-effort accessibility probe */
+        }
       }
     });
+  }
+
+  function translateChildHoverResult(result, frame) {
+    const childCenter = result?.center;
+    if (
+      typeof childCenter?.x !== 'number' ||
+      !Number.isFinite(childCenter.x) ||
+      typeof childCenter?.y !== 'number' ||
+      !Number.isFinite(childCenter.y)
+    ) {
+      return result;
+    }
+    const rect = frame.getBoundingClientRect();
+    const frameWidth = frame.offsetWidth || rect.width;
+    const frameHeight = frame.offsetHeight || rect.height;
+    const scaleX = frameWidth > 0 ? rect.width / frameWidth : 1;
+    const scaleY = frameHeight > 0 ? rect.height / frameHeight : 1;
+    const borderLeft = Number.isFinite(frame.clientLeft) ? frame.clientLeft : 0;
+    const borderTop = Number.isFinite(frame.clientTop) ? frame.clientTop : 0;
+    return {
+      ...result,
+      center: {
+        x: Math.round(rect.left + borderLeft * scaleX + childCenter.x * scaleX),
+        y: Math.round(rect.top + borderTop * scaleY + childCenter.y * scaleY),
+      },
+      coordinateSpace: window === window.top ? 'top_viewport' : 'current_viewport',
+      frameDepth:
+        typeof result.frameDepth === 'number' && Number.isFinite(result.frameDepth)
+          ? Math.max(0, Math.trunc(result.frameDepth)) + 1
+          : 1,
+    };
   }
 
   // Chrome message bridge for ping and tree generation
@@ -765,271 +1474,6 @@
       if (request && request.action === 'chrome_read_page_ping') {
         sendResponse({ status: 'pong' });
         return false;
-      }
-      if (request && request.action === 'rr_overlay') {
-        try {
-          const cmd = request.cmd || 'init';
-          let root = document.getElementById('__rr_overlay_root');
-          if (!root) {
-            root = document.createElement('div');
-            root.id = '__rr_overlay_root';
-            Object.assign(root.style, {
-              position: 'fixed',
-              right: '8px',
-              bottom: '8px',
-              zIndex: 2_147_483_647,
-              maxWidth: '40vw',
-              maxHeight: '40vh',
-              overflow: 'auto',
-              background: 'rgba(0,0,0,0.6)',
-              color: '#fff',
-              fontFamily:
-                'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-              fontSize: '12px',
-              padding: '8px',
-              borderRadius: '6px',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
-            });
-            const title = document.createElement('div');
-            title.textContent = 'Record-Replay 运行日志';
-            Object.assign(title.style, { fontWeight: 'bold', marginBottom: '6px' });
-            const body = document.createElement('div');
-            body.id = '__rr_overlay_body';
-            root.appendChild(title);
-            root.appendChild(body);
-            document.documentElement.appendChild(root);
-          }
-          const body = document.getElementById('__rr_overlay_body');
-          if (cmd === 'append' && body) {
-            const line = document.createElement('div');
-            line.textContent = String(request.text || '');
-            body.appendChild(line);
-            body.scrollTop = body.scrollHeight;
-          }
-          if (cmd === 'done' && root) {
-            root.style.opacity = '0.5';
-          }
-          sendResponse({ success: true });
-          return true;
-        } catch (e) {
-          sendResponse({ success: false, error: String(e && e.message ? e.message : e) });
-          return true;
-        }
-      }
-      // Element picker: start a temporary overlay to let user pick an element
-      if (request && request.action === 'rr_picker_start') {
-        try {
-          // state
-          const state = { active: true };
-          const hostId = '__rr_picker_host__';
-          let host = document.getElementById(hostId);
-          if (host) host.remove();
-          host = document.createElement('div');
-          host.id = hostId;
-          Object.assign(host.style, {
-            position: 'fixed',
-            inset: '0',
-            zIndex: 2147483646,
-            cursor: 'crosshair',
-            background: 'rgba(0,0,0,0.0)',
-          });
-          const box = document.createElement('div');
-          Object.assign(box.style, {
-            position: 'fixed',
-            border: '2px solid #3b82f6',
-            background: 'rgba(59,130,246,0.15)',
-            pointerEvents: 'none',
-          });
-          const tip = document.createElement('div');
-          tip.textContent = '点击选取元素（Esc 取消）';
-          Object.assign(tip.style, {
-            position: 'fixed',
-            top: '10px',
-            left: '10px',
-            background: 'rgba(0,0,0,0.7)',
-            color: '#fff',
-            padding: '6px 10px',
-            borderRadius: '6px',
-            fontSize: '12px',
-            fontFamily: 'system-ui,-apple-system,Segoe UI,Roboto,Arial',
-          });
-          host.appendChild(box);
-          host.appendChild(tip);
-          document.documentElement.appendChild(host);
-
-          const cleanup = () => {
-            try {
-              host.remove();
-            } catch {}
-            try {
-              document.removeEventListener('mousemove', onMove, true);
-            } catch {}
-            try {
-              document.removeEventListener('click', onClick, true);
-            } catch {}
-            try {
-              document.removeEventListener('keydown', onKey, true);
-            } catch {}
-            state.active = false;
-          };
-
-          const onMove = (e) => {
-            if (!state.active) return;
-            const el = e.target instanceof Element ? e.target : null;
-            if (!el) return;
-            try {
-              const r = el.getBoundingClientRect();
-              Object.assign(box.style, {
-                left: `${Math.round(r.left)}px`,
-                top: `${Math.round(r.top)}px`,
-                width: `${Math.round(Math.max(0, r.width))}px`,
-                height: `${Math.round(Math.max(0, r.height))}px`,
-                display: r.width > 0 && r.height > 0 ? 'block' : 'none',
-              });
-            } catch {}
-          };
-          const uniqueClassSelector = (node) => {
-            try {
-              const classes = Array.from(node.classList || []).filter(
-                (c) => c && /^[a-zA-Z0-9_-]+$/.test(c),
-              );
-              for (const cls of classes) {
-                const sel = `.${CSS.escape(cls)}`;
-                if (document.querySelectorAll(sel).length === 1) return sel;
-              }
-              const tag = node.tagName ? node.tagName.toLowerCase() : '';
-              for (const cls of classes) {
-                const sel = `${tag}.${CSS.escape(cls)}`;
-                if (document.querySelectorAll(sel).length === 1) return sel;
-              }
-              for (let i = 0; i < Math.min(classes.length, 3); i++) {
-                for (let j = i + 1; j < Math.min(classes.length, 3); j++) {
-                  const sel = `.${CSS.escape(classes[i])}.${CSS.escape(classes[j])}`;
-                  if (document.querySelectorAll(sel).length === 1) return sel;
-                }
-              }
-            } catch {}
-            return '';
-          };
-          const computeCandidates = (el) => {
-            const cands = [];
-            // css by id / class / short path
-            if (el.id) {
-              const idSel = `#${CSS.escape(el.id)}`;
-              if (document.querySelectorAll(idSel).length === 1)
-                cands.push({ type: 'css', value: idSel });
-            }
-            const classSel = uniqueClassSelector(el);
-            if (classSel) cands.push({ type: 'css', value: classSel });
-            // data-* and name
-            for (const attr of ['data-testid', 'data-cy', 'name']) {
-              const val = el.getAttribute(attr);
-              if (val) {
-                const s = `[${attr}="${CSS.escape(val)}"]`;
-                if (document.querySelectorAll(s).length === 1)
-                  cands.push({ type: 'attr', value: s });
-              }
-            }
-            // aria
-            const aria = el.getAttribute && el.getAttribute('aria-label');
-            if (aria) cands.push({ type: 'aria', value: `textbox[name=${aria}]` });
-            // text for clickable
-            const tag = (el.tagName || '').toLowerCase();
-            if (['button', 'a', 'summary'].includes(tag)) {
-              const text = (el.textContent || '').trim();
-              if (text) cands.push({ type: 'text', value: text.substring(0, 64) });
-            }
-            // fallback path selector
-            const gen = (node) => {
-              if (!(node instanceof Element)) return '';
-              let path = '';
-              let current = node;
-              while (
-                current &&
-                current.nodeType === Node.ELEMENT_NODE &&
-                current.tagName !== 'BODY'
-              ) {
-                let sel = current.tagName.toLowerCase();
-                const parent = current.parentElement;
-                if (parent) {
-                  const siblings = Array.from(parent.children).filter(
-                    (child) => child.tagName === current.tagName,
-                  );
-                  if (siblings.length > 1) {
-                    const index = siblings.indexOf(current) + 1;
-                    sel += `:nth-of-type(${index})`;
-                  }
-                }
-                path = path ? `${sel} > ${path}` : sel;
-                current = parent;
-              }
-              return path ? `body > ${path}` : 'body';
-            };
-            const pathSel = gen(el);
-            if (pathSel) cands.push({ type: 'css', value: pathSel });
-            return cands;
-          };
-          const onClick = (e) => {
-            if (!state.active) return;
-            e.preventDefault();
-            e.stopPropagation();
-            const el = e.target instanceof Element ? e.target : null;
-            if (!el) {
-              cleanup();
-              sendResponse({ success: false, error: 'no element' });
-              return true;
-            }
-            // create ref
-            try {
-              if (!window.__claudeElementMap) window.__claudeElementMap = {};
-              if (!window.__claudeRefCounter) window.__claudeRefCounter = 0;
-            } catch {}
-            let refId = null;
-            try {
-              for (const k in window.__claudeElementMap) {
-                if (
-                  window.__claudeElementMap[k].deref &&
-                  window.__claudeElementMap[k].deref() === el
-                ) {
-                  refId = k;
-                  break;
-                }
-              }
-              if (!refId) {
-                refId = `ref_${++window.__claudeRefCounter}`;
-                window.__claudeElementMap[refId] = new WeakRef(el);
-              }
-            } catch {}
-            const cands = computeCandidates(el);
-            cleanup();
-            sendResponse({ success: true, ref: refId, candidates: cands });
-            return true;
-          };
-          const onKey = (e) => {
-            if (e.key === 'Escape') {
-              cleanup();
-              sendResponse({ success: false, cancelled: true });
-            }
-          };
-          document.addEventListener('mousemove', onMove, true);
-          document.addEventListener('click', onClick, true);
-          document.addEventListener('keydown', onKey, true);
-          return true; // async
-        } catch (e) {
-          sendResponse({ success: false, error: String(e && e.message ? e.message : e) });
-          return true;
-        }
-      }
-      if (request && request.action === 'rr_picker_stop') {
-        try {
-          const host = document.getElementById('__rr_picker_host__');
-          if (host) host.remove();
-          sendResponse({ success: true });
-          return true;
-        } catch (e) {
-          sendResponse({ success: false, error: String(e && e.message ? e.message : e) });
-          return true;
-        }
       }
       if (request && request.action === 'generateAccessibilityTree') {
         const result = __generateAccessibilityTree(request.filter || null, {
@@ -1061,7 +1505,9 @@
                 let frameEl = null;
                 try {
                   frameEl = querySelectorDeepFirst(frameSel) || document.querySelector(frameSel);
-                } catch {}
+                } catch {
+                  /* best-effort accessibility probe */
+                }
                 if (
                   !frameEl ||
                   !(frameEl instanceof HTMLIFrameElement || frameEl instanceof HTMLFrameElement)
@@ -1099,7 +1545,7 @@
                     const data = ev && ev.data;
                     if (
                       !data ||
-                      data.type !== 'rr-bridge-ensure-ref-result' ||
+                      data.type !== 'tabrix-bridge-ensure-ref-result' ||
                       data.reqId !== reqId
                     )
                       return;
@@ -1147,7 +1593,7 @@
                 window.addEventListener('message', listener, true);
                 cw.postMessage(
                   {
-                    type: 'rr-bridge-ensure-ref',
+                    type: 'tabrix-bridge-ensure-ref',
                     reqId,
                     selector: innerSel,
                     useText: !!request.useText,
@@ -1202,6 +1648,57 @@
               }
               return (2 * inter) / (A.length + B.length);
             };
+            const isInteractiveTextTarget = (node) => {
+              try {
+                const tag = String(node.tagName || '').toLowerCase();
+                const role = String(node.getAttribute && node.getAttribute('role')).toLowerCase();
+                if (
+                  ['button', 'a', 'input', 'textarea', 'select', 'summary', 'label'].includes(tag)
+                ) {
+                  return true;
+                }
+                if (
+                  /^(button|link|menuitem|option|tab|checkbox|radio|switch|combobox|textbox|searchbox)$/i.test(
+                    role,
+                  )
+                ) {
+                  return true;
+                }
+                return (
+                  node.hasAttribute &&
+                  (node.hasAttribute('onclick') ||
+                    node.hasAttribute('tabindex') ||
+                    node.hasAttribute('aria-pressed') ||
+                    node.hasAttribute('aria-expanded') ||
+                    node.hasAttribute('aria-selected'))
+                );
+              } catch {
+                return false;
+              }
+            };
+            const accessibleTextForNode = (node) => {
+              const parts = [];
+              try {
+                parts.push(inferLabel(node));
+              } catch {
+                /* best-effort accessibility probe */
+              }
+              try {
+                parts.push(node.getAttribute && node.getAttribute('aria-label'));
+                parts.push(node.getAttribute && node.getAttribute('title'));
+                parts.push(node.getAttribute && node.getAttribute('alt'));
+              } catch {
+                /* best-effort accessibility probe */
+              }
+              try {
+                parts.push(ownVisibleText(node));
+                parts.push(/** @type {HTMLElement} */ (node).innerText);
+                parts.push(node.textContent);
+              } catch {
+                /* best-effort accessibility probe */
+              }
+              return normalize(parts.filter(Boolean).join(' '));
+            };
             let best = { el: null, score: 0 };
             // Deep traversal including shadow roots
             const stack = [document.documentElement];
@@ -1219,34 +1716,54 @@
                   } else {
                     const rect = /** @type {HTMLElement} */ (node).getBoundingClientRect();
                     if (rect.width > 0 && rect.height > 0) {
-                      const txt = normalize(node.textContent || '');
+                      const txt = accessibleTextForNode(node);
                       if (txt) {
-                        if (txt.includes(query)) {
-                          el = /** @type {Element} */ (node);
+                        const exactScore =
+                          txt === query ? 4 : txt.includes(query) || query.includes(txt) ? 2 : 0;
+                        const sc =
+                          exactScore ||
+                          (txt.length <= Math.max(80, query.length * 4) ? dice(txt, query) : 0);
+                        if (sc > 0) {
+                          const interactiveBonus = isInteractiveTextTarget(node) ? 2 : 0;
+                          const containerPenalty = isHugeContainer(node) ? 1.5 : 0;
+                          const lengthPenalty = Math.min(
+                            1,
+                            Math.max(0, txt.length - query.length) / 200,
+                          );
+                          const finalScore =
+                            sc + interactiveBonus - containerPenalty - lengthPenalty;
+                          if (finalScore > best.score)
+                            best = { el: /** @type {Element} */ (node), score: finalScore };
+                        }
+                        if (best.score >= 5.5) {
+                          el = best.el;
                           break;
                         }
-                        const sc = dice(txt, query);
-                        if (sc > best.score)
-                          best = { el: /** @type {Element} */ (node), score: sc };
                       }
                     }
                   }
                 }
-              } catch {}
+              } catch {
+                /* best-effort accessibility probe */
+              }
               // push children and shadow children
               try {
                 const children = node.children || [];
                 for (let i = 0; i < children.length; i++) stack.push(children[i]);
-              } catch {}
+              } catch {
+                /* best-effort accessibility probe */
+              }
               try {
                 const sr = node.shadowRoot;
                 if (sr && sr.children) {
                   for (let i = 0; i < sr.children.length; i++) stack.push(sr.children[i]);
                 }
-              } catch {}
+              } catch {
+                /* best-effort accessibility probe */
+              }
               if (++visited > 8000) break;
             }
-            if (!el && best.el && best.score >= 0.6) el = best.el;
+            if (!el && best.el && best.score >= 1.5) el = best.el;
           } else if (isXPath) {
             if (!sel) {
               sendResponse({ success: false, error: 'selector is required' });
@@ -1293,7 +1810,13 @@
             el = result.element;
           }
           if (!el) {
-            sendResponse({ success: false, error: `selector not found: ${sel}` });
+            sendResponse({
+              success: false,
+              error:
+                useText && textQuery
+                  ? `text not found: ${textQuery}`
+                  : `selector not found: ${sel}`,
+            });
             return true;
           }
           let refId = null;
@@ -1314,6 +1837,302 @@
             center: {
               x: Math.round(rect.left + rect.width / 2),
               y: Math.round(rect.top + rect.height / 2),
+            },
+          });
+          return true;
+        } catch (e) {
+          sendResponse({ success: false, error: String(e && e.message ? e.message : e) });
+          return true;
+        }
+      }
+      if (request && request.action === 'ensureRefForPoint') {
+        try {
+          const x = Number(request.x);
+          const y = Number(request.y);
+          const normalize = (value) =>
+            String(value || '')
+              .replace(/\s+/g, ' ')
+              .trim();
+          const identity =
+            request.identity && typeof request.identity === 'object' ? request.identity : {};
+          const label = normalize(identity.label);
+          const targetRef = normalize(identity.targetRef);
+          const locatorChain = Array.isArray(identity.locatorChain)
+            ? identity.locatorChain
+                .map((locator) => ({
+                  type: normalize(locator?.type).toLowerCase(),
+                  value: normalize(locator?.value),
+                }))
+                .filter((locator) => locator.type && locator.value)
+            : [];
+          if (!label || !targetRef || locatorChain.length === 0) {
+            sendResponse({
+              success: false,
+              error:
+                'point rebind rejected: exact label, targetRef, and locatorChain identity are required',
+            });
+            return true;
+          }
+          const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+          const addPoint = (points, point) => {
+            if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
+            const clamped = {
+              x: Math.round(clamp(point.x, 0, Math.max(0, window.innerWidth - 1))),
+              y: Math.round(clamp(point.y, 0, Math.max(0, window.innerHeight - 1))),
+            };
+            if (!points.some((existing) => existing.x === clamped.x && existing.y === clamped.y)) {
+              points.push(clamped);
+            }
+          };
+          const samplePoints = [];
+          if (Number.isFinite(x) && Number.isFinite(y)) {
+            addPoint(samplePoints, { x, y });
+          }
+          const rect = request.rect && typeof request.rect === 'object' ? request.rect : null;
+          const rx = Number(rect?.x);
+          const ry = Number(rect?.y);
+          const rw = Number(rect?.width);
+          const rh = Number(rect?.height);
+          if ([rx, ry, rw, rh].every(Number.isFinite) && rw > 0 && rh > 0) {
+            const left = clamp(rx, 0, Math.max(0, window.innerWidth - 1));
+            const right = clamp(rx + rw - 1, 0, Math.max(0, window.innerWidth - 1));
+            const top = clamp(ry, 0, Math.max(0, window.innerHeight - 1));
+            const bottom = clamp(ry + rh - 1, 0, Math.max(0, window.innerHeight - 1));
+            if (right >= left && bottom >= top) {
+              addPoint(samplePoints, { x: (left + right) / 2, y: (top + bottom) / 2 });
+              addPoint(samplePoints, {
+                x: left + Math.max(1, (right - left) * 0.25),
+                y: (top + bottom) / 2,
+              });
+              addPoint(samplePoints, {
+                x: right - Math.max(1, (right - left) * 0.25),
+                y: (top + bottom) / 2,
+              });
+              addPoint(samplePoints, {
+                x: (left + right) / 2,
+                y: top + Math.max(1, (bottom - top) * 0.25),
+              });
+              addPoint(samplePoints, {
+                x: (left + right) / 2,
+                y: bottom - Math.max(1, (bottom - top) * 0.25),
+              });
+            }
+          }
+          if (samplePoints.length === 0) {
+            sendResponse({ success: false, error: 'point x/y or rect must be finite and visible' });
+            return true;
+          }
+          const normalizedLabel = label.toLocaleLowerCase();
+          const accessibleNames = (el) =>
+            [
+              el.getAttribute?.('aria-label'),
+              el.getAttribute?.('title'),
+              el.getAttribute?.('alt'),
+              el.textContent,
+            ]
+              .map(normalize)
+              .filter(Boolean);
+          const labelMatches = (el) => {
+            const candidates = [...accessibleNames(el)].map((value) => value.toLocaleLowerCase());
+            return candidates.some((value) => value === normalizedLabel);
+          };
+          const isVisible = (el) => {
+            const rect = el.getBoundingClientRect();
+            const style = window.getComputedStyle(el);
+            return (
+              rect.width > 0 &&
+              rect.height > 0 &&
+              style.visibility !== 'hidden' &&
+              style.display !== 'none' &&
+              Number(style.opacity || '1') !== 0 &&
+              rect.right > 0 &&
+              rect.bottom > 0 &&
+              rect.left < window.innerWidth &&
+              rect.top < window.innerHeight
+            );
+          };
+          const implicitRole = (el) => {
+            const explicitRole = normalize(el.getAttribute?.('role')).toLowerCase();
+            if (explicitRole) return explicitRole;
+            const tag = String(el.tagName || '').toLowerCase();
+            if (tag === 'button' || tag === 'summary') return 'button';
+            if (tag === 'a' && el.getAttribute?.('href')) return 'link';
+            if (tag === 'select') return 'combobox';
+            if (tag === 'textarea') return 'textbox';
+            if (tag === 'input') {
+              const type = normalize(el.getAttribute?.('type') || 'text').toLowerCase();
+              if (type === 'checkbox') return 'checkbox';
+              if (type === 'radio') return 'radio';
+              if (type === 'button' || type === 'submit' || type === 'reset') return 'button';
+              return 'textbox';
+            }
+            return '';
+          };
+          const isInteractive = (el) => {
+            const tag = String(el.tagName || '').toLowerCase();
+            const role = implicitRole(el);
+            return (
+              ['button', 'a', 'input', 'textarea', 'select', 'label', 'summary'].includes(tag) ||
+              [
+                'button',
+                'link',
+                'menuitem',
+                'option',
+                'tab',
+                'checkbox',
+                'radio',
+                'switch',
+                'textbox',
+                'combobox',
+              ].includes(role) ||
+              el.getAttribute?.('tabindex') != null ||
+              typeof el.onclick === 'function'
+            );
+          };
+          const expectedRoles = new Set();
+          for (const locator of locatorChain) {
+            if (locator.type === 'role') {
+              expectedRoles.add(locator.value.toLowerCase());
+            }
+            if (locator.type === 'css') {
+              const roleMatch = locator.value.match(
+                /\[\s*role\s*=\s*["']?([a-z0-9_-]+)["']?\s*\]/i,
+              );
+              if (roleMatch?.[1]) expectedRoles.add(roleMatch[1].toLowerCase());
+            }
+          }
+          const roleMatches = (el) =>
+            expectedRoles.size === 0 || expectedRoles.has(implicitRole(el));
+          const elementsOverlap = (left, right) =>
+            left === right || left.contains(right) || right.contains(left);
+          const mappedRefMatches = (el) => {
+            const refs = [
+              targetRef,
+              ...locatorChain
+                .filter((locator) => locator.type === 'ref')
+                .map((locator) => locator.value),
+            ].filter(Boolean);
+            return refs.some((ref) => {
+              const mapped = window.__claudeElementMap?.[ref]?.deref?.();
+              return mapped instanceof Element && elementsOverlap(mapped, el);
+            });
+          };
+          const locatorMatches = (el) =>
+            locatorChain.some((locator) => {
+              try {
+                if (locator.type === 'css') {
+                  return Array.from(document.querySelectorAll(locator.value)).some((match) =>
+                    elementsOverlap(match, el),
+                  );
+                }
+                if (locator.type === 'xpath') {
+                  const result = document.evaluate(
+                    locator.value,
+                    document,
+                    null,
+                    XPathResult.ORDERED_NODE_SNAPSHOT_TYPE,
+                    null,
+                  );
+                  for (let index = 0; index < result.snapshotLength; index += 1) {
+                    const match = result.snapshotItem(index);
+                    if (match instanceof Element && elementsOverlap(match, el)) return true;
+                  }
+                }
+              } catch {
+                return false;
+              }
+              return false;
+            });
+
+          const candidates = [];
+          for (const point of samplePoints) {
+            let el = document.elementFromPoint(point.x, point.y);
+            if (!el || !(el instanceof Element)) continue;
+            let cursor = el;
+            for (let depth = 0; cursor && cursor instanceof Element && depth < 6; depth += 1) {
+              if (!candidates.includes(cursor)) candidates.push(cursor);
+              cursor = cursor.parentElement;
+            }
+          }
+          if (candidates.length === 0) {
+            sendResponse({ success: false, error: 'no element found at point' });
+            return true;
+          }
+          const matchingCandidates = candidates.filter(
+            (candidate) =>
+              isVisible(candidate) &&
+              isInteractive(candidate) &&
+              labelMatches(candidate) &&
+              roleMatches(candidate),
+          );
+          const preferred = matchingCandidates[0];
+          if (!preferred) {
+            const hasExactLabel = candidates.some(
+              (candidate) => isVisible(candidate) && labelMatches(candidate),
+            );
+            sendResponse({
+              success: false,
+              error: hasExactLabel
+                ? 'point rebind rejected: exact-label target is not interactive or role-compatible'
+                : 'point rebind rejected: current point does not match the exact candidate label',
+            });
+            return true;
+          }
+          const matchingInteractiveTargets = Array.from(document.querySelectorAll('*')).filter(
+            (candidate) =>
+              candidate instanceof Element &&
+              isVisible(candidate) &&
+              isInteractive(candidate) &&
+              labelMatches(candidate) &&
+              roleMatches(candidate),
+          );
+          const uniqueLabelMatch =
+            matchingInteractiveTargets.length === 1 &&
+            elementsOverlap(matchingInteractiveTargets[0], preferred);
+          const refCorroborated = mappedRefMatches(preferred);
+          const locatorCorroborated = locatorMatches(preferred);
+          if (!refCorroborated && !locatorCorroborated) {
+            sendResponse({
+              success: false,
+              error:
+                'point rebind rejected: exact label is not identity; no current ref or locator corroborates the target',
+            });
+            return true;
+          }
+
+          let refId = null;
+          for (const k in window.__claudeElementMap) {
+            if (
+              window.__claudeElementMap[k].deref &&
+              window.__claudeElementMap[k].deref() === preferred
+            ) {
+              refId = k;
+              break;
+            }
+          }
+          if (!refId) {
+            refId = `ref_${++window.__claudeRefCounter}`;
+            window.__claudeElementMap[refId] = new WeakRef(preferred);
+          }
+          const preferredRect = preferred.getBoundingClientRect();
+          sendResponse({
+            success: true,
+            ref: refId,
+            center: {
+              x: Math.round(preferredRect.left + preferredRect.width / 2),
+              y: Math.round(preferredRect.top + preferredRect.height / 2),
+            },
+            target: {
+              tagName: String(preferred.tagName || ''),
+              role: implicitRole(preferred) || null,
+              text: normalize(preferred.textContent).slice(0, 120),
+            },
+            identityEvidence: {
+              exactLabelMatched: true,
+              roleMatched: true,
+              refCorroborated,
+              locatorCorroborated,
+              uniqueLabelMatch,
             },
           });
           return true;
@@ -1369,7 +2188,9 @@
             try {
               const p = JSON.parse(String(request.payload || '{}'));
               if (Array.isArray(p.variables)) vars = p.variables;
-            } catch {}
+            } catch {
+              /* best-effort accessibility probe */
+            }
           }
           const useOverlay = request.useOverlay !== false; // default true
           const values = {};
@@ -1478,7 +2299,9 @@
           const cleanup = () => {
             try {
               host.remove();
-            } catch {}
+            } catch {
+              /* best-effort accessibility probe */
+            }
           };
           cancel.onclick = () => {
             cleanup();
@@ -1545,7 +2368,9 @@
                       if (document.querySelectorAll(sel).length === 1) return sel;
                     }
                   }
-                } catch {}
+                } catch {
+                  /* best-effort accessibility probe */
+                }
                 for (const attr of ['data-testid', 'data-cy', 'name']) {
                   const val = node.getAttribute(attr);
                   if (val) {
@@ -1642,10 +2467,14 @@
               block: 'center',
               inline: 'nearest',
             });
-          } catch {}
+          } catch {
+            /* best-effort accessibility probe */
+          }
           try {
             /** @type {HTMLElement} */ (el).focus && /** @type {HTMLElement} */ (el).focus();
-          } catch {}
+          } catch {
+            /* best-effort accessibility probe */
+          }
           sendResponse({ success: true });
           return true;
         } catch (e) {
@@ -1668,18 +2497,18 @@
         try {
           const data = ev && ev.data;
           // Handle hover-ref bridge requests from parent frame
-          if (data && data.type === 'rr-bridge-hover-ref') {
+          if (data && data.type === 'tabrix-bridge-hover-ref') {
             handleHoverForRef(data.ref)
               .then((result) => {
                 ev.source?.postMessage(
-                  { type: 'rr-bridge-hover-ref-result', reqId: data.reqId, result },
+                  { type: 'tabrix-bridge-hover-ref-result', reqId: data.reqId, result },
                   '*',
                 );
               })
               .catch((error) => {
                 ev.source?.postMessage(
                   {
-                    type: 'rr-bridge-hover-ref-result',
+                    type: 'tabrix-bridge-hover-ref-result',
                     reqId: data.reqId,
                     result: { success: false, error: error?.message || String(error) },
                   },
@@ -1688,16 +2517,18 @@
               });
             return;
           }
-          if (!data || data.type !== 'rr-bridge-ensure-ref') return;
+          if (!data || data.type !== 'tabrix-bridge-ensure-ref') return;
           const { reqId, selector, useText, isXPath, tagName } = data || {};
           const respond = (payload) => {
             try {
               ev.source &&
                 ev.source.postMessage(
-                  { type: 'rr-bridge-ensure-ref-result', reqId, ...payload },
+                  { type: 'tabrix-bridge-ensure-ref-result', reqId, ...payload },
                   '*',
                 );
-            } catch {}
+            } catch {
+              /* best-effort accessibility probe */
+            }
           };
           try {
             const sel = String(selector || '').trim();
@@ -1758,14 +2589,18 @@
                       }
                     }
                   }
-                } catch {}
+                } catch {
+                  /* best-effort accessibility probe */
+                }
                 try {
                   const children = node.children || [];
                   for (let i = 0; i < children.length; i++) stack.push(children[i]);
                   const sr = node.shadowRoot;
                   if (sr && sr.children)
                     for (let i = 0; i < sr.children.length; i++) stack.push(sr.children[i]);
-                } catch {}
+                } catch {
+                  /* best-effort accessibility probe */
+                }
               }
               if (!el && best.el) el = best.el;
             } else if (isXPath) {
@@ -1846,9 +2681,13 @@
           } catch (e) {
             respond({ success: false, error: String(e && e.message ? e.message : e) });
           }
-        } catch {}
+        } catch {
+          /* best-effort accessibility probe */
+        }
       },
       true,
     );
-  } catch {}
+  } catch {
+    /* best-effort accessibility probe */
+  }
 })();

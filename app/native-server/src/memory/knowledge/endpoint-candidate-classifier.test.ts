@@ -68,7 +68,7 @@ describe('classifyEndpointCandidate — V27-06 noise filter', () => {
   it('folds asset/analytics/auth/private/telemetry into one noise bucket', () => {
     const cases: Array<{ url: string; type?: string; mimeType?: string }> = [
       { url: 'https://example.test/app.css', type: 'stylesheet', mimeType: 'text/css' },
-      { url: 'https://www.google-analytics.com/collect?v=1' },
+      { url: 'https://analytics.example.test/collect?v=1' },
       { url: 'https://example.test/oauth/authorize' },
       { url: 'https://example.test/_private/internal/users' },
       { url: 'https://example.test/api/v1/telemetry' },
@@ -262,12 +262,71 @@ describe('classifyEndpointCandidate — V27-06 semantic typer', () => {
     });
     expect(r.confidence).toBeLessThanOrEqual(0.85);
   });
+
+  it('classifies shape-evidenced read-shaped POST search endpoints as search', () => {
+    const r = classifyEndpointCandidate({
+      url: 'https://api.example.test/api/web/v1/search/notes',
+      method: 'POST',
+      type: 'fetch',
+      mimeType: 'application/json',
+      status: 200,
+      shape: shape({
+        kind: 'object',
+        topLevelKeys: ['data'],
+        fieldTypes: { data: 'array' },
+        rowCount: 20,
+      }),
+    });
+    expect(r.semanticType).toBe('search');
+    expect(r.noiseReason).toBeNull();
+    expect(r.confidence).toBeGreaterThanOrEqual(0.7);
+    expect(r.evidenceLevel).toBe('shape_evidenced');
+    expect(r.rowClassification.semanticType).toBe('mutation');
+  });
+
+  it('classifies shape-evidenced multi-query POST endpoints as list', () => {
+    const r = classifyEndpointCandidate({
+      url: 'https://search-provider.example.test/1/indexes/*/queries?x-provider-agent=redacted',
+      method: 'POST',
+      type: 'xhr',
+      mimeType: 'application/json',
+      status: 200,
+      shape: shape({
+        kind: 'array',
+        rowCount: 10,
+        sampleItemKeys: ['description', 'title'],
+      }),
+    });
+    expect(r.semanticType).toBe('list');
+    expect(r.noiseReason).toBeNull();
+    expect(r.confidence).toBeGreaterThanOrEqual(0.7);
+    expect(r.evidenceLevel).toBe('shape_evidenced');
+    expect(r.rowClassification.semanticType).toBe('mutation');
+  });
+
+  it('does not promote write-shaped POST endpoints even with JSON shape evidence', () => {
+    const r = classifyEndpointCandidate({
+      url: 'https://api.example.test/api/web/v1/notes/like',
+      method: 'POST',
+      type: 'fetch',
+      mimeType: 'application/json',
+      status: 200,
+      shape: shape({
+        kind: 'object',
+        topLevelKeys: ['data'],
+        fieldTypes: { data: 'array' },
+        rowCount: 1,
+      }),
+    });
+    expect(r.semanticType).toBe('noise');
+    expect(r.noiseReason).toBe('non_read_method');
+  });
 });
 
-describe('classifyEndpointCandidate — GitHub public fixture', () => {
-  it('classifies api.github.com/search/issues as search', () => {
+describe('classifyEndpointCandidate — Workspace public fixture', () => {
+  it('classifies api.code.example/search/issues as search', () => {
     const r = classifyEndpointCandidate({
-      url: 'https://api.github.com/search/issues?q=is%3Aissue+repo%3Aowner%2Frepo&per_page=10',
+      url: 'https://api.code.example/search/issues?q=is%3Aissue+repo%3Aowner%2Frepo&per_page=10',
       method: 'GET',
       mimeType: 'application/json',
       status: 200,
@@ -282,9 +341,9 @@ describe('classifyEndpointCandidate — GitHub public fixture', () => {
     expect(r.evidenceLevel).toBe('shape_evidenced');
   });
 
-  it('classifies api.github.com/repos/:owner/:repo/issues/:n as detail', () => {
+  it('classifies api.code.example/repos/:owner/:repo/issues/:n as detail', () => {
     const r = classifyEndpointCandidate({
-      url: 'https://api.github.com/repos/owner/repo/issues/42',
+      url: 'https://api.code.example/repos/owner/repo/issues/42',
       method: 'GET',
       mimeType: 'application/json',
       status: 200,
@@ -491,6 +550,27 @@ describe('deriveEndpointCandidatesFromBundle — bundle path', () => {
     expect(c).not.toBeNull();
     expect(c!.semanticType).toBe('search');
     expect(c!.evidenceLevel).toBe('shape_evidenced');
+    expect(c!.shape?.rowCount).toBe(2);
+  });
+
+  it('derives a usable read-shaped POST candidate from captured search rows', () => {
+    const req: CapturedNetworkRequest = {
+      url: 'https://api.example.test/api/web/v1/search/notes',
+      method: 'POST',
+      type: 'fetch',
+      mimeType: 'application/json',
+      status: 200,
+      responseBody: JSON.stringify({
+        data: [
+          { id: 'n1', title: 'AI tools' },
+          { id: 'n2', title: 'browser automation' },
+        ],
+      }),
+    };
+    const c = deriveEndpointCandidateFromRequest(req, EMPTY_HEADERS);
+    expect(c).not.toBeNull();
+    expect(c!.semanticType).toBe('search');
+    expect(c!.confidence).toBeGreaterThanOrEqual(0.7);
     expect(c!.shape?.rowCount).toBe(2);
   });
 });

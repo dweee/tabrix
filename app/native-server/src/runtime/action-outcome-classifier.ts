@@ -32,15 +32,17 @@
  * Confidence model (calibrated against deterministic action-outcome
  * acceptance scenarios, not against real-browser Gate evidence):
  *
- *   - A single corroborating signal in the closed allowlist scores
- *     0.85.
- *   - Two corroborating signals (e.g. navigation + dom region change)
- *     score 0.95.
+ *   - A single strong signal in the closed allowlist scores 0.85.
+ *   - Unscoped DOM-only change is ambiguous; DOM partial updates need
+ *     either a scoped region tag or a network/readback corroborator.
+ *   - Two corroborating signals (e.g. navigation + dom region change,
+ *     or DOM partial update + network) score 0.95.
  *   - A signal kind that does not match any verdict bucket lowers the
  *     verdict confidence by 0.1 per stray signal, floored at 0.6 so
  *     `'ambiguous'` never collapses below the ambiguity confidence floor.
- *   - `no_observed_change` (empty timeline) returns 1.0 — the absence
- *     of signals is itself a strong claim.
+ *   - `no_observed_change` (empty effective timeline) returns a low
+ *     confidence value because no signal is not the same as strong
+ *     proof that nothing happened.
  *   - Anything outside the allowlist falls through to `'unknown'`
  *     with confidence 0.0.
  */
@@ -64,6 +66,9 @@ export const ACTION_OUTCOME_DEFAULT_SETTLE_WINDOW_MS = 1_500;
  *  this floor would conflict with the lifecycle confidence
  *  expectations elsewhere in the runtime. */
 export const ACTION_OUTCOME_MIN_AMBIGUOUS_CONFIDENCE = 0.6;
+
+/** Empty effective timelines carry weak evidence only. */
+export const ACTION_OUTCOME_NO_SIGNAL_CONFIDENCE = 0.5;
 
 export interface ClassifyOptions {
   /** Override the settle window in ms. Defaults to
@@ -96,7 +101,7 @@ export function classifyActionOutcome(
     return {
       actionId: envelope.actionId,
       outcome: 'no_observed_change',
-      outcomeConfidence: 1.0,
+      outcomeConfidence: ACTION_OUTCOME_NO_SIGNAL_CONFIDENCE,
       observedSignalKinds,
       producedAtMs: now,
     };
@@ -124,6 +129,7 @@ const KNOWN_SIGNAL_KINDS: ReadonlySet<ActionSignalKind> = new Set<ActionSignalKi
   'tab_created',
   'dom_region_changed',
   'network_completed',
+  'network_failed',
   'dialog_opened',
 ]);
 
@@ -143,7 +149,9 @@ function chooseVerdict(_actionKind: ActionKind, signals: ActionSignal[]): Verdic
   let hasNavigation = false;
   let hasNewTab = false;
   let hasDomRegion = false;
+  let hasScopedDomRegion = false;
   let hasNetwork = false;
+  let hasNetworkFailure = false;
   let hasDialog = false;
   let unknownCount = 0;
 
@@ -161,9 +169,13 @@ function chooseVerdict(_actionKind: ActionKind, signals: ActionSignal[]): Verdic
         break;
       case 'dom_region_changed':
         hasDomRegion = true;
+        if (hasNonEmptyString(s.regionTag)) hasScopedDomRegion = true;
         break;
       case 'network_completed':
         hasNetwork = true;
+        break;
+      case 'network_failed':
+        hasNetworkFailure = true;
         break;
       case 'dialog_opened':
         hasDialog = true;
@@ -175,7 +187,14 @@ function chooseVerdict(_actionKind: ActionKind, signals: ActionSignal[]): Verdic
   if (hasNavigation && !hasNewTab) verdictBuckets.push('navigated_same_tab');
   if (hasNewTab) verdictBuckets.push('navigated_new_tab');
   if (hasDialog) verdictBuckets.push('modal_opened');
-  if (hasDomRegion && !hasNavigation && !hasNewTab && !hasDialog)
+  if (hasNetworkFailure) verdictBuckets.push('error_observed');
+  if (
+    hasDomRegion &&
+    (hasScopedDomRegion || hasNetwork) &&
+    !hasNavigation &&
+    !hasNewTab &&
+    !hasDialog
+  )
     verdictBuckets.push('spa_partial_update');
 
   // Network on its own is too weak to call a verdict — every page
@@ -183,8 +202,16 @@ function chooseVerdict(_actionKind: ActionKind, signals: ActionSignal[]): Verdic
   // SPA-partial-update reinforcer (handled below by the confidence
   // boost) and otherwise as an ambiguity signal.
   const hasOnlyNetwork = hasNetwork && verdictBuckets.length === 0;
+  const hasOnlyUnscopedDomRegion =
+    hasDomRegion && !hasScopedDomRegion && !hasNetwork && verdictBuckets.length === 0;
 
   if (verdictBuckets.length === 0) {
+    if (hasOnlyUnscopedDomRegion) {
+      return {
+        outcome: 'ambiguous',
+        confidence: Math.max(ACTION_OUTCOME_MIN_AMBIGUOUS_CONFIDENCE, 0.65 - 0.1 * unknownCount),
+      };
+    }
     if (hasOnlyNetwork) {
       return {
         outcome: 'ambiguous',
@@ -215,6 +242,7 @@ function chooseVerdict(_actionKind: ActionKind, signals: ActionSignal[]): Verdic
   // spa_partial_update + network) lifts the score to 0.95.
   if (single === 'navigated_same_tab' && hasDomRegion) confidence = 0.95;
   if (single === 'spa_partial_update' && hasNetwork) confidence = 0.95;
+  if (single === 'error_observed') confidence = 0.9;
 
   // Each unknown stray signal subtracts a fixed amount, floored at
   // ACTION_OUTCOME_MIN_AMBIGUOUS_CONFIDENCE so the verdict never
@@ -231,6 +259,10 @@ function clamp01(value: number): number {
   if (value < 0) return 0;
   if (value > 1) return 1;
   return value;
+}
+
+function hasNonEmptyString(value: string | null | undefined): boolean {
+  return typeof value === 'string' && value.trim().length > 0;
 }
 
 function dedupeSorted<T extends string>(values: T[]): T[] {

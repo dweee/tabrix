@@ -3,7 +3,7 @@
 /**
  * report.ts
  *
- * Export a diagnostic report for GitHub Issues.
+ * Export a diagnostic report for support issues.
  * Collects system info, doctor output, logs, manifests, and registry info.
  */
 
@@ -882,7 +882,7 @@ function renderMarkdown(report: DiagnosticReport): string {
   lines.push('---');
   lines.push('');
   lines.push(
-    '> If you are opening a GitHub Issue, paste everything above. ' +
+    '> If you are opening a support issue, paste everything above. ' +
       `You can disable redaction with: \`${report.tool.name} report --no-redact\``,
   );
 

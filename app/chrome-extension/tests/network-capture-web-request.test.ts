@@ -15,10 +15,10 @@ const RESPONSE_SUMMARY_MESSAGE = 'tabrix:v27-response-summary';
 describe('network capture webRequest metadata helpers', () => {
   it('redacts raw query values while preserving query keys', () => {
     const redacted = redactNetworkCaptureUrlForMetadata(
-      'https://api.github.com/search/repositories?q=AI助手&sort=stars&order=desc',
+      'https://api.content.example/search/items?q=AI助手&sort=stars&order=desc',
     );
 
-    expect(redacted).toBe('https://api.github.com/search/repositories?order=&q=&sort=');
+    expect(redacted).toBe('https://api.content.example/search/items?order=&q=&sort=');
     expect(redacted).not.toContain('AI助手');
     expect(redacted).not.toContain('stars');
     expect(redacted).not.toContain('desc');
@@ -43,7 +43,7 @@ describe('network capture webRequest metadata helpers', () => {
   it('classifies usable API candidates and noisy private telemetry separately', () => {
     expect(
       classifyNetworkCaptureEndpoint({
-        url: 'https://api.github.com/search/repositories?q=',
+        url: 'https://api.content.example/search/items?q=',
         method: 'GET',
         type: 'xmlhttprequest',
         mimeType: 'application/json',
@@ -51,7 +51,7 @@ describe('network capture webRequest metadata helpers', () => {
     ).toBe('usable');
     expect(
       classifyNetworkCaptureEndpoint({
-        url: 'https://api.github.com/_private/browser/stats?token=',
+        url: 'https://api.content.example/_private/browser/stats?token=',
         method: 'GET',
         type: 'xmlhttprequest',
         mimeType: 'application/json',
@@ -389,5 +389,61 @@ describe('V27-10R2 — browser-context response summary sampler', () => {
       rejectedReason: 'compact_rows_unavailable',
       fieldShapeSummaryAvailable: false,
     });
+  });
+
+  it('returns capture results when sampler disarm hangs', async () => {
+    vi.useFakeTimers();
+    const executeScript = (
+      chrome as typeof chrome & { scripting: { executeScript: ReturnType<typeof vi.fn> } }
+    ).scripting.executeScript;
+    executeScript
+      .mockResolvedValueOnce([{ result: { ok: true } }])
+      .mockResolvedValueOnce([{ result: { ok: true } }])
+      .mockImplementationOnce(() => new Promise(() => undefined));
+
+    try {
+      const start = await networkCaptureStartTool.execute({
+        tabId: 77,
+        maxCaptureTime: 0,
+        inactivityTimeout: 0,
+      });
+      expect(start.isError).toBe(false);
+      const startPayload = JSON.parse(String(start.content[0].text)) as {
+        responseSummarySampler: { samplerId: string; samplerArmedAt: number };
+      };
+
+      listeners.before({
+        tabId: 77,
+        requestId: 'r-timeout',
+        url: 'https://api.neutral-social.example.test/v1/search/items?keyword=desk&page=1',
+        method: 'GET',
+        type: 'xmlhttprequest',
+        timeStamp: startPayload.responseSummarySampler.samplerArmedAt + 5,
+      });
+      listeners.headers({
+        tabId: 77,
+        requestId: 'r-timeout',
+        statusCode: 200,
+        statusLine: 'HTTP/2 200',
+        timeStamp: startPayload.responseSummarySampler.samplerArmedAt + 20,
+        responseHeaders: [{ name: 'Content-Type', value: 'application/json' }],
+      });
+
+      const stopPromise = networkCaptureStopTool.execute({ tabId: 77 });
+      await vi.advanceTimersByTimeAsync(2_000);
+      const stop = await stopPromise;
+      expect(stop.isError).toBe(false);
+      const stopPayload = JSON.parse(String(stop.content[0].text)) as {
+        requestCount: number;
+        responseSummaryLifecycle: { responseSummaryRejectedReason: string };
+      };
+      expect(stopPayload.requestCount).toBe(1);
+      expect(stopPayload.responseSummaryLifecycle.responseSummaryRejectedReason).toBe(
+        'sampler_disarm_timeout',
+      );
+      expect(networkCaptureStartTool.captureData.has(77)).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

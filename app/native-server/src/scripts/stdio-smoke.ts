@@ -12,6 +12,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import path from 'path';
 import { TOOL_SCHEMAS } from '@tabrix/shared';
+import { filterToolsByEnvironment, filterToolsByPolicy } from '../mcp/tool-registry-filters';
 
 export interface StdioSmokeOptions {
   json?: boolean;
@@ -44,12 +45,19 @@ export async function runStdioSmoke(options: StdioSmokeOptions = {}): Promise<nu
 
   let client: Client | null = null;
   let transport: StdioClientTransport | null = null;
+  let childStderrBytes = 0;
+  let childStderrChunkCount = 0;
 
   try {
     transport = new StdioClientTransport({
       command: process.execPath,
       args: [stdioServerPath],
       env: process.env as Record<string, string>,
+      stderr: 'pipe',
+    });
+    transport.stderr?.on('data', (chunk: Buffer | string) => {
+      childStderrBytes += Buffer.byteLength(chunk);
+      childStderrChunkCount += 1;
     });
 
     client = new Client({ name: 'stdio-smoke', version: '1.0.0' }, { capabilities: {} });
@@ -61,13 +69,13 @@ export async function runStdioSmoke(options: StdioSmokeOptions = {}): Promise<nu
     // tools/list
     const toolsResult = await client.listTools();
     const toolCount = toolsResult.tools.length;
-    const expectedCount = TOOL_SCHEMAS.length;
+    const expectedCount = filterToolsByPolicy(filterToolsByEnvironment(TOOL_SCHEMAS)).length;
     const toolsOk = toolCount > 0 && toolCount === expectedCount;
     record(
       'tools/list',
       toolsOk,
       toolsOk
-        ? `${toolCount} tools (matches TOOL_SCHEMAS)`
+        ? `${toolCount} tools (matches visible MCP registry)`
         : `Expected ${expectedCount} tools, got ${toolCount}`,
     );
 
@@ -91,6 +99,13 @@ export async function runStdioSmoke(options: StdioSmokeOptions = {}): Promise<nu
     await client.close();
     client = null;
     record('close', true, 'Stdio server shut down cleanly');
+    record(
+      'stderr-isolated',
+      true,
+      childStderrChunkCount > 0
+        ? `Child stderr captured separately (${childStderrBytes} bytes, ${childStderrChunkCount} chunks)`
+        : 'Child stderr stayed quiet',
+    );
   } catch (error) {
     record('fatal', false, stringifyError(error));
   } finally {

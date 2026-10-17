@@ -1,280 +1,264 @@
 /**
- * Memory Phase 0 SQL schema.
+ * MKE Core Storage v1.
  *
- * Three tables, one-to-one with the in-memory TS types in
- * `src/execution/types.ts`:
- * - memory_tasks      <-> Task
- * - memory_sessions   <-> ExecutionSession (minus `steps`)
- * - memory_steps      <-> ExecutionStep
+ * Product memory now starts here. The pre-launch Memory Phase 0 tables
+ * (`memory_tasks`, `memory_sessions`, `memory_steps`, page snapshots,
+ * action rows, and operation logs) are retired; tool-call facts must enter
+ * through `tabrix_memory_traces`.
  *
- * Columns use TEXT for ids/enums/timestamps to match the existing
- * TypeScript DTOs exactly (no int encoding). `labels` and
- * `artifact_refs` are stored as JSON-serialized TEXT.
- *
- * Design choices (see docs/MEMORY_PHASE_0.md):
- * - Independent SQLite file (`memory.db`) to avoid coupling with
- *   the agent db's hand-rolled migration surface.
- * - `CREATE TABLE IF NOT EXISTS` for idempotent initialization.
- * - Foreign keys enforced via `PRAGMA foreign_keys=ON`.
- * - WAL journal for concurrent-read safety.
- * - Compound uniqueness `(session_id, step_index)` preserves
- *   ordering invariants from `SessionManager.startStep`.
+ * - `tabrix_memory_traces` is append-only factual trace storage for each
+ *   AI -> Tabrix tool call and Tabrix -> AI result.
+ * - `tabrix_knowledge_models` is a page-object model store. It is NOT a
+ *   keyword dictionary; object/data-source models must distinguish stable
+ *   structural signals from weak text signals inside their JSON blobs.
+ * - `tabrix_experience_recipes` is a redacted, import/export-capable recipe
+ *   store derived from successful traces.
  */
-
-export const MEMORY_CREATE_TABLES_SQL = `
-CREATE TABLE IF NOT EXISTS memory_tasks (
-  task_id     TEXT PRIMARY KEY,
-  task_type   TEXT NOT NULL,
-  title       TEXT NOT NULL,
-  intent      TEXT NOT NULL,
-  origin      TEXT NOT NULL,
-  owner       TEXT,
-  project_id  TEXT,
-  labels      TEXT NOT NULL DEFAULT '[]',
-  status      TEXT NOT NULL,
-  created_at  TEXT NOT NULL,
-  updated_at  TEXT NOT NULL
+export const MKE_CORE_CREATE_TABLES_SQL = `
+CREATE TABLE IF NOT EXISTS tabrix_memory_traces (
+  trace_id                 TEXT PRIMARY KEY,
+  task_id                  TEXT NOT NULL,
+  task_theme               TEXT,
+  task_intent              TEXT,
+  task_signature           TEXT,
+  ai_client                TEXT,
+  tool_name                TEXT NOT NULL,
+  tool_call_id             TEXT,
+  sequence_index           INTEGER,
+  request_params_blob      TEXT NOT NULL,
+  request_at               TEXT NOT NULL,
+  response_blob            TEXT NOT NULL,
+  response_at              TEXT NOT NULL,
+  duration_ms              INTEGER,
+  tool_success             INTEGER,
+  business_success         TEXT,
+  result_summary           TEXT,
+  error_code               TEXT,
+  tab_id                   INTEGER,
+  window_id                INTEGER,
+  browser_context_key      TEXT,
+  tab_lifecycle_blob       TEXT,
+  site_family              TEXT,
+  page_url_pattern         TEXT,
+  page_role                TEXT,
+  page_state               TEXT,
+  page_model_key           TEXT,
+  perception_objects_blob  TEXT,
+  action_target_blob       TEXT,
+  pre_observation_blob     TEXT,
+  post_observation_blob    TEXT,
+  post_action_delta_blob   TEXT,
+  source_route             TEXT,
+  selected_data_source     TEXT,
+  freshness                TEXT,
+  fallback_used            TEXT,
+  next_required_check      TEXT,
+  token_prompt             INTEGER,
+  token_completion         INTEGER,
+  token_total              INTEGER,
+  ai_feedback_score        REAL,
+  ai_feedback_blob         TEXT,
+  redaction_state          TEXT NOT NULL DEFAULT 'redacted',
+  created_at               TEXT NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS memory_tasks_created_at_idx ON memory_tasks(created_at);
-CREATE INDEX IF NOT EXISTS memory_tasks_status_idx     ON memory_tasks(status);
+CREATE INDEX IF NOT EXISTS tabrix_memory_traces_task_idx
+  ON tabrix_memory_traces(task_id, created_at);
+CREATE INDEX IF NOT EXISTS tabrix_memory_traces_tool_idx
+  ON tabrix_memory_traces(tool_name, created_at);
+CREATE INDEX IF NOT EXISTS tabrix_memory_traces_page_idx
+  ON tabrix_memory_traces(site_family, page_model_key, page_role, created_at);
+CREATE INDEX IF NOT EXISTS tabrix_memory_traces_success_idx
+  ON tabrix_memory_traces(tool_success, business_success, created_at);
 
-CREATE TABLE IF NOT EXISTS memory_sessions (
-  session_id          TEXT PRIMARY KEY,
-  task_id             TEXT NOT NULL REFERENCES memory_tasks(task_id) ON DELETE CASCADE,
-  transport           TEXT NOT NULL,
-  client_name         TEXT NOT NULL,
-  workspace_context   TEXT,
-  browser_context     TEXT,
-  summary             TEXT,
-  status              TEXT NOT NULL,
-  started_at          TEXT NOT NULL,
-  ended_at            TEXT,
-  aggregated_at       TEXT,
-  -- Deterministic session-end composite score (raw, before
-  -- recency decay) and the JSON breakdown of its component values
-  -- ({accuracy, speed, token, stability}). Both nullable because
-  -- the aggregator only fills them on replay sessions; non-replay
-  -- sessions keep them NULL so reads can short-circuit.
-  composite_score_raw REAL,
-  components_blob     TEXT
+CREATE TABLE IF NOT EXISTS tabrix_memory_feedback_events (
+  feedback_event_id       TEXT PRIMARY KEY,
+  trace_id                TEXT NOT NULL,
+  task_id                 TEXT NOT NULL,
+  tool_name               TEXT,
+  tool_call_id            TEXT,
+  sequence_index          INTEGER,
+  trace_binding_hash      TEXT NOT NULL,
+  evaluation_scope        TEXT NOT NULL,
+  evaluation_version      TEXT NOT NULL,
+  rubric_version          TEXT NOT NULL,
+  evaluator_model         TEXT,
+  business_status         TEXT NOT NULL,
+  confidence              REAL,
+  reason_code             TEXT,
+  summary                 TEXT,
+  user_goal_snapshot      TEXT,
+  experience_candidate    INTEGER NOT NULL DEFAULT 0,
+  source_tool_name        TEXT,
+  source_tool_call_id     TEXT,
+  accepted                INTEGER NOT NULL DEFAULT 1,
+  rejection_code          TEXT,
+  rejection_message       TEXT,
+  payload_blob            TEXT NOT NULL,
+  created_at              TEXT NOT NULL,
+  FOREIGN KEY(trace_id) REFERENCES tabrix_memory_traces(trace_id) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS memory_sessions_task_id_idx    ON memory_sessions(task_id);
-CREATE INDEX IF NOT EXISTS memory_sessions_started_at_idx ON memory_sessions(started_at);
+CREATE INDEX IF NOT EXISTS tabrix_memory_feedback_events_trace_idx
+  ON tabrix_memory_feedback_events(trace_id, created_at);
+CREATE INDEX IF NOT EXISTS tabrix_memory_feedback_events_task_idx
+  ON tabrix_memory_feedback_events(task_id, created_at);
 
-CREATE TABLE IF NOT EXISTS memory_steps (
-  step_id        TEXT PRIMARY KEY,
-  session_id     TEXT NOT NULL REFERENCES memory_sessions(session_id) ON DELETE CASCADE,
-  step_index     INTEGER NOT NULL,
-  tool_name      TEXT NOT NULL,
-  step_type      TEXT NOT NULL,
-  status         TEXT NOT NULL,
-  input_summary  TEXT,
-  result_summary TEXT,
-  error_code     TEXT,
-  error_summary  TEXT,
-  artifact_refs  TEXT NOT NULL DEFAULT '[]',
-  started_at     TEXT NOT NULL,
-  ended_at       TEXT,
-  UNIQUE (session_id, step_index)
+CREATE TABLE IF NOT EXISTS tabrix_knowledge_models (
+  knowledge_id                 TEXT PRIMARY KEY,
+  site_family                  TEXT NOT NULL,
+  page_url_pattern             TEXT,
+  page_role                    TEXT NOT NULL,
+  page_model_key               TEXT NOT NULL,
+  model_version                INTEGER NOT NULL DEFAULT 1,
+  page_state_model_blob        TEXT NOT NULL,
+  object_graph_blob            TEXT NOT NULL,
+  action_surface_blob          TEXT NOT NULL,
+  data_source_model_blob       TEXT,
+  navigation_model_blob        TEXT,
+  failure_signal_blob          TEXT,
+  source_trace_ids_blob        TEXT,
+  source_experience_ids_blob   TEXT,
+  observation_count            INTEGER NOT NULL DEFAULT 0,
+  successful_use_count         INTEGER NOT NULL DEFAULT 0,
+  failed_use_count             INTEGER NOT NULL DEFAULT 0,
+  confidence_score             REAL NOT NULL DEFAULT 0,
+  drift_score                  REAL,
+  archived_at                  TEXT,
+  last_observed_at             TEXT,
+  last_validated_at            TEXT,
+  created_at                   TEXT NOT NULL,
+  updated_at                   TEXT NOT NULL,
+  UNIQUE(site_family, page_model_key, model_version)
 );
 
-CREATE INDEX IF NOT EXISTS memory_steps_session_id_idx ON memory_steps(session_id);
-CREATE INDEX IF NOT EXISTS memory_steps_tool_name_idx  ON memory_steps(tool_name);
+CREATE INDEX IF NOT EXISTS tabrix_knowledge_models_lookup_idx
+  ON tabrix_knowledge_models(site_family, page_role, page_model_key);
+CREATE INDEX IF NOT EXISTS tabrix_knowledge_models_confidence_idx
+  ON tabrix_knowledge_models(confidence_score, last_validated_at);
 
--- Phase 0.2: structured page snapshots produced by chrome_read_page.
--- Stable columns are kept narrow (query-friendly, low volatility).
--- Blob columns hold JSON-serialized slices of the original response,
--- intentionally trimmed (e.g. top-24 interactive elements) so the
--- table stays lightweight enough for long-horizon retention.
-CREATE TABLE IF NOT EXISTS memory_page_snapshots (
-  snapshot_id               TEXT PRIMARY KEY,
-  step_id                   TEXT NOT NULL REFERENCES memory_steps(step_id) ON DELETE CASCADE,
-  tab_id                    INTEGER,
-  url                       TEXT,
-  title                     TEXT,
-  page_type                 TEXT,
-  mode                      TEXT,
-  page_role                 TEXT,
-  primary_region            TEXT,
-  quality                   TEXT,
-  task_mode                 TEXT,
-  complexity_level          TEXT,
-  source_kind               TEXT,
-  fallback_used             INTEGER DEFAULT 0,
-  interactive_count         INTEGER DEFAULT 0,
-  candidate_action_count    INTEGER DEFAULT 0,
-  high_value_object_count   INTEGER DEFAULT 0,
-  summary_blob              TEXT,
-  page_context_blob         TEXT,
-  high_value_objects_blob   TEXT,
-  interactive_elements_blob TEXT,
-  candidate_actions_blob    TEXT,
-  protocol_l0_blob          TEXT,
-  protocol_l1_blob          TEXT,
-  protocol_l2_blob          TEXT,
-  captured_at               TEXT NOT NULL
+CREATE TABLE IF NOT EXISTS tabrix_experience_recipes (
+  experience_id              TEXT PRIMARY KEY,
+  recipe_name                TEXT NOT NULL,
+  scenario_key               TEXT NOT NULL,
+  task_signature             TEXT NOT NULL,
+  recipe_fingerprint         TEXT NOT NULL,
+  recipe_version             INTEGER NOT NULL DEFAULT 1,
+  site_family                TEXT,
+  page_model_key             TEXT,
+  page_role                  TEXT,
+  preconditions_blob         TEXT NOT NULL,
+  variable_schema_blob       TEXT NOT NULL,
+  steps_blob                 TEXT NOT NULL,
+  success_check_blob         TEXT NOT NULL,
+  recovery_blob              TEXT,
+  source_trace_ids_blob      TEXT NOT NULL DEFAULT '[]',
+  linked_knowledge_ids_blob  TEXT,
+  success_count              INTEGER NOT NULL DEFAULT 0,
+  failure_count              INTEGER NOT NULL DEFAULT 0,
+  adoption_count             INTEGER NOT NULL DEFAULT 0,
+  avg_duration_ms            INTEGER,
+  avg_token_total            INTEGER,
+  reliability_score          REAL,
+  speed_score                REAL,
+  token_saving_score         REAL,
+  usefulness_score           REAL,
+  drift_state                TEXT,
+  portability_scope          TEXT NOT NULL DEFAULT 'local',
+  origin_kind                TEXT NOT NULL DEFAULT 'local_mined',
+  origin_package_id          TEXT,
+  compatibility_blob         TEXT,
+  export_state               TEXT NOT NULL DEFAULT 'not_exportable',
+  import_state               TEXT NOT NULL DEFAULT 'native',
+  redaction_state            TEXT NOT NULL DEFAULT 'template_only'
+                             CHECK (redaction_state = 'template_only'),
+  archived_at                TEXT,
+  last_used_at               TEXT,
+  last_verified_at           TEXT,
+  created_at                 TEXT NOT NULL,
+  updated_at                 TEXT NOT NULL,
+  UNIQUE(recipe_fingerprint, recipe_version)
 );
 
-CREATE INDEX IF NOT EXISTS memory_page_snapshots_step_id_idx      ON memory_page_snapshots(step_id);
-CREATE INDEX IF NOT EXISTS memory_page_snapshots_url_idx          ON memory_page_snapshots(url);
-CREATE INDEX IF NOT EXISTS memory_page_snapshots_page_role_idx    ON memory_page_snapshots(page_role);
-CREATE INDEX IF NOT EXISTS memory_page_snapshots_captured_at_idx  ON memory_page_snapshots(captured_at);
--- Added in Phase 0.3 to support "latest snapshot for this tab in the
--- current session" lookup from the action post-processor.
-CREATE INDEX IF NOT EXISTS memory_page_snapshots_tab_captured_idx ON memory_page_snapshots(tab_id, captured_at);
-
--- Phase 0.3: structured trail of DOM-interaction actions produced by
--- click / fill / navigate / keyboard tools. Each row links back to
--- the owning execution step, the session, and (when available) the
--- most recent page snapshot for the same tab in the same session.
--- Sensitive values (notably chrome_fill_or_select.value) are never
--- stored in plaintext; only a redacted {kind,type,length,sha256}
--- summary lands in value_summary. result_blob is omitted for fill
--- because the extension response may echo the submitted value.
-CREATE TABLE IF NOT EXISTS memory_actions (
-  action_id         TEXT PRIMARY KEY,
-  step_id           TEXT NOT NULL REFERENCES memory_steps(step_id) ON DELETE CASCADE,
-  session_id        TEXT NOT NULL REFERENCES memory_sessions(session_id) ON DELETE CASCADE,
-  tool_name         TEXT NOT NULL,
-  action_kind       TEXT NOT NULL,       -- 'click' | 'fill' | 'navigate' | 'keyboard'
-  navigate_mode     TEXT,                -- 'url' | 'refresh' | 'back' | 'forward' | 'new_tab' | null
-  tab_id            INTEGER,
-  window_id         INTEGER,
-  target_ref        TEXT,
-  target_selector   TEXT,
-  target_frame_id   INTEGER,
-  url_requested     TEXT,
-  url_before        TEXT,
-  url_after         TEXT,
-  key_spec          TEXT,
-  value_summary     TEXT,                -- JSON redaction record; null unless action_kind='fill'
-  status            TEXT NOT NULL,       -- 'success' | 'failed' | 'soft_failure'
-  error_code        TEXT,
-  pre_snapshot_ref  TEXT,                -- memory://snapshot/<uuid> | null
-  args_blob         TEXT,                -- JSON; sensitive fields replaced with '[redacted]'
-  result_blob       TEXT,                -- JSON; null for fill (see above)
-  captured_at       TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS memory_actions_step_id_idx     ON memory_actions(step_id);
-CREATE INDEX IF NOT EXISTS memory_actions_session_id_idx  ON memory_actions(session_id);
-CREATE INDEX IF NOT EXISTS memory_actions_action_kind_idx ON memory_actions(action_kind);
-CREATE INDEX IF NOT EXISTS memory_actions_captured_at_idx ON memory_actions(captured_at);
+CREATE INDEX IF NOT EXISTS tabrix_experience_recipes_lookup_idx
+  ON tabrix_experience_recipes(site_family, page_model_key, page_role, task_signature);
+CREATE INDEX IF NOT EXISTS tabrix_experience_recipes_import_export_idx
+  ON tabrix_experience_recipes(export_state, import_state, updated_at);
 `;
 
 /**
- * Operation memory log.
+ * Browser Object schema.
  *
- * This is a factual operation trail, not Experience. It records the
- * tool-level decision/outcome metadata needed to explain routing,
- * fallback, timing, token savings, and tab hygiene for benchmark
- * reports. It deliberately avoids raw URL query values, request/response
- * bodies, cookies, Authorization values, and API result payloads.
- *
- * Idempotent CREATE: old DBs pick up the table on the next
- * `openMemoryDb()` call. No ALTER is needed for the first version.
+ * `tabrix_browser_objects` is the current browser/page object fact layer. It
+ * is additive to MKE: Memory remains the tool-call trace log, Knowledge can
+ * later project from object facts, and Experience still mines validated Memory
+ * paths. The table stores redacted object summaries, not raw DOM/text/body
+ * evidence.
  */
-export const OPERATION_MEMORY_LOG_CREATE_TABLES_SQL = `
-CREATE TABLE IF NOT EXISTS operation_memory_logs (
-  operation_log_id      TEXT PRIMARY KEY,
-  task_id               TEXT NOT NULL REFERENCES memory_tasks(task_id) ON DELETE CASCADE,
-  session_id            TEXT NOT NULL REFERENCES memory_sessions(session_id) ON DELETE CASCADE,
-  step_id               TEXT NOT NULL REFERENCES memory_steps(step_id) ON DELETE CASCADE,
-  tool_name             TEXT NOT NULL,
-  url_pattern           TEXT,
-  page_role             TEXT,
-  requested_layer       TEXT,
-  selected_data_source  TEXT,
-  source_route          TEXT,
-  decision_reason       TEXT,
-  result_kind           TEXT,
-  duration_ms           INTEGER,
-  success               INTEGER NOT NULL,
-  fallback_used         TEXT,
-  error_code            TEXT,
-  read_count            INTEGER,
-  tokens_saved          INTEGER,
-  tab_hygiene_blob      TEXT,
-  created_at            TEXT NOT NULL,
-  UNIQUE(step_id)
+export const BROWSER_OBJECT_CREATE_TABLES_SQL = `
+CREATE TABLE IF NOT EXISTS tabrix_browser_objects (
+  browser_object_id      TEXT PRIMARY KEY,
+  schema_version         INTEGER NOT NULL DEFAULT 1,
+  site_family            TEXT NOT NULL DEFAULT 'unknown',
+  page_url_pattern       TEXT,
+  root_route             TEXT,
+  current_route          TEXT,
+  page_role              TEXT,
+  page_model_key         TEXT NOT NULL DEFAULT 'unknown',
+  object_fingerprint     TEXT NOT NULL,
+  object_type            TEXT NOT NULL,
+  parent_object_id       TEXT,
+  model_version          INTEGER NOT NULL DEFAULT 1,
+  browser_context_key    TEXT,
+  tab_id                 INTEGER,
+  window_id              INTEGER,
+  owner_type             TEXT,
+  source_route           TEXT,
+  selected_data_source   TEXT,
+  source_lineage_blob    TEXT,
+  source_freshness       TEXT,
+  tab_status             TEXT,
+  lifecycle_state        TEXT,
+  is_active              INTEGER,
+  can_tabrix_operate     INTEGER,
+  operability_reason     TEXT,
+  targetability_blob     TEXT,
+  facts_blob             TEXT,
+  action_types_blob      TEXT,
+  changed_groups_blob    TEXT,
+  primary_conclusion     TEXT,
+  claim_boundary         TEXT,
+  observation_count      INTEGER NOT NULL DEFAULT 0,
+  confidence_score       REAL,
+  drift_score            REAL,
+  last_observed_at       TEXT,
+  last_validated_at      TEXT,
+  first_trace_id         TEXT,
+  last_trace_id          TEXT,
+  source_trace_ids_blob  TEXT,
+  evidence_refs_blob     TEXT,
+  redaction_state        TEXT NOT NULL DEFAULT 'redacted',
+  current_state_blob     TEXT,
+  recent_events_blob     TEXT,
+  created_at             TEXT NOT NULL,
+  updated_at             TEXT NOT NULL,
+  closed_at              TEXT,
+  archived_at            TEXT,
+  UNIQUE(site_family, page_model_key, object_fingerprint, schema_version)
 );
 
-CREATE INDEX IF NOT EXISTS operation_memory_logs_task_id_idx      ON operation_memory_logs(task_id);
-CREATE INDEX IF NOT EXISTS operation_memory_logs_session_id_idx   ON operation_memory_logs(session_id);
-CREATE INDEX IF NOT EXISTS operation_memory_logs_tool_name_idx    ON operation_memory_logs(tool_name);
-CREATE INDEX IF NOT EXISTS operation_memory_logs_source_route_idx ON operation_memory_logs(source_route);
-CREATE INDEX IF NOT EXISTS operation_memory_logs_created_at_idx   ON operation_memory_logs(created_at);
+CREATE INDEX IF NOT EXISTS tabrix_browser_objects_lookup_idx
+  ON tabrix_browser_objects(site_family, page_model_key, object_type, updated_at);
+CREATE INDEX IF NOT EXISTS tabrix_browser_objects_lifecycle_idx
+  ON tabrix_browser_objects(lifecycle_state, source_freshness, updated_at);
+CREATE INDEX IF NOT EXISTS tabrix_browser_objects_tab_idx
+  ON tabrix_browser_objects(browser_context_key, window_id, tab_id, updated_at);
+CREATE INDEX IF NOT EXISTS tabrix_browser_objects_operability_idx
+  ON tabrix_browser_objects(can_tabrix_operate, owner_type, updated_at);
 `;
 
 /**
- * Experience schema.
- *
- * Co-located in the same `memory.db` file as Memory: Experience is a
- * derived view of Memory data, and keeping them in one DB keeps
- * projection reads/writes local to one SQLite handle.
- *
- * Same idempotency rules as Memory: every `CREATE … IF NOT EXISTS`.
- */
-export const EXPERIENCE_CREATE_TABLES_SQL = `
-CREATE TABLE IF NOT EXISTS experience_action_paths (
-  action_path_id           TEXT PRIMARY KEY,
-  page_role                TEXT NOT NULL,
-  intent_signature         TEXT NOT NULL,
-  step_sequence            TEXT NOT NULL,    -- JSON: ordered [{ toolName, status, historyRef }]
-  success_count            INTEGER NOT NULL DEFAULT 0,
-  failure_count            INTEGER NOT NULL DEFAULT 0,
-  last_used_at             TEXT,
-  -- Replay-outcome write-back fields. All nullable because
-  -- they are only populated once a replay (or a direct
-  -- experience_score_step call) has run against the row.
-  --   last_replay_at        : ISO 8601 timestamp the writer used.
-  --   last_replay_outcome   : last ClickObservedOutcome recorded.
-  --   last_replay_status    : projected {ok|failed} the writer
-  --                           chose via isClickSuccessOutcome.
-  --   composite_score_decayed : deterministic recency-decayed
-  --                             composite score (see
-  --                             composite-score.ts).
-  last_replay_at           TEXT,
-  last_replay_outcome      TEXT,
-  last_replay_status       TEXT,
-  composite_score_decayed  REAL,
-  created_at               TEXT NOT NULL,
-  updated_at               TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS experience_action_paths_role_intent_idx
-  ON experience_action_paths(page_role, intent_signature);
-CREATE INDEX IF NOT EXISTS experience_action_paths_last_used_at_idx
-  ON experience_action_paths(last_used_at);
--- Lets the chooser ORDER BY composite_score_decayed
--- without a full table scan. Partial index condition is safe under
--- SQLite; rows that have not been scored yet drop out of the index.
-CREATE INDEX IF NOT EXISTS experience_action_paths_composite_score_idx
-  ON experience_action_paths(composite_score_decayed)
-  WHERE composite_score_decayed IS NOT NULL;
-
-CREATE TABLE IF NOT EXISTS experience_locator_prefs (
-  locator_pref_id          TEXT PRIMARY KEY,
-  page_role                TEXT NOT NULL,
-  element_purpose          TEXT NOT NULL,
-  preferred_selector_kind  TEXT NOT NULL,    -- 'role' | 'text' | 'data-testid' | 'css'
-  preferred_selector       TEXT NOT NULL,
-  hit_count                INTEGER NOT NULL DEFAULT 0,
-  last_hit_at              TEXT,
-  created_at               TEXT NOT NULL,
-  updated_at               TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS experience_locator_prefs_role_purpose_idx
-  ON experience_locator_prefs(page_role, element_purpose);
-CREATE INDEX IF NOT EXISTS experience_locator_prefs_last_hit_at_idx
-  ON experience_locator_prefs(last_hit_at);
-`;
-
-/**
- * Knowledge schema (opt-in via TABRIX_POLICY_CAPABILITIES=api_knowledge).
+ * Knowledge schema.
  *
  * `knowledge_api_endpoints` is the storage side of "API Knowledge capture
  * v1": a deduplicated, redaction-only-metadata view of API endpoints that
@@ -293,11 +277,11 @@ CREATE INDEX IF NOT EXISTS experience_locator_prefs_last_hit_at_idx
  *    *keys* / shape, response content-type / size, and at most a small
  *    deterministic excerpt of the response shape. No raw header values,
  *    no Authorization, no Cookie, no body payloads.
- *  - `source_*` columns are informational pointers back into Memory; they
- *    are nullable on purpose so older rows survive Memory rotation.
+ *  - `source_*` columns are informational pointers back into the current
+ *    trace/object evidence surfaces.
  *
- * Idempotent CREATE: same pattern as `MEMORY_CREATE_TABLES_SQL` and
- * `EXPERIENCE_CREATE_TABLES_SQL`. Old DBs that pre-date this table simply
+ * Idempotent CREATE: same pattern as `EXPERIENCE_CREATE_TABLES_SQL`.
+ * Old DBs that pre-date this table simply
  * pick up the new table on next `openMemoryDb()`; no ALTER needed.
  */
 export const KNOWLEDGE_CREATE_TABLES_SQL = `
@@ -348,9 +332,9 @@ CREATE TABLE IF NOT EXISTS knowledge_api_endpoints (
   --   endpoint_source: closed enum
   --     observed | seed_adapter | manual_seed | unknown | deprecated_seed
   --     NULL is treated as 'unknown' on read; rowToEndpoint() derives
-  --     a back-compat value from the family column so legacy rows
-  --     written with family='github' surface as seed_adapter and rows
-  --     written with family='observed' surface as observed. The
+  --     a back-compat value from the family column so rows written with
+  --     family='observed' surface as observed and all other legacy rows
+  --     surface as unknown. The
   --     'deprecated_seed' value is the retirement-state writer's
   --     explicit way to express "this seed_adapter row has been
   --     superseded by an observed peer"; the seed row is NEVER deleted.
@@ -392,6 +376,11 @@ CREATE TABLE IF NOT EXISTS knowledge_api_endpoints (
   source_lineage_blob      TEXT,
   schema_version           INTEGER,
   last_failure_reason      TEXT,
+  -- Reuse outcomes for this exact endpoint_id. These counters are
+  -- operational metadata only; they contain no request/response data.
+  successful_use_count     INTEGER NOT NULL DEFAULT 0,
+  failed_use_count         INTEGER NOT NULL DEFAULT 0,
+  last_validated_at        TEXT,
   UNIQUE (site, endpoint_signature)
 );
 
@@ -425,7 +414,7 @@ CREATE INDEX IF NOT EXISTS knowledge_api_endpoints_last_seen_at_idx
  *
  * No personally identifying info: `intent_signature` is normalized
  * and already pre-redacted, `page_role` is a structural label, and
- * `site_family` is a closed enum. We do NOT
+ * `site_family` is a safe routing token. We do NOT
  * store the raw `intent` string to avoid leaking session content into
  * a long-horizon table.
  */
@@ -467,7 +456,13 @@ CREATE TABLE IF NOT EXISTS tabrix_choose_context_decisions (
   -- independently. Both NULLABLE so legacy rows + tests that
   -- pre-date these inputs stay valid.
   dispatcher_input_source      TEXT,
-  fallback_cause_v26           TEXT
+  fallback_cause_v26           TEXT,
+  -- Redacted copy of the artifacts returned to the AI for this
+  -- decision. This is audit-only lineage so acceptance can prove a
+  -- decision used a specific Experience recipe; it MUST NOT drive
+  -- routing. No raw page payloads, cookies, tokens, or request/response
+  -- bodies belong here.
+  selected_artifacts_blob      TEXT
 );
 
 CREATE INDEX IF NOT EXISTS tabrix_choose_context_decisions_strategy_idx
@@ -488,46 +483,118 @@ CREATE INDEX IF NOT EXISTS tabrix_choose_context_outcomes_recorded_at_idx
   ON tabrix_choose_context_outcomes(recorded_at);
 `;
 
-/**
- * Isolation telemetry — `experience_score_step` write-back warnings.
- *
- * Every row represents one Experience write-back attempt that the
- * runtime caught and isolated. Two callers write here:
- *  - per-step `experience_score_step` MCP handler (when the per-step
- *    counter delta SQL throws),
- *  - session-end `SessionCompositeScoreWriter` (when the composite
- *    score / aggregated-at update fails).
- *
- * Hard rules baked into the schema:
- *  - Append-only — no UPDATE / DELETE in the writer; auditors rely on
- *    full row history.
- *  - `payload_blob` is small JSON (cap enforced at write time) so the
- *    table stays bounded even under bridge-flap conditions.
- *  - No FK to `memory_sessions` / `experience_action_paths` because
- *    the warning has to outlive an aggressive Memory rotation.
- *  - The table exists regardless of capability state (idempotent
- *    CREATE) so a write that races a freshly-disabled persistence
- *    knob still has somewhere to land.
- */
-export const EXPERIENCE_WRITEBACK_WARNINGS_CREATE_TABLES_SQL = `
-CREATE TABLE IF NOT EXISTS experience_writeback_warnings (
-  warning_id        TEXT PRIMARY KEY,
-  source            TEXT NOT NULL,            -- 'experience_score_step' | 'session_composite_score'
-  action_path_id    TEXT,
-  step_index        INTEGER,
-  session_id        TEXT,
-  replay_id         TEXT,
-  observed_outcome  TEXT,
-  error_code        TEXT,
-  error_message     TEXT,
-  payload_blob      TEXT,                     -- JSON: { historyRef?, evidence?, components? } — bounded
-  created_at        TEXT NOT NULL
-);
+export const MEMORY_DB_ACTIVE_TABLE_MANIFEST = [
+  {
+    name: 'tabrix_memory_traces',
+    layer: 'mke_memory',
+    surface: 'mke_sidepanel',
+    purpose: 'Redacted AI-to-Tabrix tool-call trace source for MKE projections.',
+    retention: 'active',
+  },
+  {
+    name: 'tabrix_memory_feedback_events',
+    layer: 'mke_memory',
+    surface: 'mke_sidepanel',
+    purpose: 'Append-only AI feedback audit history for Memory traces.',
+    retention: 'active',
+  },
+  {
+    name: 'tabrix_knowledge_models',
+    layer: 'mke_knowledge',
+    surface: 'mke_sidepanel',
+    purpose: 'Page/object knowledge model that must be derived from Object Library facts.',
+    retention: 'projection_gap',
+  },
+  {
+    name: 'tabrix_experience_recipes',
+    layer: 'mke_experience',
+    surface: 'mke_sidepanel',
+    purpose: 'Template-only reusable recipe store derived from AI-approved Memory traces.',
+    retention: 'projection_gap',
+  },
+  {
+    name: 'tabrix_browser_objects',
+    layer: 'object_library',
+    surface: 'mke_sidepanel',
+    purpose: 'Current browser window/tab/page-object fact layer for lifecycle-aware operation.',
+    retention: 'active',
+  },
+  {
+    name: 'knowledge_api_endpoints',
+    layer: 'knowledge',
+    surface: 'mcp_routing',
+    purpose: 'Redacted API endpoint catalogue for data-source routing decisions.',
+    retention: 'active',
+  },
+  {
+    name: 'tabrix_choose_context_decisions',
+    layer: 'policy',
+    surface: 'execution_insights',
+    purpose: 'Chooser strategy decision telemetry for token-savings and routing audits.',
+    retention: 'active',
+  },
+  {
+    name: 'tabrix_choose_context_outcomes',
+    layer: 'policy',
+    surface: 'execution_insights',
+    purpose: 'Chooser decision outcome write-back for reuse/fallback quality metrics.',
+    retention: 'active',
+  },
+] as const;
 
-CREATE INDEX IF NOT EXISTS experience_writeback_warnings_source_idx
-  ON experience_writeback_warnings(source);
-CREATE INDEX IF NOT EXISTS experience_writeback_warnings_action_path_idx
-  ON experience_writeback_warnings(action_path_id);
-CREATE INDEX IF NOT EXISTS experience_writeback_warnings_created_at_idx
-  ON experience_writeback_warnings(created_at);
-`;
+export const MEMORY_DB_ACTIVE_TABLES = MEMORY_DB_ACTIVE_TABLE_MANIFEST.map((table) => table.name);
+
+export const MEMORY_DB_RETIRED_TABLES = [
+  {
+    name: 'memory_tasks',
+    retiredAt: '2026-06-11',
+    reason:
+      'Pre-launch task envelope table replaced by in-process execution context plus tabrix_memory_traces.',
+  },
+  {
+    name: 'memory_sessions',
+    retiredAt: '2026-06-11',
+    reason:
+      'Pre-launch session-history table replaced by tabrix_memory_traces; no legacy-user migration required before launch.',
+  },
+  {
+    name: 'memory_steps',
+    retiredAt: '2026-06-11',
+    reason: 'Pre-launch ordered-step table replaced by append-only tabrix_memory_traces records.',
+  },
+  {
+    name: 'memory_page_snapshots',
+    retiredAt: '2026-06-11',
+    reason:
+      'Pre-launch page snapshot table replaced by Object Library facts and memory trace observation blobs.',
+  },
+  {
+    name: 'memory_actions',
+    retiredAt: '2026-06-11',
+    reason:
+      'Pre-launch action evidence table replaced by memory trace request/result evidence and future trace-derived experience mining.',
+  },
+  {
+    name: 'operation_memory_logs',
+    retiredAt: '2026-06-11',
+    reason: 'Pre-launch operation-log table replaced by the richer tabrix_memory_traces schema.',
+  },
+  {
+    name: 'experience_locator_prefs',
+    retiredAt: '2026-06-11',
+    reason:
+      'Reserved locator-preference table had no production reader, writer, MCP API, or sidepanel surface.',
+  },
+  {
+    name: 'experience_action_paths',
+    retiredAt: '2026-06-11',
+    reason:
+      'Pre-launch action-path cache used system counters instead of real AI evaluation; replaced by AI-feedback-derived tabrix_experience_recipes.',
+  },
+  {
+    name: 'experience_writeback_warnings',
+    retiredAt: '2026-06-11',
+    reason:
+      'Pre-launch replay write-back diagnostics served retired experience_action_paths and experience_score_step.',
+  },
+] as const;

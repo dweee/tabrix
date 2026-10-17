@@ -5,7 +5,7 @@
  * MCP loop should drive a foreground `chrome_network_capture_*`
  * round-trip:
  *
- *   1. `learning_requested` (env opt-in) — ALWAYS wins, even when
+ *   1. `learning_requested` — ALWAYS wins, even when
  *      Knowledge has a high-confidence candidate. The point of a
  *      learning pass is to observe traffic; suppressing capture
  *      would defeat the purpose.
@@ -18,19 +18,12 @@
  *      foreground capture is the only way to seed the catalog.
  *
  * No SQLite, no MCP server: the chooser is run in-process with a
- * synthetic experience stub and a tiny in-memory `KnowledgeApi` to
+ * tiny in-memory `KnowledgeApi` to
  * exercise the four-state matrix without standing up persistence.
  */
 
 import { runTabrixChooseContext } from './choose-context';
-import type { ExperienceQueryService } from '../memory/experience';
 import type { KnowledgeApiRepository } from '../memory/knowledge/knowledge-api-repository';
-
-function emptyExperience(): ExperienceQueryService {
-  return {
-    suggestActionPaths: jest.fn().mockReturnValue([]),
-  } as unknown as ExperienceQueryService;
-}
 
 function emptyKnowledgeApi(): Pick<KnowledgeApiRepository, 'listBySite' | 'countAll'> &
   Partial<Pick<KnowledgeApiRepository, 'listScoredBySite'>> {
@@ -42,7 +35,7 @@ function emptyKnowledgeApi(): Pick<KnowledgeApiRepository, 'listBySite' | 'count
 }
 
 function knowledgeApiWithRows(
-  rows: Array<{ endpointSignature: string; usableForTask: boolean }>,
+  rows: Array<Record<string, unknown> & { endpointSignature: string; usableForTask: boolean }>,
 ): Pick<KnowledgeApiRepository, 'listBySite' | 'countAll'> &
   Partial<Pick<KnowledgeApiRepository, 'listScoredBySite'>> {
   return {
@@ -52,19 +45,44 @@ function knowledgeApiWithRows(
   };
 }
 
-const CAPS_API_KNOWLEDGE = { TABRIX_POLICY_CAPABILITIES: 'api_knowledge' } as const;
-
+function observedEndpoint(overrides: Record<string, unknown> = {}) {
+  return {
+    endpointId: 'observed-ep-1',
+    site: 'code.example',
+    family: 'observed',
+    method: 'GET',
+    urlPattern: 'code.example/search/items',
+    endpointSignature: 'GET code.example/search/items',
+    semanticTag: null,
+    statusClass: '2xx',
+    requestSummary: {
+      headerKeys: [],
+      queryKeys: ['q'],
+      bodyKeys: [],
+      hasAuth: false,
+      hasCookie: false,
+    },
+    responseSummary: { contentType: 'application/json', sizeBytes: 128, shape: { kind: 'object' } },
+    sourceSessionId: null,
+    sourceStepId: null,
+    sourceHistoryRef: null,
+    sampleCount: 2,
+    firstSeenAt: '2026-04-22T00:00:00.000Z',
+    lastSeenAt: '2026-04-22T00:01:00.000Z',
+    endpointSource: 'observed',
+    semanticType: 'search',
+    confidence: 0.9,
+    usableForTask: true,
+    fallbackReason: null,
+    ...overrides,
+  };
+}
 describe('runTabrixChooseContext — V26-FIX-02 observe-mode advisory', () => {
   it('high-confidence Knowledge candidate → observeMode=disabled / not_needed', () => {
     const result = runTabrixChooseContext(
-      { intent: '搜索 GitHub 上 AI助手 相关热门项目', url: 'https://github.com/search' },
+      { intent: '搜索 Workspace 上 AI助手 相关热门项目', url: 'https://code.example/search' },
       {
-        experience: emptyExperience(),
-        // No knowledgeApi rows needed — the api_knowledge candidate
-        // resolver fires on the URL alone for the GitHub search
-        // family, and that is what populates `apiCandidate`.
-        knowledgeApi: emptyKnowledgeApi(),
-        capabilityEnv: CAPS_API_KNOWLEDGE,
+        knowledgeApi: knowledgeApiWithRows([observedEndpoint()]),
       },
     );
     expect(result.status).toBe('ok');
@@ -72,33 +90,29 @@ describe('runTabrixChooseContext — V26-FIX-02 observe-mode advisory', () => {
     expect(result.observeReason).toBe('not_needed');
   });
 
-  it('Knowledge has rows but no usable candidate → background / confidence_low', () => {
+  it('observed Knowledge read intent → disabled / not_needed', () => {
     const result = runTabrixChooseContext(
-      // Generic GitHub repo file URL — no read-only API candidate
+      // Generic Workspace repo file URL — no read-only API candidate
       // fires (the intent has no search/list/issues vocabulary), but
       // the `listScoredBySite` stub returns a non-empty catalog so
       // `knowledgeCatalog` is populated.
-      { intent: 'read this file', url: 'https://github.com/tabrix/tabrix/blob/main/README.md' },
+      { intent: 'read this file', url: 'https://code.example/tabrix/tabrix/blob/main/README.md' },
       {
-        experience: emptyExperience(),
         knowledgeApi: knowledgeApiWithRows([
-          { endpointSignature: 'GET api.github.com/repos/{owner}/{repo}', usableForTask: true },
+          { endpointSignature: 'GET api.code.example/repos/{owner}/{repo}', usableForTask: true },
         ]),
-        capabilityEnv: CAPS_API_KNOWLEDGE,
       },
     );
     expect(result.status).toBe('ok');
-    expect(result.observeMode).toBe('background');
-    expect(result.observeReason).toBe('confidence_low');
+    expect(result.observeMode).toBe('disabled');
+    expect(result.observeReason).toBe('not_needed');
   });
 
-  it('non-GitHub URL with no Knowledge → foreground / knowledge_missing', () => {
+  it('non-Workspace URL with no Knowledge → foreground / knowledge_missing', () => {
     const result = runTabrixChooseContext(
       { intent: 'read article', url: 'https://news.ycombinator.com/item?id=1' },
       {
-        experience: emptyExperience(),
         knowledgeApi: emptyKnowledgeApi(),
-        capabilityEnv: CAPS_API_KNOWLEDGE,
       },
     );
     expect(result.status).toBe('ok');
@@ -110,11 +124,9 @@ describe('runTabrixChooseContext — V26-FIX-02 observe-mode advisory', () => {
     const result = runTabrixChooseContext(
       // Same input as the high-confidence candidate test above; the
       // learning override must still flip the advisory to foreground.
-      { intent: '搜索 GitHub 上 AI助手 相关热门项目', url: 'https://github.com/search' },
+      { intent: '搜索 Workspace 上 AI助手 相关热门项目', url: 'https://code.example/search' },
       {
-        experience: emptyExperience(),
         knowledgeApi: emptyKnowledgeApi(),
-        capabilityEnv: CAPS_API_KNOWLEDGE,
         learningModeRequested: true,
       },
     );
@@ -127,9 +139,7 @@ describe('runTabrixChooseContext — V26-FIX-02 observe-mode advisory', () => {
     const result = runTabrixChooseContext(
       { intent: '' },
       {
-        experience: emptyExperience(),
         knowledgeApi: null,
-        capabilityEnv: {},
       },
     );
     expect(result.status).toBe('invalid_input');

@@ -2,28 +2,6 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { buildPolicyDeniedPayload } from '../policy/phase0-opt-in';
 import { getBridgeSnapshot, type GenericFailurePayload } from './bridge-recovery';
 
-export function createCapabilityDeniedResult(toolName: string, capability: string): CallToolResult {
-  // Mirrors the experience_replay handler's `denied / capability_off`
-  // payload so callers do not have to branch on whether the gate
-  // fired pre- or post-handler.
-  return {
-    content: [
-      {
-        type: 'text' as const,
-        text: JSON.stringify({
-          status: 'denied',
-          evidenceRefs: [],
-          error: {
-            code: 'capability_off',
-            message: `Tool "${toolName}" requires the '${capability}' capability (set TABRIX_POLICY_CAPABILITIES=${capability} or =all)`,
-          },
-        }),
-      },
-    ],
-    isError: true,
-  };
-}
-
 export function createPolicyDeniedResult(toolName: string): CallToolResult {
   return {
     content: [
@@ -37,11 +15,25 @@ export function createPolicyDeniedResult(toolName: string): CallToolResult {
 }
 
 export function createErrorResult(text: string): CallToolResult {
+  let payloadText = text;
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (!parsed || typeof parsed !== 'object') {
+      payloadText = JSON.stringify(
+        buildGenericFailurePayload('TABRIX_TOOL_UNAVAILABLE', text, false),
+      );
+    }
+  } catch {
+    payloadText = JSON.stringify(
+      buildGenericFailurePayload('TABRIX_TOOL_UNAVAILABLE', text, false),
+    );
+  }
+
   return {
     content: [
       {
         type: 'text' as const,
-        text,
+        text: payloadText,
       },
     ],
     isError: true,

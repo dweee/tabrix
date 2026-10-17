@@ -1,11 +1,13 @@
 import { type Tool } from '@modelcontextprotocol/sdk/types.js';
+import { MAX_TABRIX_SITE_ID_CHARS, TABRIX_SITE_ID_PATTERN } from '../site';
 import { TOOL_NAMES } from './names';
+import { TASK_SESSION_ID_PROPERTY } from './schemas-browser';
 
 export const CONTEXT_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.CONTEXT.CHOOSE,
     description:
-      'Tabrix MKEP context selector. Given an `intent` (free text) and optional `url` / `pageRole` / `siteId`, deterministically pick which existing native asset to use as context: `experience_reuse` (a previously-successful action path), `knowledge_light` (captured site API catalog / endpoint evidence), or `read_page_required` (fallback: caller should issue `chrome_read_page`). Pure SELECT against local SQLite. Unsupported or uncertain inputs resolve to `read_page_required`.',
+      'Choose the cheapest useful context for an AI browser task. Given an intent and optional page identity, Tabrix returns reusable Experience (`experience_reuse`) only after current-page validation, reusable local Knowledge (`knowledge_light`), or tells the caller to read the page (`read_page_required`). Unsupported, uncertain, or stale Experience inputs resolve to `read_page_required` and may include `reuseBlockedBy`.',
     annotations: {
       readOnlyHint: true,
       idempotentHint: true,
@@ -13,10 +15,11 @@ export const CONTEXT_SCHEMAS: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {
+        taskSessionId: TASK_SESSION_ID_PROPERTY,
         intent: {
           type: 'string',
           description:
-            'Caller intent in natural language. Trimmed and matched on the same normalized signature as `experience_suggest_plan`.intent so a hit there is also a hit here. Empty string is rejected.',
+            'Caller intent in natural language. Trimmed and normalized so repeated task wording stays stable. Empty string is rejected.',
           minLength: 1,
           maxLength: 1024,
         },
@@ -28,14 +31,15 @@ export const CONTEXT_SCHEMAS: Tool[] = [
         pageRole: {
           type: 'string',
           description:
-            'Optional `pageRole` filter (e.g. `repo_home`, `issues_list`). Forwarded to the Experience lookup verbatim.',
+            'Optional `pageRole` filter (e.g. `search_results`, `content_detail`). Used to narrow the local context selection.',
           maxLength: 128,
         },
         siteId: {
           type: 'string',
           description:
-            'Optional explicit site-family override. Currently only honours `"github"`; other values are ignored (URL-derived family is used instead).',
-          enum: ['github'],
+            'Optional explicit site-family token. Must match the shared safe-token contract (lowercase letters/digits plus dot, underscore, or hyphen). Unsupported sites resolve through safe fallback paths.',
+          maxLength: MAX_TABRIX_SITE_ID_CHARS,
+          pattern: TABRIX_SITE_ID_PATTERN.source,
         },
       },
       required: ['intent'],
@@ -44,7 +48,7 @@ export const CONTEXT_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.CONTEXT.RECORD_OUTCOME,
     description:
-      "Outcome write-back for `tabrix_choose_context`. Closes the loop on whether the suggested strategy actually saved a `chrome_read_page` round-trip. Pure-INSERT P0: appends one telemetry row keyed by `decisionId` and never reads, mutates, or replays anything else. `outcome` is one of `'reuse'` (acted on the suggestion), `'fallback'` (had to fall back to `chrome_read_page` anyway), `'completed'` (the whole task completed on top of the suggestion), `'retried'` (re-issued `tabrix_choose_context`). Returns `{ status: 'unknown_decision' }` when the id has no matching row so the caller can distinguish a lost decision from a permission / transport error.",
+      "Record whether the previous `tabrix_choose_context` suggestion helped the AI avoid an unnecessary page read. `outcome` is one of `'reuse'`, `'fallback'`, `'completed'`, or `'retried'`. Unknown decision ids return `{ status: 'unknown_decision' }`.",
     annotations: {
       readOnlyHint: false,
       idempotentHint: false,

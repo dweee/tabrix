@@ -40,7 +40,6 @@ import type {
   LayerDispatchReason,
   LayerSourceRoute,
   ReadPageRequestedLayer,
-  ReplayEligibilityBlockReason,
   TabrixChooseContextOutcome,
 } from '@tabrix/shared';
 
@@ -74,13 +73,6 @@ export interface RecordChooseContextDecisionInput {
   tokensSavedEstimate?: number | null;
   /** Telemetry-only knowledge family hint. MUST NOT drive routing. */
   knowledgeEndpointFamily?: string | null;
-  // ---------------------------------------------------------------
-  // Ranked-replay audit fields persisted for release analysis.
-  // ---------------------------------------------------------------
-  rankedCandidateCount?: number | null;
-  replayEligibleBlockedBy?: ReplayEligibilityBlockReason | null;
-  replayFallbackDepth?: number | 'cold' | null;
-  // ---------------------------------------------------------------
   // Honest dispatcher inputs. Both optional — older callers and tests keep
   // working unchanged. The
   // `dispatcher_input_source` column is closed-enum at the SQL
@@ -90,6 +82,21 @@ export interface RecordChooseContextDecisionInput {
   // ---------------------------------------------------------------
   dispatcherInputSource?: string | null;
   fallbackCauseV26?: string | null;
+  /**
+   * Redacted audit pointers for artifacts returned by the chooser.
+   * Stores IDs and lightweight classification only; never raw page content,
+   * cookies, headers, recipe steps, or success-check payloads.
+   */
+  selectedArtifacts?: SelectedChooseContextArtifactAudit[] | null;
+}
+
+export interface SelectedChooseContextArtifactAudit {
+  kind: string;
+  ref: string;
+  recipeSchema?: string | null;
+  siteFamily?: string | null;
+  pageRole?: string | null;
+  taskSignature?: string | null;
 }
 
 export interface RecordChooseContextOutcomeInput {
@@ -99,8 +106,23 @@ export interface RecordChooseContextOutcomeInput {
   recordedAt: string;
 }
 
+export interface ChooseContextArtifactUsageSignal {
+  successful: boolean;
+  adopted: boolean;
+  selectedArtifacts: SelectedChooseContextArtifactAudit[];
+}
+
 export type RecordChooseContextOutcomeResult =
-  | { status: 'ok'; outcomeId: string }
+  | {
+      status: 'ok';
+      outcomeId: string;
+      /**
+       * Present only for the first definitive outcome of a decision.
+       * The caller must use this explicit AI write-back signal rather than
+       * inferring library success from browser/tool execution.
+       */
+      artifactUsage?: ChooseContextArtifactUsageSignal;
+    }
   | { status: 'unknown_decision' };
 
 export interface ChooseContextDecisionRow {
@@ -134,6 +156,54 @@ interface DecisionDbRow {
   strategy: string;
   fallback_strategy: string | null;
   created_at: string;
+  selected_artifacts_blob: string | null;
+}
+
+function serializeSelectedArtifacts(
+  selectedArtifacts: SelectedChooseContextArtifactAudit[] | null | undefined,
+): string | null {
+  const items = Array.isArray(selectedArtifacts)
+    ? selectedArtifacts.filter(
+        (item) =>
+          typeof item.kind === 'string' && item.kind.length > 0 && typeof item.ref === 'string',
+      )
+    : [];
+  if (items.length === 0) {
+    return null;
+  }
+  return JSON.stringify({
+    schema: 'tabrix_choose_context_selected_artifacts_v1',
+    items,
+  });
+}
+
+function deserializeSelectedArtifacts(
+  blobValue: string | null,
+): SelectedChooseContextArtifactAudit[] {
+  if (!blobValue) return [];
+  try {
+    const payload = JSON.parse(blobValue) as {
+      schema?: unknown;
+      items?: unknown;
+    };
+    if (
+      payload.schema !== 'tabrix_choose_context_selected_artifacts_v1' ||
+      !Array.isArray(payload.items)
+    ) {
+      return [];
+    }
+    return payload.items.filter(
+      (item): item is SelectedChooseContextArtifactAudit =>
+        Boolean(item) &&
+        typeof item === 'object' &&
+        typeof (item as SelectedChooseContextArtifactAudit).kind === 'string' &&
+        (item as SelectedChooseContextArtifactAudit).kind.length > 0 &&
+        typeof (item as SelectedChooseContextArtifactAudit).ref === 'string' &&
+        (item as SelectedChooseContextArtifactAudit).ref.length > 0,
+    );
+  } catch {
+    return [];
+  }
 }
 
 interface OutcomeAggRow {
@@ -167,13 +237,6 @@ export class ChooseContextTelemetryRepository {
    * Throws on PK collision so we never silently drop a decision id.
    */
   recordDecision(input: RecordChooseContextDecisionInput): void {
-    const blockedByValue = input.replayEligibleBlockedBy ?? null;
-    const fallbackDepthValue =
-      input.replayFallbackDepth === undefined || input.replayFallbackDepth === null
-        ? null
-        : input.replayFallbackDepth === 'cold'
-          ? -1 // sentinel for "no candidates surfaced"; positive depths stay 1:1 with candidate count
-          : input.replayFallbackDepth;
     this.db
       .prepare(
         `INSERT INTO tabrix_choose_context_decisions (
@@ -183,8 +246,8 @@ export class ChooseContextTelemetryRepository {
            token_estimate_chosen, token_estimate_full_read, tokens_saved_estimate,
            knowledge_endpoint_family,
            ranked_candidate_count, replay_eligible_blocked_by, replay_fallback_depth,
-           dispatcher_input_source, fallback_cause_v26
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           dispatcher_input_source, fallback_cause_v26, selected_artifacts_blob
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         input.decisionId,
@@ -202,11 +265,12 @@ export class ChooseContextTelemetryRepository {
         input.tokenEstimateFullRead ?? null,
         input.tokensSavedEstimate ?? null,
         input.knowledgeEndpointFamily ?? null,
-        input.rankedCandidateCount ?? null,
-        blockedByValue,
-        fallbackDepthValue,
+        null,
+        null,
+        null,
         input.dispatcherInputSource ?? null,
         input.fallbackCauseV26 ?? null,
+        serializeSelectedArtifacts(input.selectedArtifacts),
       );
   }
 
@@ -215,28 +279,68 @@ export class ChooseContextTelemetryRepository {
    * when the `decisionId` does not exist so the MCP layer can
    * distinguish "decision id we forgot about" from "permission denied".
    */
-  recordOutcome(input: RecordChooseContextOutcomeInput): RecordChooseContextOutcomeResult {
-    // We use a dedicated SELECT rather than relying on the FK
-    // constraint to fire because better-sqlite3 surfaces FK errors as
-    // generic SqliteError, which we would have to string-match. An
-    // explicit existence probe is one extra cheap query and gives the
-    // caller a clean structural status code.
-    const exists = this.db
-      .prepare(`SELECT 1 AS x FROM tabrix_choose_context_decisions WHERE decision_id = ?`)
-      .get(input.decisionId) as { x: number } | undefined;
-    if (!exists) {
-      return { status: 'unknown_decision' };
-    }
+  recordOutcome(
+    input: RecordChooseContextOutcomeInput,
+    applyArtifactUsage?: (signal: ChooseContextArtifactUsageSignal) => void,
+  ): RecordChooseContextOutcomeResult {
+    const record = this.db.transaction((): RecordChooseContextOutcomeResult => {
+      // The decision probe and prior-outcome check share the insert
+      // transaction so one decision cannot emit duplicate library-use signals.
+      const decision = this.db
+        .prepare(
+          `SELECT selected_artifacts_blob
+             FROM tabrix_choose_context_decisions
+            WHERE decision_id = ?`,
+        )
+        .get(input.decisionId) as { selected_artifacts_blob: string | null } | undefined;
+      if (!decision) {
+        return { status: 'unknown_decision' };
+      }
 
-    const outcomeId = randomUUID();
-    this.db
-      .prepare(
-        `INSERT INTO tabrix_choose_context_outcomes (
-           outcome_id, decision_id, outcome, recorded_at
-         ) VALUES (?, ?, ?, ?)`,
-      )
-      .run(outcomeId, input.decisionId, input.outcome, input.recordedAt);
-    return { status: 'ok', outcomeId };
+      const priorDefinitive = this.db
+        .prepare(
+          `SELECT COUNT(*) AS count
+             FROM tabrix_choose_context_outcomes
+            WHERE decision_id = ?
+              AND outcome IN ('reuse', 'fallback', 'completed', 'retried')`,
+        )
+        .get(input.decisionId) as { count: number };
+
+      const outcomeId = randomUUID();
+      this.db
+        .prepare(
+          `INSERT INTO tabrix_choose_context_outcomes (
+             outcome_id, decision_id, outcome, recorded_at
+           ) VALUES (?, ?, ?, ?)`,
+        )
+        .run(outcomeId, input.decisionId, input.outcome, input.recordedAt);
+
+      if (priorDefinitive.count > 0) {
+        return { status: 'ok', outcomeId };
+      }
+
+      const selectedArtifacts = deserializeSelectedArtifacts(decision.selected_artifacts_blob);
+      if (selectedArtifacts.length === 0) {
+        return { status: 'ok', outcomeId };
+      }
+
+      const successful = input.outcome === 'reuse' || input.outcome === 'completed';
+      const artifactUsage = {
+        successful,
+        adopted: successful,
+        selectedArtifacts,
+      };
+      // The callback writes to repositories backed by the same SQLite handle.
+      // Running it inside this transaction prevents a persisted telemetry
+      // outcome from claiming success when the four-library update failed.
+      applyArtifactUsage?.(artifactUsage);
+      return {
+        status: 'ok',
+        outcomeId,
+        artifactUsage,
+      };
+    });
+    return record();
   }
 
   findDecision(decisionId: string): ChooseContextDecisionRow | null {
@@ -318,9 +422,9 @@ export class ChooseContextTelemetryRepository {
   // All methods below return UI-shaped DTOs that the
   // `/execution/**` HTTP routes echo verbatim. They are pure reads
   // off the existing `tabrix_choose_context_decisions` and
-  // `tabrix_choose_context_outcomes` tables — no joins to
-  // `memory_sessions`, no pulls from `memory_steps.tool_input`,
-  // and no exposure of raw `intent` text. The intent_signature is
+  // `tabrix_choose_context_outcomes` tables — no joins to retired
+  // runtime-history tables and no exposure of raw `intent` text.
+  // The intent_signature is
   // already structurally normalized before persistence so
   // it is safe to expose as a UI chip.
   // ============================================================
@@ -427,33 +531,11 @@ export class ChooseContextTelemetryRepository {
       }
     }
 
-    const lastReplayRow = this.db
-      .prepare(
-        `SELECT d.decision_id AS decisionId,
-                d.created_at  AS createdAt,
-                (SELECT o.outcome
-                   FROM tabrix_choose_context_outcomes o
-                  WHERE o.decision_id = d.decision_id
-                  ORDER BY o.recorded_at DESC, o.outcome_id DESC
-                  LIMIT 1)   AS outcome
-           FROM tabrix_choose_context_decisions d
-          WHERE d.strategy = 'experience_replay'
-          ORDER BY d.created_at DESC, d.decision_id DESC
-          LIMIT 1`,
-      )
-      .get() as { decisionId: string; createdAt: string; outcome: string | null } | undefined;
-
     return {
       decisionCount: totals?.decisionCount ?? 0,
       tokensSavedEstimateSum: totals?.tokensSavedEstimateSum ?? 0,
       layerCounts,
-      lastReplay: lastReplayRow
-        ? {
-            decisionId: lastReplayRow.decisionId,
-            createdAt: lastReplayRow.createdAt,
-            outcome: (lastReplayRow.outcome ?? null) as TabrixChooseContextOutcome | null,
-          }
-        : null,
+      lastReplay: null,
     };
   }
 
@@ -557,9 +639,9 @@ export class ChooseContextTelemetryRepository {
 
     const sourceRouteCounts: ExecutionReliabilitySignalSummary['sourceRouteCounts'] = {
       read_page_required: 0,
-      experience_replay_skip_read: 0,
       knowledge_supported_read: 0,
       dispatcher_fallback_safe: 0,
+      experience_reuse: 0,
       unknown: 0,
     };
     const routeRows = this.db
@@ -573,9 +655,9 @@ export class ChooseContextTelemetryRepository {
       const key = (row.sourceRoute ?? 'unknown') as LayerSourceRoute | 'unknown';
       if (
         key === 'read_page_required' ||
-        key === 'experience_replay_skip_read' ||
         key === 'knowledge_supported_read' ||
         key === 'dispatcher_fallback_safe' ||
+        key === 'experience_reuse' ||
         key === 'unknown'
       ) {
         sourceRouteCounts[key] = (sourceRouteCounts[key] ?? 0) + row.n;

@@ -1,0 +1,672 @@
+[
+  {
+    "file": "app/native-server/src/daemon-entry.ts",
+    "line": 14,
+    "text": "catch { // stderr may be closed; nothing we can do }"
+  },
+  {
+    "file": "app/native-server/src/daemon-entry.ts",
+    "line": 24,
+    "text": "catch { // ignore shutdown errors }"
+  },
+  {
+    "file": "app/native-server/src/file-handler.ts",
+    "line": 242,
+    "text": "catch { // Invalid URL, fall through to generate random name }"
+  },
+  {
+    "file": "app/native-server/src/host-config.ts",
+    "line": 51,
+    "text": "catch { // best-effort; if home dir is unwritable, fall back to in-memory }"
+  },
+  {
+    "file": "app/native-server/src/mcp/bridge-recovery.ts",
+    "line": 157,
+    "text": "catch { // Ignore unref errors. }"
+  },
+  {
+    "file": "app/native-server/src/mcp/bridge-recovery.ts",
+    "line": 314,
+    "text": "catch { // Fall through to a failed reconnect attempt. }"
+  },
+  {
+    "file": "app/native-server/src/mcp/close-tabs-hygiene-evidence.ts",
+    "line": 150,
+    "text": "catch { // Not JSON; skip. }"
+  },
+  {
+    "file": "app/native-server/src/mcp/mcp-legacy-action-result.ts",
+    "line": 20,
+    "text": "catch { // Fall through and wrap the legacy text result. }"
+  },
+  {
+    "file": "app/native-server/src/mcp/mcp-server-stdio.ts",
+    "line": 142,
+    "text": "catch { // ignore close errors }"
+  },
+  {
+    "file": "app/native-server/src/mcp/register-tools.ts",
+    "line": 378,
+    "text": "catch { // Non-JSON error payload — fall back to the generic summary. }"
+  },
+  {
+    "file": "app/native-server/src/mcp/task-context-key.ts",
+    "line": 206,
+    "text": "catch { // Not JSON — skip. }"
+  },
+  {
+    "file": "app/native-server/src/mcp/task-context-key.ts",
+    "line": 259,
+    "text": "catch { // Not JSON — skip. }"
+  },
+  {
+    "file": "app/native-server/src/memory/knowledge/api-knowledge-capture.ts",
+    "line": 611,
+    "text": "catch { // Non-JSON bodies are intentionally skipped. }"
+  },
+  {
+    "file": "app/native-server/src/native-messaging-host.ts",
+    "line": 351,
+    "text": "catch (error: any) { // Catch JSON.stringify or Buffer operation errors // If preparation stage fails, associated request may never be sent // Need to consider whether to reject corresponding Promise (if called within sendRequestToExtensionAndWait) }"
+  },
+  {
+    "file": "app/native-server/src/scripts/daemon.ts",
+    "line": 71,
+    "text": "catch { // ignore }"
+  },
+  {
+    "file": "app/native-server/src/scripts/daemon.ts",
+    "line": 192,
+    "text": "catch { // already dead }"
+  },
+  {
+    "file": "app/native-server/src/scripts/daemon.ts",
+    "line": 310,
+    "text": "catch { // may not be loaded }"
+  },
+  {
+    "file": "app/native-server/src/scripts/daemon.ts",
+    "line": 322,
+    "text": "catch { // may not be enabled }"
+  },
+  {
+    "file": "app/native-server/src/scripts/daemon.ts",
+    "line": 330,
+    "text": "catch { // best effort }"
+  },
+  {
+    "file": "app/native-server/src/scripts/doctor.ts",
+    "line": 488,
+    "text": "catch { // ignore }"
+  },
+  {
+    "file": "app/native-server/src/scripts/doctor.ts",
+    "line": 573,
+    "text": "catch { // ignore }"
+  },
+  {
+    "file": "app/native-server/src/scripts/mcp-inspect.ts",
+    "line": 265,
+    "text": "catch { // Session cleanup is best-effort after the command result has been produced. }"
+  },
+  {
+    "file": "app/native-server/src/scripts/mcp-inspect.ts",
+    "line": 268,
+    "text": "catch { // Session cleanup is best-effort after the command result has been produced. }"
+  },
+  {
+    "file": "app/native-server/src/scripts/report.ts",
+    "line": 480,
+    "text": "catch { // ignore }"
+  },
+  {
+    "file": "app/native-server/src/scripts/report.ts",
+    "line": 624,
+    "text": "catch { // ignore }"
+  },
+  {
+    "file": "app/native-server/src/scripts/runtime-consistency.ts",
+    "line": 133,
+    "text": "catch { // Try next candidate. }"
+  },
+  {
+    "file": "app/native-server/src/scripts/smoke.ts",
+    "line": 1963,
+    "text": "catch { // Ignore cleanup failures. }"
+  },
+  {
+    "file": "app/native-server/src/scripts/smoke.ts",
+    "line": 1970,
+    "text": "catch { // Ignore cleanup failures. }"
+  },
+  {
+    "file": "app/native-server/src/scripts/smoke.ts",
+    "line": 1977,
+    "text": "catch { // Ignore cleanup failures. }"
+  },
+  {
+    "file": "app/native-server/src/scripts/smoke.ts",
+    "line": 1983,
+    "text": "catch { // Ignore cleanup failures. }"
+  },
+  {
+    "file": "app/native-server/src/scripts/stdio-smoke.ts",
+    "line": 115,
+    "text": "catch { // Best-effort cleanup. }"
+  },
+  {
+    "file": "app/native-server/src/scripts/utils.ts",
+    "line": 291,
+    "text": "catch { // ignore }"
+  },
+  {
+    "file": "app/native-server/src/scripts/utils.ts",
+    "line": 416,
+    "text": "catch { // ignore malformed Secure Preferences here; doctor surfaces parsing issues separately }"
+  },
+  {
+    "file": "app/native-server/src/scripts/utils.ts",
+    "line": 451,
+    "text": "catch { // ignore }"
+  },
+  {
+    "file": "app/native-server/src/server/auth.ts",
+    "line": 89,
+    "text": "catch { // Best effort — if home dir is read-only, token still works in memory }"
+  },
+  {
+    "file": "app/native-server/src/server/bridge-command-channel.ts",
+    "line": 51,
+    "text": "catch { // ignore }"
+  },
+  {
+    "file": "app/native-server/src/server/bridge-command-channel.ts",
+    "line": 56,
+    "text": "catch { // ignore }"
+  },
+  {
+    "file": "app/native-server/src/server/bridge-command-channel.ts",
+    "line": 116,
+    "text": "catch { // ignore }"
+  },
+  {
+    "file": "app/native-server/src/server/bridge-command-channel.ts",
+    "line": 207,
+    "text": "catch { // ignore }"
+  },
+  {
+    "file": "app/native-server/src/server/bridge-command-channel.ts",
+    "line": 259,
+    "text": "catch { // ingestBridgeObservation is best-effort. Anything that escapes // is intentionally swallowed: the bridge socket must keep // accepting commands even if a producer-side schema bug ships. }"
+  },
+  {
+    "file": "app/native-server/src/server/bridge-command-channel.ts",
+    "line": 270,
+    "text": "catch { // ignore }"
+  },
+  {
+    "file": "app/native-server/src/server/index.ts",
+    "line": 75,
+    "text": "catch { // ignore }"
+  },
+  {
+    "file": "app/native-server/src/server/index.ts",
+    "line": 80,
+    "text": "catch { // ignore }"
+  },
+  {
+    "file": "app/native-server/src/server/session-registry.ts",
+    "line": 170,
+    "text": "catch { // Ignore transport cleanup failures during disconnect/teardown. }"
+  },
+  {
+    "file": "app/native-server/src/server/session-registry.ts",
+    "line": 175,
+    "text": "catch { // Ignore MCP server cleanup failures during disconnect/teardown. }"
+  },
+  {
+    "file": "app/native-server/src/server/session-registry.ts",
+    "line": 224,
+    "text": "catch { // Ignore transport cleanup failures during shutdown. }"
+  },
+  {
+    "file": "app/native-server/src/test/setup-node-compat.ts",
+    "line": 53,
+    "text": "catch { // ignore }"
+  },
+  {
+    "file": "app/native-server/src/test/setup-node-compat.ts",
+    "line": 58,
+    "text": "catch { // ignore }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/background/browser-world-inventory.ts",
+    "line": 679,
+    "text": "catch { // BrowserWorld can recover from the other storage area, or retry on the next resync. }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/background/browser-world-inventory.ts",
+    "line": 695,
+    "text": "catch { // BrowserWorld must keep running even if extension storage is temporarily unavailable. }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/background/browser-world-inventory.ts",
+    "line": 1523,
+    "text": "catch { // Best-effort detach for tests and service-worker restart. }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/background/keepalive/offscreen-keepalive.ts",
+    "line": 301,
+    "text": "catch { // Port may already be disconnected. }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/background/keepalive/offscreen-keepalive.ts",
+    "line": 389,
+    "text": "catch { // Best-effort: Offscreen document may not be ready yet. }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/background/native-host.ts",
+    "line": 342,
+    "text": "catch { // Ignore }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/background/native-host.ts",
+    "line": 457,
+    "text": "catch { // Ignore }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/background/native-host.ts",
+    "line": 796,
+    "text": "catch { // Ignore and still try HTTP heartbeat below for compatibility. }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/background/native-host.ts",
+    "line": 816,
+    "text": "catch { // Best-effort only: the daemon or local HTTP server may not be ready yet. }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/background/native-host.ts",
+    "line": 1541,
+    "text": "catch { // Ignore }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/background/tools/browser/bookmark.ts",
+    "line": 90,
+    "text": "catch (e) { // do nothing, try to parse as path string }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/background/tools/browser/click-verifier.ts",
+    "line": 164,
+    "text": "catch { // ignore }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/background/tools/browser/click-verifier.ts",
+    "line": 198,
+    "text": "catch { // Keep the best previously observed tab, if any. }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/background/tools/browser/common.ts",
+    "line": 176,
+    "text": "catch { // Fall through to the normal last-focused window path. }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/background/tools/browser/computer.ts",
+    "line": 427,
+    "text": "catch { // Best effort - continue even if scroll fails }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/background/tools/browser/computer.ts",
+    "line": 472,
+    "text": "catch { // Best effort - continue even if scroll fails }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/background/tools/browser/computer.ts",
+    "line": 498,
+    "text": "catch (e) { // fall through to error handling below }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/background/tools/browser/computer.ts",
+    "line": 690,
+    "text": "catch (e) { // ignore and use provided coordinates }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/background/tools/browser/computer.ts",
+    "line": 717,
+    "text": "catch (e) { // ignore }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/background/tools/browser/computer.ts",
+    "line": 839,
+    "text": "catch { // ignore }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/background/tools/browser/computer.ts",
+    "line": 851,
+    "text": "catch { // ignore }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/background/tools/browser/computer.ts",
+    "line": 918,
+    "text": "catch { // ignore }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/background/tools/browser/console-buffer.ts",
+    "line": 440,
+    "text": "catch { // best effort }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/background/tools/browser/console-buffer.ts",
+    "line": 445,
+    "text": "catch { // best effort }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/background/tools/browser/dialog-prearm.ts",
+    "line": 22,
+    "text": "catch { // best-effort cleanup }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/background/tools/browser/dialog-prearm.ts",
+    "line": 35,
+    "text": "catch { // Page.enable may fail when the page is already transitioning; keep the session attached anyway. }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/background/tools/browser/dialog-prearm.ts",
+    "line": 39,
+    "text": "catch { // Do not fail the click path if debugger attach/prearm is unavailable. }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/background/tools/browser/gif-auto-capture.ts",
+    "line": 265,
+    "text": "catch { // Ignore }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/background/tools/browser/gif-auto-capture.ts",
+    "line": 348,
+    "text": "catch { // Ignore }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/background/tools/browser/gif-auto-capture.ts",
+    "line": 413,
+    "text": "catch { // Ignore errors from previous capture }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/background/tools/browser/interaction.ts",
+    "line": 946,
+    "text": "catch { // ignore }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/background/tools/browser/interaction.ts",
+    "line": 1087,
+    "text": "catch { // ignore }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/background/tools/browser/interaction.ts",
+    "line": 1640,
+    "text": "catch { // best-effort }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/background/tools/browser/network-capture.ts",
+    "line": 43,
+    "text": "catch { // If the underlying tool didn't return JSON, keep it as-is }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/background/tools/browser/performance.ts",
+    "line": 151,
+    "text": "catch { // ignore, fallback will apply }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/background/tools/browser/performance.ts",
+    "line": 168,
+    "text": "catch { // ignore }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/background/tools/browser/performance.ts",
+    "line": 217,
+    "text": "catch { // ignore }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/background/tools/browser/performance.ts",
+    "line": 240,
+    "text": "catch { // best effort; ignore if fails }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/background/tools/browser/performance.ts",
+    "line": 250,
+    "text": "catch { // ignore }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/background/tools/browser/performance.ts",
+    "line": 319,
+    "text": "catch { // ignore }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/background/tools/browser/performance.ts",
+    "line": 324,
+    "text": "catch { // ignore }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/background/tools/browser/performance.ts",
+    "line": 454,
+    "text": "catch (e) { // Fallback to lightweight analysis below }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/background/tools/browser/read-page.ts",
+    "line": 264,
+    "text": "catch { /* fall through to 'none' */ }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/background/tools/browser/read-page.ts",
+    "line": 1025,
+    "text": "catch { // Expected when the fallback helper has not been injected on this page yet. }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/background/tools/browser/screenshot.ts",
+    "line": 355,
+    "text": "catch { // ignore }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/background/tools/browser/web-fetcher.ts",
+    "line": 598,
+    "text": "catch { // The user may close the tab after extraction; keep the metadata already captured. }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/offscreen/keepalive.ts",
+    "line": 208,
+    "text": "catch { // Ignore }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/offscreen/keepalive.ts",
+    "line": 248,
+    "text": "catch { // Ignore }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/popup/App.vue",
+    "line": 673,
+    "text": "catch { // best-effort }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/popup/App.vue",
+    "line": 1007,
+    "text": "catch { // ignore }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/popup/App.vue",
+    "line": 1015,
+    "text": "catch { // ignore }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/popup/App.vue",
+    "line": 1499,
+    "text": "catch { /* best-effort local preference restore */ }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/popup/components/TokenManagementPage.vue",
+    "line": 268,
+    "text": "catch { /* ignore */ }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/shared/composables/usePopupTheme.ts",
+    "line": 62,
+    "text": "catch { // ignore persistence errors in non-DOM contexts }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/sidepanel/tabs/MkeDataTab.vue",
+    "line": 347,
+    "text": "catch { // URL state is a test/deep-link convenience; UI tab state remains authoritative. }"
+  },
+  {
+    "file": "app/chrome-extension/entrypoints/sidepanel/utils/server-error.ts",
+    "line": 44,
+    "text": "catch { // ignore non-json response }"
+  },
+  {
+    "file": "app/chrome-extension/inject-scripts/accessibility-tree-helper.js",
+    "line": 220,
+    "text": "catch (_) { /* ignore */ }"
+  },
+  {
+    "file": "app/chrome-extension/inject-scripts/accessibility-tree-helper.js",
+    "line": 233,
+    "text": "catch (_) { /* ignore */ }"
+  },
+  {
+    "file": "app/chrome-extension/inject-scripts/accessibility-tree-helper.js",
+    "line": 246,
+    "text": "catch (_) { /* ignore */ }"
+  },
+  {
+    "file": "app/chrome-extension/inject-scripts/accessibility-tree-helper.js",
+    "line": 289,
+    "text": "catch (_) { /* ignore */ }"
+  },
+  {
+    "file": "app/chrome-extension/inject-scripts/accessibility-tree-helper.js",
+    "line": 369,
+    "text": "catch (_) { /* ignore */ }"
+  },
+  {
+    "file": "app/chrome-extension/inject-scripts/click-helper.js",
+    "line": 245,
+    "text": "catch { /* best-effort click sensing fallback */ }"
+  },
+  {
+    "file": "app/chrome-extension/inject-scripts/click-helper.js",
+    "line": 558,
+    "text": "catch (e) { // ignore }"
+  },
+  {
+    "file": "app/chrome-extension/inject-scripts/click-helper.js",
+    "line": 885,
+    "text": "catch { // Detached body edge case — treat the observer as absent rather than crash. }"
+  },
+  {
+    "file": "app/chrome-extension/inject-scripts/click-helper.js",
+    "line": 934,
+    "text": "catch { // ignore }"
+  },
+  {
+    "file": "app/chrome-extension/inject-scripts/click-helper.js",
+    "line": 1167,
+    "text": "catch { /* best-effort click sensing fallback */ }"
+  },
+  {
+    "file": "app/chrome-extension/inject-scripts/click-helper.js",
+    "line": 1175,
+    "text": "catch { /* best-effort click sensing fallback */ }"
+  },
+  {
+    "file": "app/chrome-extension/inject-scripts/click-helper.js",
+    "line": 1180,
+    "text": "catch { /* best-effort click sensing fallback */ }"
+  },
+  {
+    "file": "app/chrome-extension/inject-scripts/click-helper.js",
+    "line": 1185,
+    "text": "catch { /* best-effort click sensing fallback */ }"
+  },
+  {
+    "file": "app/chrome-extension/inject-scripts/click-helper.js",
+    "line": 1191,
+    "text": "catch { /* best-effort click sensing fallback */ }"
+  },
+  {
+    "file": "app/chrome-extension/inject-scripts/click-helper.js",
+    "line": 1197,
+    "text": "catch { /* best-effort click sensing fallback */ }"
+  },
+  {
+    "file": "app/chrome-extension/inject-scripts/click-helper.js",
+    "line": 1206,
+    "text": "catch { /* best-effort click sensing fallback */ }"
+  },
+  {
+    "file": "app/chrome-extension/inject-scripts/click-helper.js",
+    "line": 1215,
+    "text": "catch { /* best-effort click sensing fallback */ }"
+  },
+  {
+    "file": "app/chrome-extension/inject-scripts/click-helper.js",
+    "line": 1220,
+    "text": "catch { /* best-effort click sensing fallback */ }"
+  },
+  {
+    "file": "app/chrome-extension/inject-scripts/click-helper.js",
+    "line": 1226,
+    "text": "catch { /* best-effort click sensing fallback */ }"
+  },
+  {
+    "file": "app/chrome-extension/inject-scripts/click-helper.js",
+    "line": 1232,
+    "text": "catch { /* best-effort click sensing fallback */ }"
+  },
+  {
+    "file": "app/chrome-extension/inject-scripts/click-helper.js",
+    "line": 1238,
+    "text": "catch { /* best-effort click sensing fallback */ }"
+  },
+  {
+    "file": "app/chrome-extension/inject-scripts/click-helper.js",
+    "line": 1288,
+    "text": "catch { /* best-effort click sensing fallback */ }"
+  },
+  {
+    "file": "app/chrome-extension/inject-scripts/interactive-elements-helper.js",
+    "line": 263,
+    "text": "catch (_) { /* ignore */ }"
+  },
+  {
+    "file": "app/chrome-extension/inject-scripts/interactive-elements-helper.js",
+    "line": 276,
+    "text": "catch (_) { /* ignore */ }"
+  },
+  {
+    "file": "app/chrome-extension/inject-scripts/keyboard-helper.js",
+    "line": 146,
+    "text": "catch { // Keep the original focus wait diagnostics below. }"
+  },
+  {
+    "file": "app/chrome-extension/inject-scripts/network-helper.js",
+    "line": 162,
+    "text": "catch { /* best-effort network probe */ }"
+  },
+  {
+    "file": "app/chrome-extension/inject-scripts/network-helper.js",
+    "line": 171,
+    "text": "catch { /* best-effort network probe */ }"
+  },
+  {
+    "file": "app/chrome-extension/inject-scripts/web-fetcher-helper.js",
+    "line": 452,
+    "text": "catch (ex) { // Something went wrong, just return the original: }"
+  },
+  {
+    "file": "app/chrome-extension/inject-scripts/web-fetcher-helper.js",
+    "line": 562,
+    "text": "catch (e) { /* ignore exceptions setting the title. */ }"
+  },
+  {
+    "file": "app/chrome-extension/inject-scripts/web-fetcher-helper.js",
+    "line": 2911,
+    "text": "catch { /* best-effort response cleanup */ }"
+  }
+]

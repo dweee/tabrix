@@ -11,11 +11,17 @@ export function buildLiveObservedApiRowsSuccessResult(args: {
   taskTotals: unknown;
 }): { result: CallToolResult; operationLog: Record<string, unknown> } {
   const { liveObserved } = args;
-  const sourceKind = liveObserved.selectedDataSource === 'api_detail' ? 'api_detail' : 'api_list';
+  const isContent = liveObserved.selectedDataSource === 'api_content';
+  const sourceKind = isContent
+    ? 'api_content'
+    : liveObserved.selectedDataSource === 'api_detail'
+      ? 'api_detail'
+      : 'api_list';
   const layerContract = mapDataSourceToLayerContract({
     dataSource: liveObserved.selectedDataSource,
-    requestedLayer: 'L0+L1',
+    requestedLayer: isContent ? 'L0+L1+L2' : 'L0+L1',
     fallbackEntryLayer: 'L0+L1',
+    taskRequiresDetail: isContent,
   });
   const liveObservedEvidence = {
     liveObservedDataUsed: true,
@@ -23,6 +29,8 @@ export function buildLiveObservedApiRowsSuccessResult(args: {
     selectedDataSource: liveObserved.selectedDataSource,
     liveObservedEndpointId: liveObserved.liveObservedEndpointId,
     rowCount: liveObserved.rowCount,
+    contentChars: liveObserved.contentChars,
+    contentSectionCount: liveObserved.contentSectionCount,
     emptyResult: liveObserved.emptyResult,
     fieldShapeSummaryAvailable: liveObserved.fieldShapeSummaryAvailable,
     pageRegion: liveObserved.pageRegion,
@@ -49,6 +57,20 @@ export function buildLiveObservedApiRowsSuccessResult(args: {
     responseBodySource: liveObserved.responseBodySource,
     bodyCompacted: liveObserved.bodyCompacted,
   };
+  const dataSourceDecision = {
+    availableSources: [liveObserved.selectedDataSource],
+    selectedSource: liveObserved.selectedDataSource,
+    selectedReason: 'live_observed_current_task_api_data',
+    rejectedSources: [],
+    fallbackReason: null,
+    regionCorrelation: liveObserved.correlationScore,
+    taskRelevance: liveObserved.correlationScore,
+    privacySafety: liveObserved.privacyCheck === 'passed' ? 'redacted' : 'unknown',
+    metadataCompleteness:
+      liveObserved.rowCount > 0 && liveObserved.fieldShapeSummaryAvailable ? 1 : 0,
+    sourceFreshness: 'fresh',
+    sourceConfidence: liveObserved.correlationScore,
+  };
   const apiPayload = {
     kind: liveObserved.selectedDataSource,
     readPageAvoided: true,
@@ -58,6 +80,13 @@ export function buildLiveObservedApiRowsSuccessResult(args: {
     dataSource: sourceKind,
     selectedDataSource: liveObserved.selectedDataSource,
     decisionReason: 'live_observed_current_task_api_data',
+    dataSourceDecision,
+    aiContextEnvelope: {
+      envelopeKind: 'live_observed_api_context',
+      contextSource: 'live_observed_current_task_api_data',
+      selectedDataSource: liveObserved.selectedDataSource,
+      dataSourceDecision,
+    },
     dispatcherInputSource: 'chrome_network_capture',
     fallbackPlan: {
       dataSource: 'dom_json',
@@ -65,20 +94,25 @@ export function buildLiveObservedApiRowsSuccessResult(args: {
       reason: 'live_observed_current_task_api_data',
     },
     layerContract,
-    chosenLayer: 'L0+L1',
+    chosenLayer: layerContract.layer,
     tokenEstimateChosen: 0,
     tokenEstimateFullRead: 0,
     tokensSavedEstimate: 0,
-    tokensSavedEstimateSource: 'unavailable_live_observed_api_rows',
+    tokensSavedEstimateSource: isContent
+      ? 'unavailable_live_observed_api_content'
+      : 'unavailable_live_observed_api_rows',
     fallbackUsed: 'none',
     fallbackCause: null,
     fallbackEntryLayer: 'L0+L1',
     requiresApiCall: false,
-    requiresExperienceReplay: false,
     apiFamily: liveObserved.endpointFamily,
     dataPurpose: liveObserved.dataPurpose,
     rows: liveObserved.rows,
     rowCount: liveObserved.rowCount,
+    contentText: liveObserved.contentText,
+    contentChars: liveObserved.contentChars,
+    contentSections: liveObserved.contentSections,
+    contentSectionCount: liveObserved.contentSectionCount,
     compact: liveObserved.compact,
     rawBodyStored: liveObserved.rawBodyStored,
     emptyResult: liveObserved.emptyResult,
@@ -88,7 +122,7 @@ export function buildLiveObservedApiRowsSuccessResult(args: {
     apiTelemetry: {
       endpointFamily: liveObserved.endpointFamily,
       method: 'GET',
-      reason: 'live_observed_api_rows',
+      reason: isContent ? 'live_observed_api_content' : 'live_observed_api_rows',
       status: null,
       waitedMs: 0,
       readAllowed: true,
@@ -116,7 +150,9 @@ export function buildLiveObservedApiRowsSuccessResult(args: {
     debuggerConflict: liveObserved.debuggerConflict,
     responseBodySource: liveObserved.responseBodySource,
     bodyCompacted: liveObserved.bodyCompacted,
-    diagnostic: 'skip: current task already observed safe compact API rows',
+    diagnostic: isContent
+      ? 'skip: current task already observed safe API content'
+      : 'skip: current task already observed safe compact API rows',
     taskTotals: args.taskTotals,
   };
 
@@ -125,7 +161,7 @@ export function buildLiveObservedApiRowsSuccessResult(args: {
       content: [{ type: 'text', text: JSON.stringify(apiPayload) }],
     },
     operationLog: {
-      requestedLayer: 'L0+L1',
+      requestedLayer: layerContract.layer,
       selectedDataSource: liveObserved.selectedDataSource,
       sourceRoute: 'knowledge_supported_read',
       decisionReason: 'live_observed_current_task_api_data',
@@ -137,7 +173,9 @@ export function buildLiveObservedApiRowsSuccessResult(args: {
       tabHygiene: liveObservedEvidence,
       metadata: {
         emptyResult: liveObserved.emptyResult ? 'true' : 'false',
-        apiTelemetry: 'live_observed_api_rows',
+        apiTelemetry: isContent ? 'live_observed_api_content' : 'live_observed_api_rows',
+        contentChars: String(liveObserved.contentChars),
+        contentSectionCount: String(liveObserved.contentSectionCount),
         confidence: liveObserved.correlationScore.toFixed(2),
         responseSummarySource: liveObserved.responseSummarySource,
         capturedAfterArm:

@@ -57,7 +57,7 @@ async function openDocs(): Promise<void> {
 </script>
 
 <template>
-  <div class="agent-theme welcome-root">
+  <div class="popup-theme welcome-root">
     <div class="min-h-screen flex flex-col">
       <header class="welcome-header flex-none px-6 py-5">
         <div class="max-w-3xl mx-auto flex items-center justify-between gap-4">
@@ -230,7 +230,7 @@ async function openDocs(): Promise<void> {
                   Report an issue
                 </div>
                 <p class="welcome-muted text-sm mt-1">
-                  Generate a diagnostic report and paste it into a GitHub issue.
+                  Generate a diagnostic report and attach it to your support request.
                 </p>
 
                 <div

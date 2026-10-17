@@ -1,12 +1,18 @@
-/* global window, document, Element, MouseEvent, PointerEvent, HTMLElement, SVGElement, HTMLInputElement, HTMLButtonElement, HTMLAnchorElement, HTMLLabelElement, HTMLTextAreaElement, HTMLSelectElement, MutationObserver, chrome */
+/* global window, document, Element, MouseEvent, PointerEvent, HTMLElement, SVGElement, HTMLInputElement, HTMLButtonElement, HTMLAnchorElement, HTMLLabelElement, HTMLTextAreaElement, HTMLSelectElement, HTMLOptionElement, MutationObserver, chrome */
 
 // click-helper.js
 // This script is injected into the page to handle click operations
 
-if (window.__CLICK_HELPER_INITIALIZED__) {
+const TABRIX_CLICK_HELPER_VERSION = 'click-helper-v3-delegated-action-targets';
+
+if (
+  window.__CLICK_HELPER_INITIALIZED__ &&
+  window.__TABRIX_CLICK_HELPER_VERSION__ === TABRIX_CLICK_HELPER_VERSION
+) {
   // Already initialized, skip
 } else {
   window.__CLICK_HELPER_INITIALIZED__ = true;
+  window.__TABRIX_CLICK_HELPER_VERSION__ = TABRIX_CLICK_HELPER_VERSION;
 
   const SCROLL_READY_MAX_MS = 150;
   const RECT_STABLE_EPSILON_PX = 1;
@@ -65,6 +71,16 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
       element.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'center' });
     } catch {
       return Promise.resolve({ waitedMs: 0, reason: 'scroll_failed', ready: false });
+    }
+
+    if (document.visibilityState === 'hidden') {
+      const rect = element instanceof Element ? element.getBoundingClientRect() : null;
+      return Promise.resolve({
+        waitedMs: Math.max(0, Math.round(nowMs() - startedAt)),
+        reason: 'hidden_document_fast_path',
+        ready: !!rect && rect.width > 0 && rect.height > 0,
+        stableFrames: 0,
+      });
     }
 
     return new Promise((resolve) => {
@@ -158,18 +174,114 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
     options = {},
   ) {
     try {
+      const helperDiagnostics = [];
+      const recordHelperDiagnostic = (source, error) => {
+        if (helperDiagnostics.length >= 8) return;
+        helperDiagnostics.push({
+          source,
+          message: describeClickDispatchError(error),
+        });
+      };
       let element = null;
       let elementInfo = null;
       let clickX, clickY;
 
+      const isFormControl = (candidate) =>
+        candidate instanceof HTMLInputElement ||
+        candidate instanceof HTMLTextAreaElement ||
+        candidate instanceof HTMLSelectElement;
+
+      const compactVisibleText = (candidate) => {
+        try {
+          return String(candidate.innerText || candidate.textContent || '')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, 80);
+        } catch {
+          return '';
+        }
+      };
+
+      const GENERIC_ACTION_SELECTOR =
+        'button, a[href], label, summary, option, input, textarea, select, [role="button"], [role="link"], [role="menuitem"], [role="option"], [role="tab"], [onclick], [tabindex]:not([tabindex^="-"])';
+      const ACTION_LIKE_CLASS_PATTERN =
+        /\b(action|button|btn|click|select|selected|option|filter|sort|tab|menu|item|chip|tag|pill)\b/i;
+
+      const isGenericActionControl = (candidate) => {
+        if (!(candidate instanceof Element)) return false;
+        if (!candidate.matches?.(GENERIC_ACTION_SELECTOR)) return false;
+        const rect = candidate.getBoundingClientRect();
+        const viewportArea = Math.max(1, window.innerWidth * window.innerHeight);
+        const area = Math.max(1, rect.width * rect.height);
+        if (rect.width <= 0 || rect.height <= 0) return false;
+        if (area > viewportArea * 0.35) return false;
+        return true;
+      };
+
+      const isDelegatedActionControl = (candidate) => {
+        if (!(candidate instanceof Element)) return false;
+        if (isFormControl(candidate)) return false;
+        if (
+          candidate instanceof HTMLLabelElement &&
+          candidate.querySelector?.('input, textarea, select')
+        ) {
+          return false;
+        }
+        const rect = candidate.getBoundingClientRect();
+        const viewportArea = Math.max(1, window.innerWidth * window.innerHeight);
+        const area = Math.max(1, rect.width * rect.height);
+        if (rect.width <= 0 || rect.height <= 0) return false;
+        if (area > viewportArea * 0.18) return false;
+        const text = compactVisibleText(candidate);
+        if (!text || text.length > 100) return false;
+        const className =
+          typeof candidate.className === 'string'
+            ? candidate.className
+            : candidate.className?.baseVal || '';
+        const stateSignal = [
+          candidate.getAttribute('aria-selected'),
+          candidate.getAttribute('aria-current'),
+          candidate.getAttribute('aria-pressed'),
+          candidate.getAttribute('data-selected'),
+          candidate.getAttribute('data-active'),
+          candidate.getAttribute('data-state'),
+        ].some((value) => value !== null && value !== 'false');
+        const classSignal = ACTION_LIKE_CLASS_PATTERN.test(className);
+        let pointerSignal = false;
+        try {
+          pointerSignal = window.getComputedStyle(candidate).cursor === 'pointer';
+        } catch (error) {
+          recordHelperDiagnostic('delegated_action_style_failed', error);
+        }
+        if (!pointerSignal && !classSignal && !stateSignal) return false;
+        const nestedActions = candidate.querySelectorAll?.(GENERIC_ACTION_SELECTOR).length || 0;
+        return nestedActions <= 2;
+      };
+
+      const isActionControl = (candidate) =>
+        isGenericActionControl(candidate) || isDelegatedActionControl(candidate);
+
+      const isCompactLeafClickTarget = (candidate) => {
+        if (!(candidate instanceof Element)) return false;
+        if (isFormControl(candidate)) return false;
+        if (candidate.querySelector?.(GENERIC_ACTION_SELECTOR)) return false;
+        const text = compactVisibleText(candidate);
+        if (!text || text.length > 40) return false;
+        const rect = candidate.getBoundingClientRect();
+        const viewportArea = Math.max(1, window.innerWidth * window.innerHeight);
+        const area = Math.max(1, rect.width * rect.height);
+        if (rect.width <= 0 || rect.height <= 0) return false;
+        return area <= viewportArea * 0.1;
+      };
+
       const resolvePreferredClickTarget = (candidate) => {
         if (!(candidate instanceof Element)) return null;
+        if (isGenericActionControl(candidate)) return candidate;
+        if (isCompactLeafClickTarget(candidate)) return candidate;
         const candidateRect = candidate.getBoundingClientRect();
         const candidateArea = Math.max(1, candidateRect.width * candidateRect.height);
         const candidateText = (candidate.innerText || candidate.textContent || '').trim();
-        const ancestorSelector =
-          'button, a[href], label, summary, option, input, textarea, select, [role="button"], [role="link"], [role="menuitem"], [role="option"], [role="tab"], [onclick], [tabindex]:not([tabindex^="-"])';
-        const candidateIsActionable = candidate.matches?.(ancestorSelector) === true;
+        const candidateIsActionable = candidate.matches?.(GENERIC_ACTION_SELECTOR) === true;
         const comboAncestor = !candidateIsActionable
           ? candidate.closest?.(
               '[role="combobox"], .arco-cascader, .arco-select-view, .arco-picker, .arco-input-tag',
@@ -182,7 +294,7 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
         let current = candidate;
         let depth = 0;
         while (current && current instanceof Element && depth < 8) {
-          if (current.matches?.(ancestorSelector)) {
+          if (current.matches?.(GENERIC_ACTION_SELECTOR)) {
             ancestors.push(current);
           }
           current = current.parentElement;
@@ -211,7 +323,7 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
             if (
               el.tagName === 'DIV' &&
               area > 30000 &&
-              el.querySelectorAll?.(ancestorSelector).length > 3
+              el.querySelectorAll?.(GENERIC_ACTION_SELECTOR).length > 3
             ) {
               score -= 40;
             }
@@ -230,20 +342,275 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
         return candidate;
       };
 
+      const describeHitTarget = (candidate) => {
+        if (!(candidate instanceof Element)) return null;
+        const rect = candidate.getBoundingClientRect();
+        return {
+          tagName: candidate.tagName,
+          id: candidate.id || '',
+          className:
+            typeof candidate.className === 'string'
+              ? candidate.className
+              : candidate.className?.baseVal || '',
+          text: (candidate.textContent || '').trim().slice(0, 100),
+          role: candidate.getAttribute('role') || '',
+          rect: {
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+          },
+        };
+      };
+
+      const looksLikeOverlay = (candidate) => {
+        if (!(candidate instanceof Element)) return false;
+        if (isActionControl(candidate)) {
+          return false;
+        }
+        const text = (candidate.textContent || '').trim();
+        const signature = [
+          candidate.id,
+          typeof candidate.className === 'string'
+            ? candidate.className
+            : candidate.className?.baseVal,
+          candidate.getAttribute('role'),
+          candidate.getAttribute('aria-modal'),
+        ]
+          .filter(Boolean)
+          .join(' ');
+        const rect = candidate.getBoundingClientRect();
+        const viewportArea = Math.max(1, window.innerWidth * window.innerHeight);
+        const area = Math.max(1, rect.width * rect.height);
+        const modalSignature = /\b(modal|overlay|backdrop|drawer|dialog|popup)\b/i.test(signature);
+        const passiveMaskSignature = /\b(mask|layer)\b/i.test(signature);
+        if (modalSignature) {
+          return true;
+        }
+        if (passiveMaskSignature && area >= viewportArea * 0.35) {
+          return true;
+        }
+        return area >= viewportArea * 0.45 && text.length < 20;
+      };
+
+      const buildActionRecovery = (verdict) => {
+        if (verdict === 'blocked_by_overlay') {
+          return {
+            status: 'blocked',
+            reason: 'blocked_by_overlay',
+            requiredNextAction: 'handle_blocking_surface_then_retry',
+            recommendedTool: 'chrome_read_page',
+            sameTabRequired: true,
+            instruction:
+              'The intended click target is covered by another visible surface. Read the same tab again, identify the blocking modal/overlay/dialog, handle that surface first, then retry the original action only after the target is clear.',
+            claimBoundary:
+              'This proves only that the intended click point is currently blocked; it does not prove which user-facing action will close the blocking surface.',
+          };
+        }
+        if (verdict === 'target_mismatch') {
+          return {
+            status: 'not_proven',
+            reason: 'target_mismatch',
+            requiredNextAction: 'fresh_read_page_and_select_actual_target',
+            recommendedTool: 'chrome_read_page',
+            sameTabRequired: true,
+            instruction:
+              'The intended click point resolves to a different element. Read the same tab again and choose a fresher, more specific targetRef/candidateAction instead of retrying coordinates or the same broad selector.',
+            claimBoundary:
+              'This proves only a target mismatch at the click point; it does not prove the page changed or that the intended business action happened.',
+          };
+        }
+        return {
+          status: 'not_proven',
+          reason: String(verdict || 'verification_unavailable'),
+          requiredNextAction: 'stop_or_retry_after_fresh_read',
+          recommendedTool: 'chrome_read_page',
+          sameTabRequired: true,
+          instruction:
+            'The click target could not be proven actionable. Read the same tab again before retrying or choosing another action.',
+          claimBoundary:
+            'This is recovery guidance for click execution only; it does not prove business success.',
+        };
+      };
+
+      const inspectTargetConsistency = (expected, x, y, clickMethod) => {
+        const actual = document.elementFromPoint(x, y);
+        const expectedInfo = describeHitTarget(expected);
+        const actualInfo = describeHitTarget(actual);
+        const nearestActionAncestor = (candidate) => {
+          if (!(candidate instanceof Element)) return null;
+          let current = candidate;
+          let depth = 0;
+          while (current && current instanceof Element && depth < 8) {
+            if (isActionControl(current)) return current;
+            current = current.parentElement;
+            depth += 1;
+          }
+          return null;
+        };
+        const linkHrefFor = (candidate) => {
+          if (!(candidate instanceof Element)) return '';
+          const anchor =
+            candidate instanceof HTMLAnchorElement ? candidate : candidate.closest?.('a[href]');
+          return anchor instanceof HTMLAnchorElement ? String(anchor.href || '') : '';
+        };
+        if (!(expected instanceof Element)) {
+          return {
+            verdict: actual ? 'coordinate_target_observed' : 'target_unknown',
+            clickMethod,
+            expectedTarget: expectedInfo,
+            actualTarget: actualInfo,
+          };
+        }
+        if (actual === expected) {
+          return {
+            verdict: 'matched',
+            clickMethod,
+            expectedTarget: expectedInfo,
+            actualTarget: actualInfo,
+          };
+        }
+        if (actual instanceof Element && expected.contains(actual)) {
+          const actualIsNestedIndependentAction =
+            actual !== expected && typeof actual.matches === 'function'
+              ? actual.matches(GENERIC_ACTION_SELECTOR)
+              : false;
+          if (
+            actualIsNestedIndependentAction ||
+            (isFormControl(actual) && !isFormControl(expected))
+          ) {
+            return {
+              verdict: 'target_mismatch',
+              clickMethod,
+              expectedTarget: expectedInfo,
+              actualTarget: actualInfo,
+            };
+          }
+          return {
+            verdict: 'matched',
+            clickMethod,
+            expectedTarget: expectedInfo,
+            actualTarget: actualInfo,
+          };
+        }
+        if (actual instanceof Element && actual.contains(expected)) {
+          return {
+            verdict: 'matched_by_clickable_ancestor',
+            clickMethod,
+            expectedTarget: expectedInfo,
+            actualTarget: actualInfo,
+          };
+        }
+        if (actual instanceof Element) {
+          const expectedAction = nearestActionAncestor(expected);
+          const actualAction = nearestActionAncestor(actual);
+          if (expectedAction && actualAction && expectedAction === actualAction) {
+            return {
+              verdict: 'matched_by_shared_action_ancestor',
+              clickMethod,
+              expectedTarget: expectedInfo,
+              actualTarget: actualInfo,
+            };
+          }
+        }
+        if (actual instanceof Element) {
+          const expectedHref = linkHrefFor(expected);
+          const actualHref = linkHrefFor(actual);
+          if (expectedHref && actualHref && expectedHref === actualHref) {
+            return {
+              verdict: 'matched_by_same_href_action',
+              clickMethod,
+              expectedTarget: expectedInfo,
+              actualTarget: actualInfo,
+            };
+          }
+        }
+        if (actual instanceof Element) {
+          const expectedRect = expected.getBoundingClientRect();
+          const actualRect = actual.getBoundingClientRect();
+          const rectDelta =
+            Math.abs(expectedRect.left - actualRect.left) +
+            Math.abs(expectedRect.top - actualRect.top) +
+            Math.abs(expectedRect.width - actualRect.width) +
+            Math.abs(expectedRect.height - actualRect.height);
+          const sameVisualLayer = rectDelta <= 2;
+          const sameTag = expected.tagName === actual.tagName;
+          const expectedClass =
+            typeof expected.className === 'string'
+              ? expected.className
+              : expected.className?.baseVal || '';
+          const actualClass =
+            typeof actual.className === 'string'
+              ? actual.className
+              : actual.className?.baseVal || '';
+          const sameClass = expectedClass && actualClass && expectedClass === actualClass;
+          if (sameVisualLayer && sameTag && sameClass) {
+            return {
+              verdict: 'matched_by_visual_duplicate_action',
+              clickMethod,
+              expectedTarget: expectedInfo,
+              actualTarget: actualInfo,
+            };
+          }
+        }
+        return {
+          verdict: looksLikeOverlay(actual) ? 'blocked_by_overlay' : 'target_mismatch',
+          clickMethod,
+          expectedTarget: expectedInfo,
+          actualTarget: actualInfo,
+        };
+      };
+
+      const findConsistentClickPoint = (expected, rect, clickMethod) => {
+        if (!(expected instanceof Element) || !rect || rect.width <= 0 || rect.height <= 0) {
+          return null;
+        }
+        const left = Math.max(0, rect.left);
+        const right = Math.min(window.innerWidth, rect.right);
+        const top = Math.max(0, rect.top);
+        const bottom = Math.min(window.innerHeight, rect.bottom);
+        const width = right - left;
+        const height = bottom - top;
+        if (width <= 0 || height <= 0) return null;
+        const points = [
+          [0.5, 0.5],
+          [0.35, 0.5],
+          [0.65, 0.5],
+          [0.5, 0.35],
+          [0.5, 0.65],
+          [0.25, 0.5],
+          [0.75, 0.5],
+        ];
+        for (const [xRatio, yRatio] of points) {
+          const x = left + width * xRatio;
+          const y = top + height * yRatio;
+          const consistency = inspectTargetConsistency(expected, x, y, clickMethod);
+          if (!['blocked_by_overlay', 'target_mismatch'].includes(consistency.verdict)) {
+            return { x, y, consistency };
+          }
+        }
+        return null;
+      };
+
       if (ref && typeof ref === 'string') {
         // Resolve element from weak map
         let target = null;
+        let refLookupError = null;
         try {
           const map = window.__claudeElementMap;
           const weak = map && map[ref];
           target = weak && typeof weak.deref === 'function' ? weak.deref() : null;
         } catch (e) {
-          // ignore
+          refLookupError = e;
         }
 
         if (!target || !(target instanceof Element)) {
+          const lookupMessage = refLookupError
+            ? ` Element ref lookup failed: ${describeClickDispatchError(refLookupError)}.`
+            : '';
           return {
-            error: `Element ref "${ref}" not found. Please call chrome_read_page first and ensure the ref is still valid.`,
+            error: `Element ref "${ref}" not found.${lookupMessage} Please call chrome_read_page first and ensure the ref is still valid.`,
+            reason: refLookupError ? 'ref_lookup_failed' : 'target_ref_stale',
           };
         }
 
@@ -350,15 +717,98 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
         elementInfo.isVisible = isElementVisible(element);
         elementInfo.waitDiagnostics = { scroll: scrollWait };
         if (!elementInfo.isVisible) {
-          return {
-            error: `Element with selector "${selector}" is not visible`,
-            elementInfo,
-          };
+          const blockedConsistency = inspectTargetConsistency(
+            element,
+            rect.left + rect.width / 2,
+            rect.top + rect.height / 2,
+            elementInfo.clickMethod,
+          );
+          elementInfo.targetConsistency = blockedConsistency;
+          const visibilityProvenByHit = [
+            'matched',
+            'matched_by_clickable_ancestor',
+            'matched_by_shared_action_ancestor',
+            'matched_by_same_href_action',
+            'matched_by_visual_duplicate_action',
+          ].includes(blockedConsistency.verdict);
+          if (['blocked_by_overlay', 'target_mismatch'].includes(blockedConsistency.verdict)) {
+            return {
+              success: false,
+              dispatchSucceeded: false,
+              observedOutcome: 'no_observed_change',
+              error: blockedConsistency.verdict,
+              reason: blockedConsistency.verdict,
+              message:
+                blockedConsistency.verdict === 'blocked_by_overlay'
+                  ? 'Click target is covered by an overlay or dialog; handle the blocking surface first.'
+                  : 'Click target center resolves to a different element; refresh read_page or choose the blocking target first.',
+              elementInfo,
+              targetConsistency: blockedConsistency,
+              actionRecovery: buildActionRecovery(blockedConsistency.verdict),
+            };
+          }
+          if (visibilityProvenByHit) {
+            elementInfo.isVisible = true;
+            elementInfo.visibilityRecoveredByHitTarget = true;
+          } else {
+            return {
+              error: `Element with selector "${selector}" is not visible`,
+              elementInfo,
+            };
+          }
         }
 
         const updatedRect = element.getBoundingClientRect();
         clickX = updatedRect.left + updatedRect.width / 2;
         clickY = updatedRect.top + updatedRect.height / 2;
+      }
+
+      const targetConsistency = inspectTargetConsistency(
+        element,
+        clickX,
+        clickY,
+        elementInfo?.clickMethod || 'unknown',
+      );
+      let finalTargetConsistency = targetConsistency;
+      if (
+        element &&
+        ['blocked_by_overlay', 'target_mismatch'].includes(finalTargetConsistency.verdict)
+      ) {
+        const fallbackPoint = findConsistentClickPoint(
+          element,
+          element.getBoundingClientRect(),
+          elementInfo?.clickMethod || 'unknown',
+        );
+        if (fallbackPoint) {
+          clickX = fallbackPoint.x;
+          clickY = fallbackPoint.y;
+          finalTargetConsistency = fallbackPoint.consistency;
+          if (elementInfo) {
+            elementInfo.clickPosition = { x: clickX, y: clickY };
+            elementInfo.targetConsistencyFallbackUsed = true;
+          }
+        }
+      }
+      if (elementInfo) elementInfo.targetConsistency = finalTargetConsistency;
+      if (
+        element &&
+        (elementInfo?.clickMethod === 'selector' || elementInfo?.clickMethod === 'ref') &&
+        ['blocked_by_overlay', 'target_mismatch'].includes(finalTargetConsistency.verdict)
+      ) {
+        return {
+          success: false,
+          dispatchSucceeded: false,
+          observedOutcome: 'no_observed_change',
+          error: finalTargetConsistency.verdict,
+          reason: finalTargetConsistency.verdict,
+          message:
+            finalTargetConsistency.verdict === 'blocked_by_overlay'
+              ? 'Click target is covered by an overlay or dialog; handle the blocking surface first.'
+              : 'Click target center resolves to a different element; refresh read_page or choose the blocking target first.',
+          elementInfo,
+          targetConsistency: finalTargetConsistency,
+          actionRecovery: buildActionRecovery(finalTargetConsistency.verdict),
+        };
       }
 
       const allowDownloadClick = options.allowDownloadClick === true;
@@ -418,9 +868,17 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
       //     callers still get signal without long blocking.
       // `beforeunload` short-circuits the window (we already have the verdict).
       const VERIFY_FAST_WINDOW_MS = 400;
+      const VERIFY_DYNAMIC_POST_ACTION_WINDOW_MS = 600;
+      const intent = typeof options.intent === 'string' ? options.intent : '';
+      const needsDynamicPostActionWindow =
+        intent.startsWith('filter.') ||
+        intent === 'search.open_filters' ||
+        intent.startsWith('search.apply_filter.');
       const verifyWindowMs = waitForNavigation
         ? Math.max(0, Number(timeout) || VERIFY_FAST_WINDOW_MS)
-        : VERIFY_FAST_WINDOW_MS;
+        : needsDynamicPostActionWindow
+          ? VERIFY_DYNAMIC_POST_ACTION_WINDOW_MS
+          : VERIFY_FAST_WINDOW_MS;
 
       // Page-local pre-click snapshot.
       const urlBefore = String(window.location.href || '');
@@ -433,6 +891,7 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
       let domChanged = false;
       let domAddedDialog = false;
       let domAddedMenu = false;
+      let observerDiagnostic = { available: true };
 
       const DIALOG_SELECTOR = '[role="dialog"], [aria-modal="true"], dialog[open]';
       const MENU_SELECTOR =
@@ -476,53 +935,69 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
             'disabled',
           ],
         });
-      } catch {
+      } catch (error) {
         // Detached body edge case — treat the observer as absent rather than crash.
+        observerDiagnostic = {
+          available: false,
+          reason: 'observer_error',
+          message: describeClickDispatchError(error),
+        };
       }
 
       let dispatchSucceeded = false;
+      let dispatchDiagnostics = null;
       try {
         if (
           element &&
           (elementInfo.clickMethod === 'selector' || elementInfo.clickMethod === 'ref')
         ) {
-          if (double) {
-            dispatchClickSequence(element, clickX, clickY, options, true);
-          } else {
-            dispatchClickSequence(element, clickX, clickY, options, false);
-          }
-          dispatchSucceeded = true;
+          const dispatchResult = dispatchClickSequence(element, clickX, clickY, options, double);
+          dispatchSucceeded = dispatchResult.primaryClickDelivered === true;
+          dispatchDiagnostics = dispatchResult;
         } else {
-          if (double) simulateDoubleClick(clickX, clickY, options);
-          else simulateClick(clickX, clickY, options);
-          // coordinate-based path is best-effort; treat as dispatched iff an
-          // element was resolvable at the coord.
-          dispatchSucceeded = element != null;
+          const dispatchResult = double
+            ? simulateDoubleClick(clickX, clickY, options)
+            : simulateClick(clickX, clickY, options);
+          dispatchSucceeded = dispatchResult.primaryClickDelivered === true;
+          dispatchDiagnostics = dispatchResult;
         }
-      } catch {
+      } catch (error) {
         dispatchSucceeded = false;
+        dispatchDiagnostics = {
+          primaryClickDelivered: false,
+          failedEvents: [
+            {
+              event: 'dispatch_sequence',
+              message: describeClickDispatchError(error),
+            },
+          ],
+        };
       }
 
-      const outcomeWait = await waitForClickOutcomeWindow(verifyWindowMs, () => {
-        const hrefNow = String(window.location.href || '');
-        const hashNow = String(window.location.hash || '');
-        if (beforeUnloadFired) return 'beforeunload';
-        if (hrefNow !== urlBefore) return hashNow !== hashBefore ? 'hash_changed' : 'url_changed';
-        if (hashNow !== hashBefore) return 'hash_changed';
-        if (domAddedDialog) return 'dialog_opened';
-        if (domAddedMenu) return 'menu_opened';
-        if (diffTargetState(stateBefore, snapshotTargetState(element)) != null) {
-          return 'target_state_changed';
-        }
-        if (!waitForNavigation && document.activeElement !== focusBefore) return 'focus_changed';
-        return null;
-      });
+      const outcomeWait = await waitForClickOutcomeWindow(
+        verifyWindowMs,
+        () => {
+          const hrefNow = String(window.location.href || '');
+          const hashNow = String(window.location.hash || '');
+          if (beforeUnloadFired) return 'beforeunload';
+          if (hrefNow !== urlBefore) return hashNow !== hashBefore ? 'hash_changed' : 'url_changed';
+          if (hashNow !== hashBefore) return 'hash_changed';
+          if (domAddedDialog) return 'dialog_opened';
+          if (domAddedMenu) return 'menu_opened';
+          if (diffTargetState(stateBefore, snapshotTargetState(element)) != null) {
+            return 'target_state_changed';
+          }
+          if (!waitForNavigation && document.activeElement !== focusBefore) return 'focus_changed';
+          return null;
+        },
+        { allowHiddenFastPath: !needsDynamicPostActionWindow },
+      );
 
       window.removeEventListener('beforeunload', beforeUnloadListener);
       try {
         mutationObserver.disconnect();
-      } catch {
-        // ignore
+      } catch (error) {
+        observerDiagnostic.disconnectError = describeClickDispatchError(error);
       }
 
       const urlAfter = String(window.location.href || '');
@@ -543,6 +1018,7 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
           ? 'Click dispatched; awaiting outcome verification in background layer'
           : 'Click dispatch failed',
         elementInfo,
+        targetConsistency,
         // Compat: background layer will overwrite with verification.navigationOccurred.
         navigationOccurred: beforeUnloadFired,
         signals: {
@@ -558,6 +1034,9 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
           targetStateDelta,
           waitDiagnostics: {
             verification: outcomeWait,
+            observer: observerDiagnostic,
+            ...(dispatchDiagnostics ? { dispatch: dispatchDiagnostics } : {}),
+            ...(helperDiagnostics.length ? { helper: helperDiagnostics } : {}),
           },
         },
       };
@@ -578,13 +1057,24 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
       }
     };
     return {
+      className:
+        typeof element.className === 'string'
+          ? element.className
+          : element.className && typeof element.className.baseVal === 'string'
+            ? element.className.baseVal
+            : null,
       ariaExpanded: get('aria-expanded'),
       ariaSelected: get('aria-selected'),
       ariaPressed: get('aria-pressed'),
       ariaChecked: get('aria-checked'),
+      ariaCurrent: get('aria-current'),
+      dataState: get('data-state'),
+      dataSelected: get('data-selected'),
+      dataActive: get('data-active'),
       open: get('open'),
       disabled: get('disabled'),
       checked: element instanceof HTMLInputElement ? String(element.checked) : get('checked'),
+      selected: element instanceof HTMLOptionElement ? String(element.selected) : get('selected'),
       value:
         element instanceof HTMLInputElement ||
         element instanceof HTMLTextAreaElement ||
@@ -607,9 +1097,16 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
     return anyChanged ? changed : null;
   }
 
-  function waitForClickOutcomeWindow(ms, earlyExitCheck) {
+  function waitForClickOutcomeWindow(ms, earlyExitCheck, options = {}) {
     return new Promise((resolve) => {
       const startedAt = nowMs();
+      if (options.allowHiddenFastPath !== false && document.visibilityState === 'hidden') {
+        resolve({
+          waitedMs: Math.max(0, Math.round(nowMs() - startedAt)),
+          reason: 'hidden_document_fast_path',
+        });
+        return;
+      }
       let done = false;
       let timeoutId = null;
       const finish = (reason) => {
@@ -629,6 +1126,15 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
         return;
       }
       const deadline = startedAt + Math.max(0, ms);
+      const scheduleNext = () => {
+        if (document.visibilityState === 'hidden') {
+          setTimeout(tick, 50);
+          return;
+        }
+        if (!requestNextFrame(tick)) {
+          setTimeout(tick, 50);
+        }
+      };
       const tick = () => {
         if (done) return;
         const reason = earlyExitCheck ? earlyExitCheck() : null;
@@ -640,7 +1146,7 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
           finish('timeout');
           return;
         }
-        if (!requestNextFrame(tick)) finish('raf_unavailable');
+        scheduleNext();
       };
       timeoutId = setTimeout(() => finish('timeout'), Math.max(0, ms));
       tick();
@@ -654,8 +1160,13 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
    */
   function simulateClick(x, y, options = {}) {
     const element = document.elementFromPoint(x, y);
-    if (!element) return;
-    dispatchClickSequence(element, x, y, options, false);
+    if (!element) {
+      return {
+        primaryClickDelivered: false,
+        failedEvents: [{ event: 'target_lookup', message: 'No element at click coordinates' }],
+      };
+    }
+    return dispatchClickSequence(element, x, y, options, false);
   }
 
   /**
@@ -663,15 +1174,24 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
    */
   function simulateDoubleClick(x, y, options = {}) {
     const element = document.elementFromPoint(x, y);
-    if (!element) return;
-    dispatchClickSequence(element, x, y, options, true);
+    if (!element) {
+      return {
+        primaryClickDelivered: false,
+        failedEvents: [{ event: 'target_lookup', message: 'No element at click coordinates' }],
+      };
+    }
+    return dispatchClickSequence(element, x, y, options, true);
   }
 
   /**
    * Simulate double click using element when available
    */
   function simulateDomDoubleClick(element, x, y, options) {
-    dispatchClickSequence(element, x, y, options, true);
+    return dispatchClickSequence(element, x, y, options, true);
+  }
+
+  function describeClickDispatchError(error) {
+    return String(error && error.message ? error.message : error);
   }
 
   function normalizeMouseOpts(x, y, options = {}) {
@@ -699,16 +1219,50 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
     };
   }
 
-  function dispatchClickSequence(element, x, y, options = {}, isDouble = false) {
-    const base = normalizeMouseOpts(x, y, options);
-    const nativeClickable =
-      element instanceof HTMLElement ||
-      element instanceof SVGElement ||
+  function shouldUseNativeClick(element, button) {
+    if (button !== 0 || typeof element.click !== 'function') return false;
+    if (
       element instanceof HTMLInputElement ||
       element instanceof HTMLButtonElement ||
       element instanceof HTMLAnchorElement ||
-      element instanceof HTMLLabelElement;
-    const useNativeClick = nativeClickable && base.button === 0;
+      element instanceof HTMLLabelElement ||
+      element instanceof HTMLTextAreaElement ||
+      element instanceof HTMLSelectElement
+    ) {
+      return true;
+    }
+    const tagName = String(element.tagName || '').toUpperCase();
+    return tagName === 'OPTION' || tagName === 'SUMMARY';
+  }
+
+  function dispatchClickSequence(element, x, y, options = {}, isDouble = false) {
+    const base = normalizeMouseOpts(x, y, options);
+    const useNativeClick = shouldUseNativeClick(element, base.button);
+    const failedEvents = [];
+    const recordFailure = (event, error) => {
+      failedEvents.push({
+        event,
+        message: describeClickDispatchError(error),
+      });
+    };
+    const tryDispatch = (eventName, event) => {
+      try {
+        element.dispatchEvent(event);
+        return true;
+      } catch (error) {
+        recordFailure(eventName, error);
+        return false;
+      }
+    };
+    const tryNativeClick = () => {
+      try {
+        element.click();
+        return true;
+      } catch (error) {
+        recordFailure('native_click', error);
+        return false;
+      }
+    };
     const pointerBase = {
       ...base,
       pointerId: 1,
@@ -717,58 +1271,54 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
     };
     try {
       element.dispatchEvent(new PointerEvent('pointerdown', pointerBase));
-    } catch {}
+    } catch (error) {
+      recordFailure('pointerdown', error);
+    }
     const down = new MouseEvent('mousedown', base);
     const up = new MouseEvent('mouseup', base);
     const click = new MouseEvent('click', base);
-    try {
-      element.dispatchEvent(down);
-    } catch {}
-    try {
-      element.dispatchEvent(up);
-    } catch {}
+    tryDispatch('mousedown', down);
     try {
       element.dispatchEvent(new PointerEvent('pointerup', pointerBase));
-    } catch {}
-    if (useNativeClick && typeof element.click === 'function') {
-      try {
-        element.click();
-      } catch {}
-    } else {
-      try {
-        element.dispatchEvent(click);
-      } catch {}
+    } catch (error) {
+      recordFailure('pointerup', error);
     }
+    tryDispatch('mouseup', up);
+    let primaryClickDelivered = false;
+    if (useNativeClick && typeof element.click === 'function') {
+      primaryClickDelivered = tryNativeClick();
+      if (!primaryClickDelivered) {
+        primaryClickDelivered = tryDispatch('click', click);
+      }
+    } else {
+      primaryClickDelivered = tryDispatch('click', click);
+    }
+    let contextMenuDelivered = null;
     if (base.button === 2) {
       // right button contextmenu
       const ctx = new MouseEvent('contextmenu', base);
-      try {
-        element.dispatchEvent(ctx);
-      } catch {}
+      contextMenuDelivered = tryDispatch('contextmenu', ctx);
     }
     if (isDouble) {
       // second sequence + dblclick
       setTimeout(() => {
-        try {
-          element.dispatchEvent(new MouseEvent('mousedown', base));
-        } catch {}
-        try {
-          element.dispatchEvent(new MouseEvent('mouseup', base));
-        } catch {}
+        tryDispatch('double_mousedown', new MouseEvent('mousedown', base));
+        tryDispatch('double_mouseup', new MouseEvent('mouseup', base));
         if (useNativeClick && typeof element.click === 'function') {
-          try {
-            element.click();
-          } catch {}
+          if (!tryNativeClick()) {
+            tryDispatch('double_click', new MouseEvent('click', base));
+          }
         } else {
-          try {
-            element.dispatchEvent(new MouseEvent('click', base));
-          } catch {}
+          tryDispatch('double_click', new MouseEvent('click', base));
         }
-        try {
-          element.dispatchEvent(new MouseEvent('dblclick', base));
-        } catch {}
+        tryDispatch('dblclick', new MouseEvent('dblclick', base));
       }, 30);
     }
+    return {
+      primaryClickDelivered,
+      ...(contextMenuDelivered !== null ? { contextMenuDelivered } : {}),
+      ...(failedEvents.length ? { failedEvents } : {}),
+    };
   }
 
   /**
@@ -807,8 +1357,19 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
     return element === elementAtPoint || element.contains(elementAtPoint);
   }
 
+  try {
+    if (
+      window.__TABRIX_CLICK_HELPER_MESSAGE_HANDLER__ &&
+      typeof chrome?.runtime?.onMessage?.removeListener === 'function'
+    ) {
+      chrome.runtime.onMessage.removeListener(window.__TABRIX_CLICK_HELPER_MESSAGE_HANDLER__);
+    }
+  } catch (error) {
+    window.__TABRIX_CLICK_HELPER_REMOVE_LISTENER_ERROR__ = describeClickDispatchError(error);
+  }
+
   // Listen for messages from the extension
-  chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
+  const tabrixClickHelperMessageHandler = (request, _sender, sendResponse) => {
     if (request.action === 'clickElement') {
       clickElement(
         request.selector,
@@ -823,6 +1384,7 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
           cancelable: request.cancelable,
           modifiers: request.modifiers,
           allowDownloadClick: request.allowDownloadClick === true,
+          intent: request.intent,
         },
       )
         .then(sendResponse)
@@ -836,5 +1398,8 @@ if (window.__CLICK_HELPER_INITIALIZED__) {
       sendResponse({ status: 'pong' });
       return false;
     }
-  });
+  };
+
+  window.__TABRIX_CLICK_HELPER_MESSAGE_HANDLER__ = tabrixClickHelperMessageHandler;
+  chrome.runtime.onMessage.addListener(tabrixClickHelperMessageHandler);
 }

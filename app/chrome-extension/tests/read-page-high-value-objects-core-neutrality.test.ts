@@ -11,7 +11,7 @@ import {
  * T5.4.0 Object-Layer Core Neutrality Invariants
  *
  * These tests enforce that `read-page-high-value-objects-core.ts` stays
- * family-agnostic. Any GitHub-specific vocabulary, Douyin-specific vocabulary,
+ * family-agnostic. Any platform-specific vocabulary, MediaSite-specific vocabulary,
  * or page-role literal re-introduced into core MUST fail these checks. Family
  * priors belong exclusively in sibling `read-page-high-value-objects-<family>`
  * modules behind the `PageObjectFamilyAdapter` contract.
@@ -28,19 +28,14 @@ describe('read_page high-value object core neutrality', () => {
   );
   const coreFileSource = readFileSync(coreFilePath, 'utf8');
 
-  it('core source contains no GitHub-specific page-role literals', () => {
-    const forbiddenRoles = [
-      "'repo_home'",
-      "'issues_list'",
-      "'actions_list'",
-      "'workflow_run_detail'",
-    ];
+  it('core source contains no platform-specific page-role literals', () => {
+    const forbiddenRoles = ["'workspace_home'", "'item_list'", "'job_list'", "'job_run_detail'"];
     for (const forbidden of forbiddenRoles) {
       expect(coreFileSource).not.toContain(forbidden);
     }
   });
 
-  it('core source contains no GitHub-specific priors vocabulary', () => {
+  it('core source contains no platform-specific priors vocabulary', () => {
     const forbiddenPhrases = [
       'pull requests',
       'workflow run',
@@ -57,9 +52,16 @@ describe('read_page high-value object core neutrality', () => {
     }
   });
 
-  it('core source contains no site-specific Douyin vocabulary', () => {
-    const forbiddenDouyinStrings = ['视频总榜', '话题榜', '热度趋势', '热度值', '播放量', '抖音'];
-    for (const forbidden of forbiddenDouyinStrings) {
+  it('core source contains no site-specific MediaSite vocabulary', () => {
+    const forbiddenMediaSiteStrings = [
+      '视频总榜',
+      '话题榜',
+      '热度趋势',
+      '热度值',
+      '播放量',
+      '媒体站',
+    ];
+    for (const forbidden of forbiddenMediaSiteStrings) {
       expect(coreFileSource).not.toContain(forbidden);
     }
   });
@@ -76,7 +78,7 @@ describe('read_page high-value object core neutrality', () => {
       { family: 'a', resolve: () => null },
       { family: 'b', resolve: () => null },
     ];
-    const priors = resolvePageObjectPriors(adapters, 'repo_home');
+    const priors = resolvePageObjectPriors(adapters, 'workspace_home');
     expect(priors.priorityRule).toBeNull();
     expect(priors.seed).toBeNull();
     expect(priors.l0Prefix).toBeNull();

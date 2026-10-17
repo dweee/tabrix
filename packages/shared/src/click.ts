@@ -16,10 +16,10 @@
  *
  * "Success-like" outcomes: `cross_document_navigation`, `spa_route_change`,
  * `hash_change`, `new_tab_opened`, `dialog_opened`, `menu_opened`,
- * `state_toggled`, `selection_changed`, `dom_changed`, `focus_changed`,
- * `download_intercepted`.
+ * `state_toggled`, `selection_changed`, `dom_changed`, `download_intercepted`.
  *
- * "Not-a-success" outcomes: `no_observed_change`, `verification_unavailable`.
+ * "Not-a-success" outcomes: `focus_changed`, `no_observed_change`,
+ * `verification_unavailable`.
  */
 export type ClickObservedOutcome =
   | 'cross_document_navigation'
@@ -37,10 +37,10 @@ export type ClickObservedOutcome =
   | 'verification_unavailable';
 
 /**
- * The full closed enum as a runtime tuple. Consumers (e.g. the
- * `experience_score_step` parser) build a Set from this for O(1)
- * membership checks. Keep in lockstep with {@link ClickObservedOutcome}
- * — the unit test in `click.test.ts` enforces parity.
+ * The full closed enum as a runtime tuple. Consumers can build a Set from this
+ * for O(1) membership checks. Keep in lockstep with
+ * {@link ClickObservedOutcome} — the unit test in `click.test.ts` enforces
+ * parity.
  */
 export const CLICK_OBSERVED_OUTCOMES: readonly ClickObservedOutcome[] = [
   'cross_document_navigation',
@@ -80,6 +80,27 @@ export interface ClickVerification {
   focusChanged: boolean;
 }
 
+export interface ClickActionRecoveryGuidance {
+  status: 'blocked' | 'not_proven';
+  reason:
+    | 'blocked_by_overlay'
+    | 'target_mismatch'
+    | 'target_ref_stale'
+    | 'target_not_found'
+    | 'verification_unavailable'
+    | string;
+  requiredNextAction:
+    | 'handle_blocking_surface_then_retry'
+    | 'fresh_read_page_and_select_actual_target'
+    | 'fresh_read_page_for_new_target_ref'
+    | 'stop_or_retry_after_fresh_read'
+    | string;
+  recommendedTool: 'chrome_read_page' | 'chrome_click_element' | string;
+  sameTabRequired: boolean;
+  instruction: string;
+  claimBoundary: string;
+}
+
 /**
  * The JSON shape returned by `chrome_click_element`.
  *
@@ -104,6 +125,8 @@ export interface ClickToolResult {
   clickMethod?: string;
   message?: string;
   elementInfo?: unknown;
+  targetConsistency?: unknown;
+  actionRecovery?: ClickActionRecoveryGuidance;
 }
 
 /**
@@ -121,7 +144,6 @@ export const CLICK_SUCCESS_OUTCOMES: readonly ClickObservedOutcome[] = [
   'state_toggled',
   'selection_changed',
   'dom_changed',
-  'focus_changed',
   'download_intercepted',
 ];
 

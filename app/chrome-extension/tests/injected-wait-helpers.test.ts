@@ -53,12 +53,145 @@ describe('injected state-driven waits', () => {
     document.body.innerHTML = '';
     Element.prototype.scrollIntoView = vi.fn();
     document.elementFromPoint = vi.fn(() => null);
+    (window as Window & { CSS: { escape: (value: string) => string } }).CSS = {
+      escape: (value: string) => value.replace(/[^a-zA-Z0-9_-]/g, '\\$&'),
+    };
   });
 
   it('fill scroll readiness returns before the 150ms cap when the element is already stable', async () => {
     document.body.innerHTML = '<input id="name" type="text" />';
     const input = document.getElementById('name') as HTMLInputElement;
     setRect(input, { left: 20, top: 30, width: 180, height: 28 });
+    document.elementFromPoint = vi.fn(() => input);
+    const nativeValueDescriptor = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      'value',
+    );
+    const ownValueSetter = vi.fn((nextValue: string) => {
+      nativeValueDescriptor?.set?.call(input, nextValue);
+    });
+    Object.defineProperty(input, 'value', {
+      configurable: true,
+      get: () => nativeValueDescriptor?.get?.call(input),
+      set: ownValueSetter,
+    });
+    const inputTypes: Array<string | undefined> = [];
+    input.addEventListener('input', (event) => {
+      inputTypes.push((event as InputEvent).inputType);
+    });
+
+    const listener = installInjectedHelper(
+      'inject-scripts/fill-helper.js',
+      '__FILL_HELPER_INITIALIZED__',
+    );
+    try {
+      const response = await sendRequest(listener, {
+        action: 'fillElement',
+        selector: '#name',
+        value: 'Tabrix',
+      });
+
+      expect(response.success).toBe(true);
+      expect(response.elementInfo.waitDiagnostics.scroll.reason).toBe('ready');
+      expect(response.elementInfo.waitDiagnostics.scroll.waitedMs).toBeLessThan(150);
+      expect(response.elementInfo.valueState).toBe('non_empty');
+      expect(response.elementInfo).not.toHaveProperty('value');
+      expect(JSON.stringify(response)).not.toContain('Tabrix');
+      expect(ownValueSetter).not.toHaveBeenCalled();
+      expect(inputTypes).toEqual(['deleteContentBackward', 'insertText']);
+    } finally {
+      delete (input as HTMLInputElement & { value?: string }).value;
+    }
+  });
+
+  it('fill selector prefers visible fillable controls when hidden duplicates match first', async () => {
+    document.body.innerHTML = `
+      <form>
+        <input class="search-box" type="search" style="display:none" />
+        <input id="visible-search" class="search-box" type="search" placeholder="搜索" />
+      </form>
+    `;
+    const hidden = document.querySelector('.search-box') as HTMLInputElement;
+    const visible = document.getElementById('visible-search') as HTMLInputElement;
+    setRect(hidden, { left: 0, top: 0, width: 0, height: 0 });
+    setRect(visible, { left: 24, top: 36, width: 220, height: 32 });
+    document.elementFromPoint = vi.fn(() => visible);
+
+    const listener = installInjectedHelper(
+      'inject-scripts/fill-helper.js',
+      '__FILL_HELPER_INITIALIZED__',
+    );
+    const response = await sendRequest(listener, {
+      action: 'fillElement',
+      selector: '.search-box',
+      value: 'AI图片创作',
+    });
+
+    expect(response.success).toBe(true);
+    expect(hidden.value).toBe('');
+    expect(visible.value).toBe('AI图片创作');
+    expect(response.elementInfo.id).toBe('visible-search');
+    expect(response.elementInfo.isVisible).toBe(true);
+  });
+
+  it('fills a rendered composite input when a decorative sibling owns its center hit point', async () => {
+    document.body.innerHTML = `
+      <div class="composite-search">
+        <textarea id="query" placeholder="Search"></textarea>
+        <div id="decoration">Ask AI</div>
+      </div>
+    `;
+    const input = document.getElementById('query') as HTMLTextAreaElement;
+    const decoration = document.getElementById('decoration') as HTMLDivElement;
+    setRect(input, { left: 20, top: 30, width: 420, height: 96 });
+    setRect(decoration, { left: 120, top: 50, width: 180, height: 40 });
+    document.elementFromPoint = vi.fn(() => decoration);
+
+    const listener = installInjectedHelper(
+      'inject-scripts/fill-helper.js',
+      '__FILL_HELPER_INITIALIZED__',
+    );
+    const response = await sendRequest(listener, {
+      action: 'fillElement',
+      selector: '#query',
+      value: 'composite query',
+    });
+
+    expect(response.success).toBe(true);
+    expect(input.value).toBe('composite query');
+    expect(response.elementInfo.isVisible).toBe(true);
+  });
+
+  it('rejects a rendered input hidden behind a modal overlay', async () => {
+    document.body.innerHTML = `
+      <main><input id="query" type="search" /></main>
+      <div id="modal" role="dialog" aria-modal="true">Blocking dialog</div>
+    `;
+    const input = document.getElementById('query') as HTMLInputElement;
+    const modal = document.getElementById('modal') as HTMLDivElement;
+    setRect(input, { left: 20, top: 30, width: 420, height: 48 });
+    setRect(modal, { left: 0, top: 0, width: 1024, height: 768 });
+    document.elementFromPoint = vi.fn(() => modal);
+
+    const listener = installInjectedHelper(
+      'inject-scripts/fill-helper.js',
+      '__FILL_HELPER_INITIALIZED__',
+    );
+    const response = await sendRequest(listener, {
+      action: 'fillElement',
+      selector: '#query',
+      value: 'must not fill',
+    });
+
+    expect(response.success).not.toBe(true);
+    expect(response.error).toContain('not visible');
+    expect(input.value).toBe('');
+  });
+
+  it('still rejects fillable controls that are outside the viewport', async () => {
+    document.body.innerHTML = '<input id="offscreen" type="search" />';
+    const input = document.getElementById('offscreen') as HTMLInputElement;
+    setRect(input, { left: 20, top: 1200, width: 220, height: 32 });
     document.elementFromPoint = vi.fn(() => input);
 
     const listener = installInjectedHelper(
@@ -67,13 +200,119 @@ describe('injected state-driven waits', () => {
     );
     const response = await sendRequest(listener, {
       action: 'fillElement',
-      selector: '#name',
+      selector: '#offscreen',
+      value: 'must not fill',
+    });
+
+    expect(response.success).not.toBe(true);
+    expect(response.error).toContain('not visible');
+    expect(input.value).toBe('');
+  });
+
+  it('fill reports stale ref lookup failures instead of hiding them', async () => {
+    Object.defineProperty(window, '__claudeElementMap', {
+      configurable: true,
+      get: () => {
+        throw new Error('map unavailable');
+      },
+    });
+
+    const listener = installInjectedHelper(
+      'inject-scripts/fill-helper.js',
+      '__FILL_HELPER_INITIALIZED__',
+    );
+    const response = await sendRequest(listener, {
+      action: 'fillElement',
+      ref: 'ref_broken',
       value: 'Tabrix',
     });
 
+    expect(response.error).toContain('Element ref "ref_broken" lookup failed: map unavailable');
+    expect(response.error).toContain('chrome_read_page');
+
+    delete (window as Window & { __claudeElementMap?: unknown }).__claudeElementMap;
+  });
+
+  it('wait helper returns immediately when a selector is already present', async () => {
+    document.body.innerHTML = '<button id="ready-action">继续</button>';
+    const button = document.getElementById('ready-action') as HTMLButtonElement;
+    setRect(button, { left: 20, top: 20, width: 96, height: 32 });
+
+    const listener = installInjectedHelper(
+      'inject-scripts/wait-helper.js',
+      '__WAIT_HELPER_INITIALIZED__',
+    );
+    const response = await sendRequest(listener, {
+      action: 'waitForSelector',
+      selector: '#ready-action',
+      timeout: 1,
+    });
+
     expect(response.success).toBe(true);
-    expect(response.elementInfo.waitDiagnostics.scroll.reason).toBe('ready');
-    expect(response.elementInfo.waitDiagnostics.scroll.waitedMs).toBeLessThan(150);
+    expect(response.matched.ref).toMatch(/^ref_/);
+    expect(response.matched.center).toEqual({ x: 68, y: 36 });
+  });
+
+  it('wait helper reports invalid selectors without hiding them as timeouts', async () => {
+    const listener = installInjectedHelper(
+      'inject-scripts/wait-helper.js',
+      '__WAIT_HELPER_INITIALIZED__',
+    );
+    const response = await sendRequest(listener, {
+      action: 'waitForSelector',
+      selector: '[broken',
+      timeout: 25,
+    });
+
+    expect(response.success).toBe(false);
+    expect(response.reason).toBe('selector_error');
+    expect(response.error).toEqual(expect.any(String));
+    expect(response.error.length).toBeGreaterThan(0);
+    expect(response.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: 'selector_query_failed',
+        }),
+      ]),
+    );
+  });
+
+  it('wait helper does not treat text visibility probe failures as disappearance', async () => {
+    document.body.innerHTML = '<div id="status">处理中</div>';
+    const status = document.getElementById('status') as HTMLDivElement;
+    setRect(status, { left: 20, top: 20, width: 96, height: 32 });
+    const originalGetComputedStyle = window.getComputedStyle;
+    window.getComputedStyle = vi.fn((element: Element) => {
+      if (element === status) {
+        throw new Error('style probe failed');
+      }
+      return originalGetComputedStyle.call(window, element);
+    }) as typeof window.getComputedStyle;
+
+    const listener = installInjectedHelper(
+      'inject-scripts/wait-helper.js',
+      '__WAIT_HELPER_INITIALIZED__',
+    );
+    try {
+      const response = await sendRequest(listener, {
+        action: 'waitForText',
+        text: '处理中',
+        appear: false,
+        timeout: 10,
+      });
+
+      expect(response.success).toBe(false);
+      expect(response.reason).toBe('timeout');
+      expect(response.diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            source: 'visibility_check_failed',
+          }),
+        ]),
+      );
+    } finally {
+      window.getComputedStyle = originalGetComputedStyle;
+    }
   });
 
   it('keyboard focus readiness returns immediately once focus is observable', async () => {
@@ -95,5 +334,455 @@ describe('injected state-driven waits', () => {
     expect(response.success).toBe(true);
     expect(response.targetElement.waitDiagnostics.focus.ready).toBe(true);
     expect(response.targetElement.waitDiagnostics.focus.waitedMs).toBeLessThan(100);
+  });
+
+  it('interactive element search returns the visible OTP sender span before label-derived input matches', async () => {
+    document.body.innerHTML = `
+      <form>
+        <label class="auth-code">
+          <input id="otp" type="number" placeholder="输入验证码" />
+          <span id="send" class="code-button active">获取验证码</span>
+        </label>
+      </form>
+    `;
+    const form = document.querySelector('form') as HTMLFormElement;
+    const label = document.querySelector('label') as HTMLLabelElement;
+    const input = document.getElementById('otp') as HTMLInputElement;
+    const send = document.getElementById('send') as HTMLSpanElement;
+    setRect(form, { left: 20, top: 20, width: 260, height: 48 });
+    setRect(label, { left: 20, top: 20, width: 260, height: 40 });
+    setRect(input, { left: 20, top: 20, width: 170, height: 40 });
+    setRect(send, { left: 190, top: 20, width: 90, height: 40 });
+
+    const listener = installInjectedHelper(
+      'inject-scripts/interactive-elements-helper.js',
+      '__INTERACTIVE_ELEMENTS_HELPER_INITIALIZED__',
+    );
+    const response = await sendRequest(listener, {
+      action: 'getInteractiveElements',
+      textQuery: '获取验证码',
+      includeCoordinates: true,
+    });
+
+    expect(response.success).toBe(true);
+    expect(response.elements[0]).toMatchObject({
+      tagName: 'span',
+      selector: '#send',
+      text: '获取验证码',
+      actionability: 'actionable',
+    });
+    expect(
+      response.elements.some(
+        (element: any) =>
+          element.tagName === 'input' &&
+          element.text === '获取验证码' &&
+          element.actionability === 'actionable',
+      ),
+    ).toBe(false);
+  });
+
+  it('interactive element search reports center-point occlusion for covered targets', async () => {
+    document.body.innerHTML = `
+      <button id="background-search">搜索</button>
+      <div id="modal-cover">登录后继续</div>
+    `;
+    const button = document.getElementById('background-search') as HTMLButtonElement;
+    const cover = document.getElementById('modal-cover') as HTMLDivElement;
+    setRect(button, { left: 100, top: 100, width: 120, height: 40 });
+    setRect(cover, { left: 80, top: 80, width: 240, height: 160 });
+    document.elementFromPoint = vi.fn((x: number, y: number) => {
+      if (x >= 80 && x <= 320 && y >= 80 && y <= 240) return cover;
+      return null;
+    });
+
+    const listener = installInjectedHelper(
+      'inject-scripts/interactive-elements-helper.js',
+      '__INTERACTIVE_ELEMENTS_HELPER_INITIALIZED__',
+    );
+    const response = await sendRequest(listener, {
+      action: 'getInteractiveElements',
+      textQuery: '搜索',
+      includeCoordinates: true,
+    });
+
+    expect(response.success).toBe(true);
+    expect(response.elements[0]).toMatchObject({
+      selector: '#background-search',
+      visibility: {
+        source: 'dom',
+        domVisible: true,
+        inViewport: true,
+        centerHitTarget: false,
+        occluded: true,
+        reason: 'center_covered',
+      },
+    });
+  });
+
+  it('interactive element search finds search inputs by structural identity when visible text is dynamic', async () => {
+    document.body.innerHTML = `
+      <textarea id="search-input-in-feeds" class="textarea" placeholder="葡萄牙1点开战"></textarea>
+      <button id="submit-search" aria-label="提交搜索"></button>
+    `;
+    const input = document.getElementById('search-input-in-feeds') as HTMLTextAreaElement;
+    const submit = document.getElementById('submit-search') as HTMLButtonElement;
+    setRect(input, { left: 200, top: 80, width: 480, height: 44 });
+    setRect(submit, { left: 700, top: 80, width: 44, height: 44 });
+    document.elementFromPoint = vi.fn((x: number, y: number) => {
+      if (x >= 200 && x <= 680 && y >= 80 && y <= 124) return input;
+      if (x >= 700 && x <= 744 && y >= 80 && y <= 124) return submit;
+      return null;
+    });
+
+    const listener = installInjectedHelper(
+      'inject-scripts/interactive-elements-helper.js',
+      '__INTERACTIVE_ELEMENTS_HELPER_INITIALIZED__',
+    );
+    const response = await sendRequest(listener, {
+      action: 'getInteractiveElements',
+      textQuery: '搜索',
+      selector:
+        'input,textarea,[contenteditable="true"],[role="searchbox"],[role="textbox"],button,[aria-label],[placeholder]',
+      includeCoordinates: true,
+    });
+
+    expect(response.success).toBe(true);
+    expect(response.elements[0]).toMatchObject({
+      selector: '#search-input-in-feeds',
+      tagName: 'textarea',
+      matchSource: 'attribute',
+      actionability: 'actionable',
+      text: '葡萄牙1点开战',
+    });
+    expect(response.elements).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          selector: '#submit-search',
+          matchSource: 'aria',
+        }),
+      ]),
+    );
+  });
+
+  it('interactive element search includes role-less contenteditable search inputs', async () => {
+    document.body.innerHTML = `
+      <div id="composer-search" class="global-search-input" contenteditable="true" aria-label="搜索"></div>
+    `;
+    const input = document.getElementById('composer-search') as HTMLDivElement;
+    setRect(input, { left: 120, top: 48, width: 360, height: 40 });
+    document.elementFromPoint = vi.fn((x: number, y: number) => {
+      if (x >= 120 && x <= 480 && y >= 48 && y <= 88) return input;
+      return null;
+    });
+
+    const listener = installInjectedHelper(
+      'inject-scripts/interactive-elements-helper.js',
+      '__INTERACTIVE_ELEMENTS_HELPER_INITIALIZED__',
+    );
+    const response = await sendRequest(listener, {
+      action: 'getInteractiveElements',
+      textQuery: '搜索',
+      includeCoordinates: true,
+    });
+
+    expect(response.success).toBe(true);
+    expect(response.elements[0]).toMatchObject({
+      selector: '#composer-search',
+      type: 'textarea',
+      tagName: 'div',
+      matchSource: 'aria',
+      actionability: 'actionable',
+    });
+  });
+
+  it('interactive element search keeps a phone input reachable when its label only adds country code chrome', async () => {
+    document.body.innerHTML = `
+      <form>
+        <label class="phone">
+          <span class="country-code">+86</span>
+          <input id="phone" type="text" name="phone" placeholder="输入手机号" />
+          <span data-placeholder="svg-icon">[SVG Icon]</span>
+        </label>
+      </form>
+    `;
+    const form = document.querySelector('form') as HTMLFormElement;
+    const label = document.querySelector('label') as HTMLLabelElement;
+    const input = document.getElementById('phone') as HTMLInputElement;
+    setRect(form, { left: 20, top: 20, width: 260, height: 48 });
+    setRect(label, { left: 20, top: 20, width: 260, height: 40 });
+    setRect(input, { left: 62, top: 20, width: 170, height: 40 });
+
+    const listener = installInjectedHelper(
+      'inject-scripts/interactive-elements-helper.js',
+      '__INTERACTIVE_ELEMENTS_HELPER_INITIALIZED__',
+    );
+    const response = await sendRequest(listener, {
+      action: 'getInteractiveElements',
+      textQuery: '输入手机号',
+      includeCoordinates: true,
+    });
+
+    expect(response.success).toBe(true);
+    expect(response.elements[0]).toMatchObject({
+      tagName: 'input',
+      selector: '#phone',
+      text: '输入手机号',
+      matchSource: 'placeholder',
+      actionability: 'actionable',
+      valueState: 'empty',
+    });
+  });
+
+  it('interactive element search returns a nested agreement confirmation action', async () => {
+    document.body.innerHTML = `
+      <div id="modal" class="agreement-modal" onclick="void 0">
+        <div class="body">阅读并同意《用户协议》《隐私政策》</div>
+        <div id="confirm" class="modal-action">
+          <span>同意并继续</span>
+        </div>
+        <div class="modal-action">取消</div>
+      </div>
+    `;
+    const modal = document.querySelector('.agreement-modal') as HTMLDivElement;
+    const confirm = document.getElementById('confirm') as HTMLDivElement;
+    const span = confirm.querySelector('span') as HTMLSpanElement;
+    setRect(modal, { left: 320, top: 180, width: 360, height: 240 });
+    setRect(confirm, { left: 500, top: 350, width: 128, height: 40 });
+    setRect(span, { left: 520, top: 360, width: 88, height: 20 });
+
+    const listener = installInjectedHelper(
+      'inject-scripts/interactive-elements-helper.js',
+      '__INTERACTIVE_ELEMENTS_HELPER_INITIALIZED__',
+    );
+    const response = await sendRequest(listener, {
+      action: 'getInteractiveElements',
+      textQuery: '同意并继续',
+      includeCoordinates: true,
+    });
+
+    expect(response.success).toBe(true);
+    expect(response.elements[0]).toMatchObject({
+      text: '同意并继续',
+      actionability: 'actionable',
+    });
+    expect(response.elements[0].selector).toMatch(/#confirm|span/);
+    expect(response.elements.map((element: any) => element.selector)).not.toContain('#modal');
+  });
+
+  it('interactive element selector search still honors the text query', async () => {
+    document.body.innerHTML = `
+      <div>
+        <span id="phone">输入手机号</span>
+        <span id="confirm">同意并继续</span>
+        <span id="cancel">取消</span>
+      </div>
+    `;
+    Array.from(document.querySelectorAll('span')).forEach((element, index) => {
+      setRect(element, { left: 20, top: 20 + index * 40, width: 120, height: 28 });
+    });
+
+    const listener = installInjectedHelper(
+      'inject-scripts/interactive-elements-helper.js',
+      '__INTERACTIVE_ELEMENTS_HELPER_INITIALIZED__',
+    );
+    const response = await sendRequest(listener, {
+      action: 'getInteractiveElements',
+      selector: 'span',
+      textQuery: '同意并继续',
+      includeCoordinates: false,
+    });
+
+    expect(response.success).toBe(true);
+    expect(response.elements).toHaveLength(1);
+    expect(response.elements[0]).toMatchObject({
+      selector: '#confirm',
+      text: '同意并继续',
+    });
+  });
+
+  it('interactive element search reports selector match diagnostics without failing the whole scan', async () => {
+    document.body.innerHTML = '<button id="confirm">继续</button>';
+    const button = document.getElementById('confirm') as HTMLButtonElement;
+    setRect(button, { left: 20, top: 20, width: 80, height: 32 });
+    const originalMatches = Element.prototype.matches;
+    const matchesSpy = vi.spyOn(Element.prototype, 'matches').mockImplementation(function (
+      this: Element,
+      selector: string,
+    ) {
+      if (selector === '.unstable-selector') {
+        throw new Error('selector engine unavailable');
+      }
+      return originalMatches.call(this, selector);
+    });
+
+    try {
+      const listener = installInjectedHelper(
+        'inject-scripts/interactive-elements-helper.js',
+        '__INTERACTIVE_ELEMENTS_HELPER_INITIALIZED__',
+      );
+      const response = await sendRequest(listener, {
+        action: 'getInteractiveElements',
+        selector: '.unstable-selector',
+        includeCoordinates: false,
+      });
+
+      expect(response.success).toBe(true);
+      expect(response.elements).toEqual([]);
+      expect(response.diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            source: 'selector_match_failed',
+          }),
+        ]),
+      );
+    } finally {
+      matchesSpy.mockRestore();
+    }
+  });
+
+  it('interactive element search reports hit-test diagnostics while keeping safe visibility fallback', async () => {
+    document.body.innerHTML = '<button id="confirm">继续</button>';
+    const button = document.getElementById('confirm') as HTMLButtonElement;
+    setRect(button, { left: 20, top: 20, width: 80, height: 32 });
+    document.elementFromPoint = vi.fn(() => {
+      throw new Error('hit test unavailable');
+    });
+
+    const listener = installInjectedHelper(
+      'inject-scripts/interactive-elements-helper.js',
+      '__INTERACTIVE_ELEMENTS_HELPER_INITIALIZED__',
+    );
+    const response = await sendRequest(listener, {
+      action: 'getInteractiveElements',
+      textQuery: '继续',
+      includeCoordinates: true,
+    });
+
+    expect(response.success).toBe(true);
+    expect(response.elements[0]).toMatchObject({
+      selector: '#confirm',
+      visibility: expect.objectContaining({
+        reason: 'hit_test_failed',
+      }),
+    });
+    expect(response.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: 'hit_test_failed',
+        }),
+      ]),
+    );
+  });
+
+  it('interactive element search promotes compact visible filter chips as actionable targets', async () => {
+    document.body.innerHTML = `
+      <div id="toolbar">
+        <span id="filter-chip">筛选</span>
+      </div>
+      <div id="menu">
+        <span id="most-saved">最多收藏</span>
+      </div>
+    `;
+    const toolbar = document.getElementById('toolbar') as HTMLDivElement;
+    const filterChip = document.getElementById('filter-chip') as HTMLSpanElement;
+    const menu = document.getElementById('menu') as HTMLDivElement;
+    const mostSaved = document.getElementById('most-saved') as HTMLSpanElement;
+    setRect(toolbar, { left: 20, top: 20, width: 140, height: 36 });
+    setRect(filterChip, { left: 36, top: 26, width: 44, height: 22 });
+    setRect(menu, { left: 20, top: 64, width: 220, height: 180 });
+    setRect(mostSaved, { left: 40, top: 150, width: 72, height: 24 });
+
+    const listener = installInjectedHelper(
+      'inject-scripts/interactive-elements-helper.js',
+      '__INTERACTIVE_ELEMENTS_HELPER_INITIALIZED__',
+    );
+    const filterResponse = await sendRequest(listener, {
+      action: 'getInteractiveElements',
+      textQuery: '筛选',
+      includeCoordinates: true,
+    });
+    const sortResponse = await sendRequest(listener, {
+      action: 'getInteractiveElements',
+      textQuery: '最多收藏',
+      includeCoordinates: true,
+    });
+
+    expect(filterResponse.success).toBe(true);
+    expect(filterResponse.elements[0]).toMatchObject({
+      selector: '#filter-chip',
+      text: '筛选',
+      type: 'text_action',
+      actionability: 'actionable',
+    });
+    expect(sortResponse.success).toBe(true);
+    expect(sortResponse.elements[0]).toMatchObject({
+      selector: '#most-saved',
+      text: '最多收藏',
+      type: 'text_action',
+      actionability: 'actionable',
+    });
+  });
+
+  it('interactive element search does not promote an oversized option container', async () => {
+    document.body.innerHTML = `
+      <div id="panel">
+        <span id="latest">最新</span>
+        <span id="most-saved">最多收藏</span>
+        <span id="comments">最多评论</span>
+      </div>
+    `;
+    const panel = document.getElementById('panel') as HTMLDivElement;
+    const latest = document.getElementById('latest') as HTMLSpanElement;
+    const mostSaved = document.getElementById('most-saved') as HTMLSpanElement;
+    const comments = document.getElementById('comments') as HTMLSpanElement;
+    setRect(panel, { left: 0, top: 0, width: 900, height: 500 });
+    setRect(latest, { left: 20, top: 20, width: 40, height: 24 });
+    setRect(mostSaved, { left: 20, top: 64, width: 72, height: 24 });
+    setRect(comments, { left: 20, top: 108, width: 72, height: 24 });
+
+    const listener = installInjectedHelper(
+      'inject-scripts/interactive-elements-helper.js',
+      '__INTERACTIVE_ELEMENTS_HELPER_INITIALIZED__',
+    );
+    const response = await sendRequest(listener, {
+      action: 'getInteractiveElements',
+      textQuery: '最多收藏',
+      includeCoordinates: true,
+    });
+
+    expect(response.success).toBe(true);
+    expect(response.elements[0]).toMatchObject({
+      selector: '#most-saved',
+      actionability: 'actionable',
+    });
+    expect(response.elements.map((element: any) => element.selector)).not.toContain('#panel');
+  });
+
+  it('interactive element search escapes quoted text before XPath fallback', async () => {
+    document.body.innerHTML = `
+      <main>
+        <p id="method-text">form uses method='post' for this example</p>
+      </main>
+    `;
+    const paragraph = document.getElementById('method-text') as HTMLParagraphElement;
+    setRect(paragraph, { left: 20, top: 20, width: 360, height: 28 });
+
+    const listener = installInjectedHelper(
+      'inject-scripts/interactive-elements-helper.js',
+      '__INTERACTIVE_ELEMENTS_HELPER_INITIALIZED__',
+    );
+    const response = await sendRequest(listener, {
+      action: 'getInteractiveElements',
+      textQuery: "method='post'",
+      includeCoordinates: true,
+    });
+
+    expect(response.success).toBe(true);
+    expect(response.error).toBeUndefined();
+    expect(response.elements[0]).toMatchObject({
+      selector: '#method-text',
+      text: "form uses method='post' for this example",
+      actionability: 'blocked',
+    });
   });
 });

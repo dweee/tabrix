@@ -27,7 +27,7 @@
  * This transformer owns step (3) of the maintainer loop:
  *
  *   1. Real-browser scenarios listed in
- *      `docs/RELEASE_NOTES_v2.4.0_DRAFT.md` §"Maintainer command list".
+ *      `docs/releases/RELEASE_NOTES_V2_4_DRAFT.md` §"Maintainer command list".
  *   2. The runner appends one NDJSON line per tool invocation +
  *      one per scenario + one per pair to the run file.
  *   3. `pnpm run benchmark:v24 -- --input <file>` calls
@@ -113,7 +113,10 @@ export type BenchmarkReplayBlockReason =
   | 'capability_off'
   | 'unsupported_step_kind'
   | 'non_portable_args'
-  | 'non_github_pageRole'
+  | 'site_replay_policy_missing'
+  | 'page_role_not_allowed'
+  /** @deprecated Legacy runs before site-aware replay policies. */
+  | 'legacy_site_page_role'
   | 'below_threshold'
   | 'stale_locator'
   | 'none';
@@ -240,7 +243,10 @@ export interface BenchmarkReplayBlockedByCounters {
   capability_off: number;
   unsupported_step_kind: number;
   non_portable_args: number;
-  non_github_pageRole: number;
+  site_replay_policy_missing: number;
+  page_role_not_allowed: number;
+  /** Legacy bucket kept so older benchmark artifacts still parse. */
+  legacy_site_page_role: number;
   below_threshold: number;
   stale_locator: number;
   none: number;
@@ -527,7 +533,9 @@ function emptyBlockedByCounters(): BenchmarkReplayBlockedByCounters {
     capability_off: 0,
     unsupported_step_kind: 0,
     non_portable_args: 0,
-    non_github_pageRole: 0,
+    site_replay_policy_missing: 0,
+    page_role_not_allowed: 0,
+    legacy_site_page_role: 0,
     below_threshold: 0,
     stale_locator: 0,
     none: 0,
@@ -551,7 +559,9 @@ function isBlockReason(v: unknown): v is BenchmarkReplayBlockReason {
     v === 'capability_off' ||
     v === 'unsupported_step_kind' ||
     v === 'non_portable_args' ||
-    v === 'non_github_pageRole' ||
+    v === 'site_replay_policy_missing' ||
+    v === 'page_role_not_allowed' ||
+    v === 'legacy_site_page_role' ||
     v === 'below_threshold' ||
     v === 'stale_locator' ||
     v === 'none'

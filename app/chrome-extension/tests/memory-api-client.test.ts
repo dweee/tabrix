@@ -10,12 +10,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  DEFAULT_MKE_PAGE_SIZE,
   DEFAULT_NATIVE_SERVER_PORT,
-  DEFAULT_SESSIONS_PAGE_SIZE,
-  MemoryApiError,
-  fetchMemoryTask,
-  fetchRecentSessions,
-  fetchSessionSteps,
+  clearMkeBrowserObjects,
+  fetchMkeBrowserObjects,
+  fetchMkeExperienceRecipes,
+  fetchMkeKnowledgeModels,
+  fetchMkeMemoryTraces,
   resolveMemoryApiBaseUrl,
 } from '@/common/memory-api-client';
 
@@ -84,31 +85,191 @@ describe('resolveMemoryApiBaseUrl', () => {
   });
 });
 
-describe('fetchRecentSessions', () => {
-  it('sends the default limit/offset when called without args', async () => {
+describe('MKE data query helpers', () => {
+  it('fetches Memory trace summaries from the MKE endpoint', async () => {
+    const payload = {
+      traces: [
+        {
+          traceId: 'trace-1',
+          toolName: 'chrome_read_page',
+          requestAt: '2026-06-06T10:00:00Z',
+          responseAt: '2026-06-06T10:00:01Z',
+          aiFeedback: null,
+          createdAt: '2026-06-06T10:00:01Z',
+        },
+      ],
+      total: 1,
+      limit: DEFAULT_MKE_PAGE_SIZE,
+      offset: 0,
+      persistenceMode: 'disk' as const,
+    };
+    fetchMock.mockResolvedValue(okResponse(payload));
+
+    const data = await fetchMkeMemoryTraces({ baseUrl: 'http://127.0.0.1:12306' });
+
+    expect(data).toEqual(payload);
+    expect(String(fetchMock.mock.calls[0][0])).toBe(
+      `http://127.0.0.1:12306/memory/mke/traces?limit=${DEFAULT_MKE_PAGE_SIZE}&offset=0`,
+    );
+  });
+
+  it('fetches Knowledge model summaries with explicit pagination', async () => {
     fetchMock.mockResolvedValue(
       okResponse({
-        sessions: [],
+        knowledgeModels: [],
         total: 0,
-        limit: DEFAULT_SESSIONS_PAGE_SIZE,
+        limit: 5,
+        offset: 10,
+        persistenceMode: 'disk',
+      }),
+    );
+
+    await fetchMkeKnowledgeModels({
+      baseUrl: 'http://127.0.0.1:12306',
+      limit: 5,
+      offset: 10,
+    });
+
+    expect(String(fetchMock.mock.calls[0][0])).toBe(
+      'http://127.0.0.1:12306/memory/mke/knowledge?limit=5&offset=10',
+    );
+  });
+
+  it('retries protected MKE reads with the current bearer token after 401', async () => {
+    const payload = {
+      knowledgeModels: [],
+      total: 0,
+      limit: 5,
+      offset: 0,
+      persistenceMode: 'disk' as const,
+    };
+    fetchMock
+      .mockResolvedValueOnce(
+        errResponse(
+          401,
+          'Unauthorized - provide a valid Bearer token via the Authorization header.',
+        ),
+      )
+      .mockResolvedValueOnce(okResponse({ token: 'test-token' }))
+      .mockResolvedValueOnce(okResponse(payload));
+
+    const data = await fetchMkeKnowledgeModels({
+      baseUrl: 'http://127.0.0.1:12306',
+      limit: 5,
+      offset: 0,
+    });
+
+    expect(data).toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      'http://127.0.0.1:12306/memory/mke/knowledge?limit=5&offset=0',
+    );
+    expect(fetchMock.mock.calls[1][0]).toBe('http://127.0.0.1:12306/auth/token');
+    expect(fetchMock.mock.calls[2][0]).toBe(
+      'http://127.0.0.1:12306/memory/mke/knowledge?limit=5&offset=0',
+    );
+    const retryInit = fetchMock.mock.calls[2][1] as RequestInit;
+    expect(new Headers(retryInit.headers).get('authorization')).toBe('Bearer test-token');
+  });
+
+  it('preserves the original 401 when the local auth endpoint has no token', async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        errResponse(
+          401,
+          'Unauthorized - provide a valid Bearer token via the Authorization header.',
+        ),
+      )
+      .mockResolvedValueOnce(okResponse(null));
+
+    await expect(
+      fetchMkeExperienceRecipes({ baseUrl: 'http://127.0.0.1:12306' }),
+    ).rejects.toMatchObject({
+      kind: 'http',
+      httpStatus: 401,
+      message: 'Unauthorized - provide a valid Bearer token via the Authorization header.',
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1][0]).toBe('http://127.0.0.1:12306/auth/token');
+  });
+
+  it('fetches Browser Object summaries with explicit pagination', async () => {
+    const payload = {
+      browserObjects: [
+        {
+          objectId: 'object-1',
+          tabId: '7',
+          title: 'Example page',
+          url: 'https://example.test/search',
+          location: 'example.test',
+          status: 'running',
+          createdAt: '2026-06-06T10:00:00Z',
+          updatedAt: '2026-06-06T10:00:01Z',
+        },
+      ],
+      total: 1,
+      limit: 10,
+      offset: 20,
+      persistenceMode: 'disk' as const,
+    };
+    fetchMock.mockResolvedValue(okResponse(payload));
+
+    const data = await fetchMkeBrowserObjects({
+      baseUrl: 'http://127.0.0.1:12306',
+      limit: 10,
+      offset: 20,
+    });
+
+    expect(data).toEqual(payload);
+    expect(String(fetchMock.mock.calls[0][0])).toBe(
+      'http://127.0.0.1:12306/memory/mke/browser-objects?limit=10&offset=20',
+    );
+  });
+
+  it('does not expose Object Library graph scope in the product client', async () => {
+    fetchMock.mockResolvedValue(
+      okResponse({
+        browserObjects: [],
+        total: 0,
+        limit: 20,
         offset: 0,
         persistenceMode: 'disk',
       }),
     );
 
-    await fetchRecentSessions({ baseUrl: 'http://127.0.0.1:12306' });
+    await fetchMkeBrowserObjects({
+      baseUrl: 'http://127.0.0.1:12306',
+    });
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const url = String(fetchMock.mock.calls[0][0]);
-    expect(url).toBe(
-      `http://127.0.0.1:12306/memory/sessions?limit=${DEFAULT_SESSIONS_PAGE_SIZE}&offset=0`,
+    expect(String(fetchMock.mock.calls[0][0])).toBe(
+      'http://127.0.0.1:12306/memory/mke/browser-objects?limit=20&offset=0',
     );
   });
 
-  it('clamps limit into [1, 500] before putting it on the wire', async () => {
+  it('clears Object Library rows', async () => {
     fetchMock.mockResolvedValue(
       okResponse({
-        sessions: [],
+        cleared: true,
+        total: 0,
+        persistenceMode: 'disk',
+      }),
+    );
+
+    await expect(clearMkeBrowserObjects({ baseUrl: 'http://127.0.0.1:12306' })).resolves.toEqual({
+      cleared: true,
+      total: 0,
+      persistenceMode: 'disk',
+    });
+
+    expect(fetchMock.mock.calls[0][0]).toBe('http://127.0.0.1:12306/memory/mke/browser-objects');
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'DELETE' });
+  });
+
+  it('fetches Experience recipe summaries and clamps invalid pagination', async () => {
+    fetchMock.mockResolvedValue(
+      okResponse({
+        experienceRecipes: [],
         total: 0,
         limit: 500,
         offset: 0,
@@ -116,129 +277,14 @@ describe('fetchRecentSessions', () => {
       }),
     );
 
-    await fetchRecentSessions({
-      limit: 999_999,
-      offset: -5,
+    await fetchMkeExperienceRecipes({
       baseUrl: 'http://127.0.0.1:12306',
+      limit: 9999,
+      offset: -20,
     });
 
-    const url = String(fetchMock.mock.calls[0][0]);
-    expect(url).toContain('limit=500');
-    expect(url).toContain('offset=0');
-  });
-
-  it('returns the data envelope payload when the server replies 200 ok', async () => {
-    const payload = {
-      sessions: [
-        {
-          sessionId: 'sess-1',
-          taskId: 'task-1',
-          taskTitle: 'Open login',
-          taskIntent: 'Navigate to login',
-          transport: 'stdio',
-          clientName: 'codex',
-          status: 'completed' as const,
-          startedAt: '2026-04-20T10:00:00Z',
-          endedAt: '2026-04-20T10:00:42Z',
-          stepCount: 3,
-        },
-      ],
-      total: 1,
-      limit: 20,
-      offset: 0,
-      persistenceMode: 'disk' as const,
-    };
-    fetchMock.mockResolvedValue(okResponse(payload));
-
-    const data = await fetchRecentSessions({ baseUrl: 'http://127.0.0.1:12306' });
-    expect(data).toEqual(payload);
-  });
-
-  it('raises a MemoryApiError(kind=http) on non-2xx responses', async () => {
-    fetchMock.mockResolvedValue(errResponse(500, 'boom'));
-
-    await expect(fetchRecentSessions({ baseUrl: 'http://127.0.0.1:12306' })).rejects.toMatchObject({
-      name: 'MemoryApiError',
-      kind: 'http',
-      httpStatus: 500,
-      message: 'boom',
-    });
-  });
-
-  it('raises a MemoryApiError(kind=network) when fetch itself throws', async () => {
-    fetchMock.mockRejectedValue(new TypeError('Failed to fetch'));
-
-    await expect(fetchRecentSessions({ baseUrl: 'http://127.0.0.1:12306' })).rejects.toMatchObject({
-      name: 'MemoryApiError',
-      kind: 'network',
-    });
-  });
-
-  it('raises a MemoryApiError(kind=shape) when the envelope is unrecognised', async () => {
-    fetchMock.mockResolvedValue(
-      new Response(JSON.stringify({ unexpected: true }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      }),
+    expect(String(fetchMock.mock.calls[0][0])).toBe(
+      'http://127.0.0.1:12306/memory/mke/experience?limit=500&offset=0',
     );
-
-    await expect(fetchRecentSessions({ baseUrl: 'http://127.0.0.1:12306' })).rejects.toBeInstanceOf(
-      MemoryApiError,
-    );
-  });
-});
-
-describe('fetchSessionSteps', () => {
-  it('URL-encodes the sessionId segment', async () => {
-    fetchMock.mockResolvedValue(
-      okResponse({ sessionId: 'sess/1', steps: [], persistenceMode: 'disk' }),
-    );
-
-    await fetchSessionSteps('sess/1', { baseUrl: 'http://127.0.0.1:12306' });
-
-    const url = String(fetchMock.mock.calls[0][0]);
-    expect(url).toBe('http://127.0.0.1:12306/memory/sessions/sess%2F1/steps');
-  });
-
-  it('rejects an empty sessionId before touching the network', async () => {
-    await expect(fetchSessionSteps('')).rejects.toMatchObject({
-      kind: 'shape',
-    });
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-});
-
-describe('fetchMemoryTask', () => {
-  it('returns the task row on 200 ok', async () => {
-    const payload = {
-      task: {
-        taskId: 'task-1',
-        taskType: 'browser.navigate',
-        title: 't',
-        intent: 'i',
-        origin: 'codex',
-        createdAt: '2026-04-20T10:00:00Z',
-        updatedAt: '2026-04-20T10:00:00Z',
-        status: 'completed' as const,
-        labels: [],
-      },
-      persistenceMode: 'disk' as const,
-    };
-    fetchMock.mockResolvedValue(okResponse(payload));
-
-    const data = await fetchMemoryTask('task-1', { baseUrl: 'http://127.0.0.1:12306' });
-    expect(data).toEqual(payload);
-  });
-
-  it('surfaces the server message on 404 responses', async () => {
-    fetchMock.mockResolvedValue(errResponse(404, 'Task not found'));
-
-    await expect(
-      fetchMemoryTask('missing', { baseUrl: 'http://127.0.0.1:12306' }),
-    ).rejects.toMatchObject({
-      kind: 'http',
-      httpStatus: 404,
-      message: 'Task not found',
-    });
   });
 });

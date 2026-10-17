@@ -32,4 +32,21 @@ describe('TokenManager', () => {
 
     expect(chmodSpy).toHaveBeenCalledWith(path.join(tempHome, '.tabrix', 'auth-token.json'), 0o600);
   });
+
+  test('verify preserves valid invalid and expired token semantics', () => {
+    process.env.MCP_AUTH_TOKEN = 'remote-token';
+    jest.resetModules();
+
+    jest.isolateModules(() => {
+      const { tokenManager } = require('./auth') as typeof AuthModule;
+      tokenManager.resolve();
+      expect(tokenManager.verify('remote-token')).toBe('ok');
+      expect(tokenManager.verify('wrong-token')).toBe('invalid');
+
+      const current = tokenManager.current();
+      expect(current).not.toBeNull();
+      current!.expiresAt = Date.now() - 1;
+      expect(tokenManager.verify('remote-token')).toBe('expired');
+    });
+  });
 });

@@ -25,6 +25,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { randomUUID } from 'node:crypto';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { createMcpServer } from '../mcp/mcp-server';
+import { handleToolCall } from '../mcp/register-tools';
 import { __bridgeLaunchInternals } from '../mcp/bridge-recovery';
 import { sessionManager } from '../execution/session-manager';
 import { SessionRegistry, type ConnectedClient, type TransportsSnapshot } from './session-registry';
@@ -41,7 +42,7 @@ import {
 } from '../scripts/bridge-recovery-guidance';
 import { registerMemoryRoutes } from './memory-routes';
 import { registerExecutionRoutes } from './execution-routes';
-import { getCapabilityDiagnostics, type CapabilitySourceKind } from '../policy/capabilities';
+import { allowsLocalhostTokenBypass, isLoopbackClientIp } from '../policy/http-auth-boundary';
 import { getDefaultContextManager } from '../runtime/browser-context-manager';
 import { getDefaultFactCollector } from '../runtime/browser-fact-collector';
 import {
@@ -49,6 +50,15 @@ import {
   type ObservationDiagnosticsSnapshot,
 } from '../runtime/observation-diagnostics';
 import { NativeMessageType } from '@tabrix/shared';
+import { getEventStreamHealthSnapshot } from '../runtime/browser-event-stream';
+import {
+  startLifecycleEvidenceRuntime,
+  stopLifecycleEvidenceRuntime,
+} from '../runtime/lifecycle-evidence-runtime-bootstrap';
+import {
+  getLifecycleEvidenceArtifactStoreSnapshot,
+  type LifecycleEvidenceArtifactStoreSnapshot,
+} from '../runtime/lifecycle-evidence-artifact-store';
 
 // Compatibility guard:
 // @hono/node-server may call socket.destroySoon() while draining incoming requests.
@@ -91,6 +101,7 @@ interface BridgeHeartbeatPayload {
   tabCount?: unknown;
   windowCount?: unknown;
   autoConnectEnabled?: unknown;
+  browserWorld?: unknown;
 }
 
 interface BridgeFileOperationPayload {
@@ -148,18 +159,75 @@ interface ServerStatusSnapshot {
     lastSessionId: string | null;
     persistenceMode: 'disk' | 'memory' | 'off';
   };
-  capabilities: {
-    source: CapabilitySourceKind;
-    enabled: string[];
-    unknown: string[];
-  };
   v27Observation: ObservationDiagnosticsSnapshot;
+  lifecycleEvidenceArtifacts: LifecycleEvidenceArtifactStoreSnapshot;
 }
 
 export type { ConnectedClient };
 
 function canWriteReply(reply: FastifyReply): boolean {
   return !reply.sent && !reply.raw.writableEnded && !reply.raw.headersSent;
+}
+
+function getJsonRpcRequestId(body: unknown): string | number | null {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
+  const maybeId = (body as { id?: unknown }).id;
+  if (typeof maybeId === 'string' || typeof maybeId === 'number' || maybeId === null) {
+    return maybeId;
+  }
+  return null;
+}
+
+function sendMcpJsonRpcError(
+  reply: FastifyReply,
+  statusCode: number,
+  body: unknown,
+  code: number,
+  message: string,
+  data?: Record<string, unknown>,
+): void {
+  reply.code(statusCode).send({
+    jsonrpc: '2.0',
+    id: getJsonRpcRequestId(body),
+    error: {
+      code,
+      message,
+      ...(data ? { data } : {}),
+    },
+  });
+}
+
+type StaleSessionRecoverableToolCall = {
+  name: string;
+  args: Record<string, unknown>;
+};
+
+const STALE_SESSION_RECOVERABLE_TOOL_NAMES = new Set([
+  'get_windows_and_tabs',
+  'chrome_read_page',
+  'chrome_screenshot',
+]);
+
+function getStaleSessionRecoverableToolCall(body: unknown): StaleSessionRecoverableToolCall | null {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
+  const requestBody = body as {
+    method?: unknown;
+    params?: {
+      name?: unknown;
+      arguments?: unknown;
+    };
+  };
+  if (requestBody.method !== 'tools/call') return null;
+  if (typeof requestBody.params?.name !== 'string' || !requestBody.params.name) return null;
+  if (!STALE_SESSION_RECOVERABLE_TOOL_NAMES.has(requestBody.params.name)) return null;
+  const args = requestBody.params.arguments;
+  return {
+    name: requestBody.params.name,
+    args:
+      !args || typeof args !== 'object' || Array.isArray(args)
+        ? {}
+        : (args as Record<string, unknown>),
+  };
 }
 
 function getLocalNetworkAddresses(): string[] {
@@ -270,13 +338,14 @@ export class Server {
   }
 
   private setupRoutes(): void {
-    const LOCALHOST_IPS = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
     const AUTH_PUBLIC_PATHS = new Set(['/ping', '/status', '/auth/token', '/auth/refresh']);
 
     this.fastify.addHook('onRequest', async (request, reply) => {
       if (!tokenManager.enabled) return;
       if (AUTH_PUBLIC_PATHS.has(request.url.split('?')[0])) return;
-      if (LOCALHOST_IPS.has(request.ip)) return;
+      if (allowsLocalhostTokenBypass({ clientIp: request.ip, listenHost: SERVER_CONFIG.HOST })) {
+        return;
+      }
 
       const authHeader = request.headers.authorization;
       const bearer = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : '';
@@ -396,10 +465,8 @@ export class Server {
   // ============================================================
 
   private setupAuthRoutes(): void {
-    const LOCALHOST_IPS = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
-
     this.fastify.get('/auth/token', async (request: FastifyRequest, reply: FastifyReply) => {
-      if (!LOCALHOST_IPS.has(request.ip)) {
+      if (!isLoopbackClientIp(request.ip)) {
         return reply.status(403).send({
           status: 'error',
           message: 'Forbidden – auth management is only available from localhost.',
@@ -419,7 +486,7 @@ export class Server {
     });
 
     this.fastify.post('/auth/refresh', async (request: FastifyRequest, reply: FastifyReply) => {
-      if (!LOCALHOST_IPS.has(request.ip)) {
+      if (!isLoopbackClientIp(request.ip)) {
         return reply.status(403).send({
           status: 'error',
           message: 'Forbidden – auth management is only available from localhost.',
@@ -462,8 +529,6 @@ export class Server {
   // ============================================================
 
   private setupExtensionRoutes(): void {
-    const LOCALHOST_IPS = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
-
     this.fastify.get(
       '/ask-extension',
       async (request: FastifyRequest<{ Body: ExtensionRequestPayload }>, reply: FastifyReply) => {
@@ -504,7 +569,7 @@ export class Server {
     this.fastify.post(
       '/bridge/heartbeat',
       async (request: FastifyRequest<{ Body: BridgeHeartbeatPayload }>, reply: FastifyReply) => {
-        if (!LOCALHOST_IPS.has(request.ip)) {
+        if (!isLoopbackClientIp(request.ip)) {
           return reply.status(403).send({
             status: 'error',
             message: 'Forbidden – bridge heartbeat is only available from localhost.',
@@ -512,6 +577,13 @@ export class Server {
         }
 
         const body = (request.body || {}) as BridgeHeartbeatPayload;
+        if (body.browserWorld && typeof body.browserWorld === 'object') {
+          sessionManager.recordMkeBrowserWorldSnapshot({
+            browserWorld: body.browserWorld,
+            observedAtMs: Number.isFinite(body.sentAt) ? Number(body.sentAt) : Date.now(),
+            browserContextKey: typeof body.connectionId === 'string' ? body.connectionId : null,
+          });
+        }
         const snapshot = this.recordBridgeHeartbeat({
           sentAt: Number.isFinite(body.sentAt) ? Number(body.sentAt) : Date.now(),
           nativeConnected: body.nativeConnected === true,
@@ -541,7 +613,7 @@ export class Server {
         request: FastifyRequest<{ Body: BridgeFileOperationPayload }>,
         reply: FastifyReply,
       ) => {
-        if (!LOCALHOST_IPS.has(request.ip)) {
+        if (!isLoopbackClientIp(request.ip)) {
           return reply.status(403).send({
             status: 'error',
             message: 'Forbidden – bridge file operations are only available from localhost.',
@@ -574,7 +646,7 @@ export class Server {
         request: FastifyRequest<{ Body: BridgeRecoveryStartPayload }>,
         reply: FastifyReply,
       ) => {
-        if (!LOCALHOST_IPS.has(request.ip)) {
+        if (!isLoopbackClientIp(request.ip)) {
           return reply.status(403).send({
             status: 'error',
             message: 'Forbidden – bridge recovery is only available from localhost.',
@@ -604,7 +676,7 @@ export class Server {
         request: FastifyRequest<{ Body: BridgeRecoveryFinishPayload }>,
         reply: FastifyReply,
       ) => {
-        if (!LOCALHOST_IPS.has(request.ip)) {
+        if (!isLoopbackClientIp(request.ip)) {
           return reply.status(403).send({
             status: 'error',
             message: 'Forbidden – bridge recovery is only available from localhost.',
@@ -633,7 +705,7 @@ export class Server {
         request: FastifyRequest<{ Body: BridgeTestingBrowserLaunchOverridePayload }>,
         reply: FastifyReply,
       ) => {
-        if (!LOCALHOST_IPS.has(request.ip)) {
+        if (!isLoopbackClientIp(request.ip)) {
           return reply.status(403).send({
             status: 'error',
             message: 'Forbidden – bridge testing overrides are only available from localhost.',
@@ -668,7 +740,7 @@ export class Server {
         request: FastifyRequest<{ Body: BridgeTestingCommandChannelPayload }>,
         reply: FastifyReply,
       ) => {
-        if (!LOCALHOST_IPS.has(request.ip)) {
+        if (!isLoopbackClientIp(request.ip)) {
           return reply.status(403).send({
             status: 'error',
             message: 'Forbidden – command channel testing is only available from localhost.',
@@ -723,8 +795,38 @@ export class Server {
       if (transport) {
         // Existing session found, proceed.
       } else if (sessionId && !transport) {
-        // Spec: unknown/terminated session → 404, which tells the client to re-initialize.
-        reply.code(HTTP_STATUS.NOT_FOUND).send({ error: ERROR_MESSAGES.STALE_MCP_SESSION });
+        const recoverableToolCall = getStaleSessionRecoverableToolCall(request.body);
+        if (recoverableToolCall) {
+          try {
+            const result = await handleToolCall(recoverableToolCall.name, recoverableToolCall.args);
+            reply.code(HTTP_STATUS.OK).send({
+              jsonrpc: '2.0',
+              id: getJsonRpcRequestId(request.body),
+              result,
+            });
+          } catch {
+            sendMcpJsonRpcError(
+              reply,
+              HTTP_STATUS.INTERNAL_SERVER_ERROR,
+              request.body,
+              -32603,
+              ERROR_MESSAGES.MCP_REQUEST_PROCESSING_ERROR,
+            );
+          }
+          return;
+        }
+        sendMcpJsonRpcError(
+          reply,
+          HTTP_STATUS.NOT_FOUND,
+          request.body,
+          -32001,
+          ERROR_MESSAGES.STALE_MCP_SESSION,
+          {
+            retryable: true,
+            recoveryAction: 'reinitialize_without_session_id',
+            staleSessionIdReceived: true,
+          },
+        );
         return;
       } else if (!sessionId && isInitializeRequest(request.body)) {
         const createdSessionId = randomUUID();
@@ -766,7 +868,13 @@ export class Server {
         };
         await server.connect(transport);
       } else {
-        reply.code(HTTP_STATUS.BAD_REQUEST).send({ error: ERROR_MESSAGES.INVALID_MCP_REQUEST });
+        sendMcpJsonRpcError(
+          reply,
+          HTTP_STATUS.BAD_REQUEST,
+          request.body,
+          -32600,
+          ERROR_MESSAGES.INVALID_MCP_REQUEST,
+        );
         return;
       }
 
@@ -782,9 +890,13 @@ export class Server {
           this.sessions.remove(newSessionId, 'initialize-failed');
         }
         if (canWriteReply(reply)) {
-          reply
-            .code(HTTP_STATUS.INTERNAL_SERVER_ERROR)
-            .send({ error: ERROR_MESSAGES.MCP_REQUEST_PROCESSING_ERROR });
+          sendMcpJsonRpcError(
+            reply,
+            HTTP_STATUS.INTERNAL_SERVER_ERROR,
+            request.body,
+            -32603,
+            ERROR_MESSAGES.MCP_REQUEST_PROCESSING_ERROR,
+          );
         }
       }
     });
@@ -887,10 +999,12 @@ export class Server {
       this.isRunning = true;
       this.bridgeState.startWatching();
       bridgeCommandChannel.attach(this.fastify.server);
+      startLifecycleEvidenceRuntime();
     } catch (err) {
       this.listeningPort = null;
       this.isRunning = false;
       this.bridgeState.stopWatching();
+      stopLifecycleEvidenceRuntime();
       throw err;
     }
   }
@@ -909,6 +1023,7 @@ export class Server {
       this.bridgeState.reset();
       this.clearNativeHost();
       bridgeCommandChannel.reset();
+      stopLifecycleEvidenceRuntime();
     } catch (err) {
       this.listeningPort = null;
       this.isRunning = false;
@@ -916,6 +1031,7 @@ export class Server {
       this.bridgeState.reset();
       this.clearNativeHost();
       bridgeCommandChannel.reset();
+      stopLifecycleEvidenceRuntime();
       throw err;
     }
   }
@@ -957,11 +1073,11 @@ export class Server {
     this.bridgeState.syncBrowserProcessNow();
     this.bridgeState.setNativeHostAttached(this.nativeHost !== null);
     const bridge = this.bridgeState.getSnapshot();
-    const capabilities = getCapabilityDiagnostics();
     const v27Observation = getObservationDiagnosticsSnapshot({
       factSnapshotCount: getDefaultFactCollector().size(),
       trackedContextCount: getDefaultContextManager().size(),
     });
+    const lifecycleEvidenceArtifacts = getLifecycleEvidenceArtifactStoreSnapshot();
 
     return {
       isRunning: this.isRunning,
@@ -999,8 +1115,8 @@ export class Server {
             : null,
         persistenceMode: sessionManager.getPersistenceStatus().mode,
       },
-      capabilities,
       v27Observation,
+      lifecycleEvidenceArtifacts,
     };
   }
 

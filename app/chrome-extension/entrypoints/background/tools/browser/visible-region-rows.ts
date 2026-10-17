@@ -94,7 +94,7 @@ const CONTROL_ROLES = new Set([
 ]);
 
 const SHELL_TEXT_PATTERN =
-  /\b(filter|filters?|sort|footer|navigation|menu|home|login|sign in|submit|search|all|more|settings|privacy|terms|help|sponsor|sponsors?|sponsorable|skip to content|copyright|feedback|sidebar|topics?)\b|筛选|过滤|排序|首页|登录|搜索|赞助|隐私|协议|帮助|创作中心|放映厅|小游戏|业务合作|营业执照|公网安备|网文|ICP备|备案|许可证|许可|网络交易服务|医疗器械/i;
+  /\b(filter|filters?|sort|footer|navigation|menu|home|login|sign in|submit|search|all|more|settings|privacy|terms|help|sponsor|sponsors?|sponsorable|skip to content|copyright|feedback|sidebar|topics?)\b|筛选|过滤|排序|首页|登录|搜索|更多|赞助|隐私|协议|帮助|创作中心|放映厅|小游戏|业务合作|营业执照|公网安备|网文|ICP备|备案|许可证|许可|网络交易服务|医疗器械/i;
 const FOOTER_LEGAL_REPORT_PATTERN =
   /\b(footer|privacy|terms|copyright|certificate|license|permit|legal|compliance|sponsors?|sponsorable|report (?:abuse|harmful|center)|harmful information report|rumou?r exposure|exposure desk|internet report center|business license|internet drug information service)\b|隐私|协议|版权|赞助|举报|有害信息|互联网举报|网络谣言|谣言曝光|资格证书|许可证|备案|公网安备|网文|营业执照|违法不良|网信算备|增值电信|ICP备?/i;
 const SEARCH_CONTROL_TEXT_PATTERN =
@@ -102,15 +102,15 @@ const SEARCH_CONTROL_TEXT_PATTERN =
 const COMPANY_FOOTER_TEXT_PATTERN =
   /\b(?:company|co\.,?\s*ltd|limited|inc\.?|llc|address|registered office)\b|公司|有限公司|地址：|地址:/i;
 const UTILITY_LINK_TEXT_PATTERN =
-  /\b(creator center|creator learning center|upload|upload video|video management|works? data|live data|ads?|advertising|advertisements?|account recovery|contact us|join us|site map|sitemap|friend links|business license|about us|download app)\b|发布视频(?:\/图文)?|发布图文|视频管理|作品数据|直播数据|创作者学习中心|创作中心|广告投放|账号找回|联系我们|加入我们|站点地图|友情链接|业务合作|营业执照|^下载(?:app|应用|客户端)?$/i;
+  /\b(creator center|creator learning center|upload|upload video|video management|works? data|live data|ads?|advertising|advertisements?|account recovery|contact us|join us|site map|sitemap|friend links|business license|about us|download app)\b|发布视频(?:\/图文)?|发布图文|视频管理|作品数据|直播数据|创作者学习中心|创作中心|广告投放|账号找回|联系我们|加入我们|站点地图|友情链接|业务合作|营业执照|关于我们|^下载(?:app|应用|客户端)?$/i;
 const UTILITY_LINK_HREF_PATTERN =
   /(?:^|\/)(?:creator(?:-center)?|creator-center|upload|video-management|ads?|advertising|account(?:-recovery)?|recover|recovery|contact(?:-us)?|about(?:-us)?|sitemap|site-map|friend-links?|download(?:-app)?|legal|privacy|terms|certificate|license|permit|compliance|icp|record|report|feedback|sponsors?)(?:\/|$|\?)/i;
 const META_PATTERN =
-  /\b(\d+\s*(?:h|hr|hrs|hour|hours|d|day|days|m|min|mins|minute|minutes|ago)|yesterday|today|updated|posted|views?|\d{1,2}:\d{2})\b|\d{4}年\d{1,2}月\d{1,2}日|刚刚|分钟前|小时前|昨天|今天|发布|更新/i;
+  /\b(\d+\s*(?:h|hr|hrs|hour|hours|d|day|days|m|min|mins|minute|minutes|ago)|yesterday|today|updated|posted|views?|\d{1,2}:\d{2})\b|\d{4}年\d{1,2}月\d{1,2}日|\d+\s*(?:天|日|小时|分钟)前|刚刚|分钟前|小时前|昨天|今天|发布|更新/i;
 const INTERACTION_PATTERN =
   /\b(\d+(?:\.\d+)?\s*[kKmM]?\s*(?:likes?|stars?|comments?|replies?|views?|shares?))\b|点赞|评论|收藏|转发|阅读|浏览/i;
 const VISIBLE_TEXT_FALLBACK_MIN_CHARS = 120;
-const VISIBLE_TEXT_FALLBACK_MAX_ROWS = 5;
+const VISIBLE_TEXT_FALLBACK_MAX_ROWS = 12;
 
 export function extractVisibleRegionRows(input: {
   pageContent: string;
@@ -139,18 +139,17 @@ export function extractVisibleRegionRows(input: {
     rejectedReasonDistribution,
     searchShellContext,
   );
-  const candidateRows = orderedGroups
-    .map((group) => buildRow(group, searchShellContext))
-    .filter((row): row is VisibleRegionRow => row !== null)
-    .filter((row) => !isMetaOnlyRow(row))
-    .slice(0, Math.max(1, Math.floor(input.maxRows ?? 20)));
+  const candidateRows = preferBusinessRows(
+    orderedGroups
+      .map((group) => buildRow(group, searchShellContext))
+      .filter((row): row is VisibleRegionRow => row !== null)
+      .filter((row) => !isMetaOnlyRow(row)),
+  ).slice(0, Math.max(1, Math.floor(input.maxRows ?? 20)));
   const candidateTargetRefCoverageRate = candidateRows.length
     ? clampConfidence(candidateRows.filter((row) => row.targetRef).length / candidateRows.length)
     : 0;
   const rows =
-    candidateRows.length >= 2 && candidateRows.length <= 5 && candidateTargetRefCoverageRate >= 0.95
-      ? candidateRows
-      : [];
+    candidateRows.length >= 2 && candidateTargetRefCoverageRate >= 0.95 ? candidateRows : [];
   if (candidateRows.length > 0 && rows.length === 0) {
     if (candidateRows.length < 2) {
       rejectedReasonDistribution.single_isolated_text += candidateRows.length;
@@ -158,20 +157,24 @@ export function extractVisibleRegionRows(input: {
       rejectedReasonDistribution.target_ref_coverage_insufficient += candidateRows.length;
     }
   }
-  const visibleTextFallback =
-    rows.length === 0
-      ? buildVisibleTextFallbackRows({
-          visibleTextContent: input.visibleTextContent,
-          fallbackInteractiveElements: input.fallbackInteractiveElements,
-          sourceRegion,
-          searchShellContext,
-          maxRows: Math.min(
-            VISIBLE_TEXT_FALLBACK_MAX_ROWS,
-            Math.max(1, Math.floor(input.maxRows ?? VISIBLE_TEXT_FALLBACK_MAX_ROWS)),
-          ),
-        })
-      : { rows: [], rejectedReasonDistribution: emptyRejectedDistribution() };
-  const selectedRows = rows.length > 0 ? rows : visibleTextFallback.rows;
+  const shouldTryVisibleTextFallback =
+    rows.length === 0 || (input.visibleTextContent && hasShellDominatedRows(rows));
+  const visibleTextFallback = shouldTryVisibleTextFallback
+    ? buildVisibleTextFallbackRows({
+        visibleTextContent: input.visibleTextContent,
+        fallbackInteractiveElements: input.fallbackInteractiveElements,
+        sourceRegion,
+        searchShellContext,
+        maxRows: Math.min(
+          VISIBLE_TEXT_FALLBACK_MAX_ROWS,
+          Math.max(1, Math.floor(input.maxRows ?? VISIBLE_TEXT_FALLBACK_MAX_ROWS)),
+        ),
+      })
+    : { rows: [], rejectedReasonDistribution: emptyRejectedDistribution() };
+  const selectedRows =
+    rows.length > 0 && !shouldPreferVisibleTextRows(rows, visibleTextFallback.rows)
+      ? rows
+      : visibleTextFallback.rows;
   mergeRejectedDistribution(
     rejectedReasonDistribution,
     visibleTextFallback.rejectedReasonDistribution,
@@ -267,25 +270,38 @@ function buildVisibleTextFallbackRows(input: {
     return { rows: [], rejectedReasonDistribution };
   }
 
-  const lines = uniqueCompactStrings(
-    normalizedText
-      .split('\n')
-      .map((line) => normalizeText(line))
-      .filter(Boolean),
-  ).slice(0, 80);
+  const lines = compactVisibleTextFallbackLines(normalizedText).slice(0, 80);
   const rowGroups: string[][] = [];
   let current: string[] = [];
 
   for (const line of lines) {
     const rejectionReason = classifyVisibleTextLineRejection(line, input.searchShellContext);
-    if (rejectionReason) {
-      rejectedReasonDistribution[rejectionReason] += 1;
+    const titleLike =
+      isVisibleTextTitleLike(line) ||
+      (current.length > 0 && currentHasResultEvidence(current) && isLikelyShortResultTitle(line));
+    if (
+      current.length > 0 &&
+      current.length < 5 &&
+      shouldAppendVisibleTextSupportLine({
+        current,
+        line,
+        rejectionReason,
+        searchShellContext: input.searchShellContext,
+        titleLike,
+      })
+    ) {
+      current.push(line);
       continue;
     }
 
-    if (isVisibleTextTitleLike(line) && current.length !== 1) {
+    if (titleLike && rejectionReason === null) {
       if (current.length > 0) rowGroups.push(current);
       current = [line];
+      continue;
+    }
+
+    if (rejectionReason) {
+      rejectedReasonDistribution[rejectionReason] += 1;
       continue;
     }
 
@@ -297,8 +313,9 @@ function buildVisibleTextFallbackRows(input: {
 
   const rows = attachTargetRefsToVisibleTextRows(
     rowGroups
-      .filter((group) => group.some((line) => isVisibleTextTitleLike(line)))
+      .filter((group) => Boolean(visibleTextGroupTitle(group)))
       .filter((group) => !isVisibleTextFooterBusinessGroup(group))
+      .filter((group) => isVisibleTextResultGroup(group))
       .slice(0, input.maxRows)
       .map((group, index) =>
         buildVisibleTextFallbackRow({
@@ -334,7 +351,7 @@ function attachTargetRefsToVisibleTextRows(
   }
   const candidates = fallbackInteractiveElements
     .map((item, index): ParsedVisibleNode => {
-      const role = normalizeText(item?.role ?? item?.type).toLowerCase() || 'generic';
+      const role = normalizeFallbackInteractiveRole(item);
       const name = normalizeText(item?.name ?? item?.text);
       const ref = normalizeText(item?.ref) || null;
       const href = normalizeText(item?.href) || null;
@@ -345,10 +362,17 @@ function attachTargetRefsToVisibleTextRows(
 
   const usedRefs = new Set<string>();
   return rows.map((row) => {
-    const match = candidates.find((candidate) => {
-      if (!candidate.ref || usedRefs.has(candidate.ref)) return false;
-      return rowMatchesInteractiveCandidate(row, candidate);
-    });
+    const match = candidates
+      .map((candidate) => ({
+        candidate,
+        score: usedRefs.has(candidate.ref || '')
+          ? 0
+          : scoreInteractiveCandidateForRow(row, candidate),
+      }))
+      .filter((item) => item.candidate.ref && item.score > 0)
+      .sort(
+        (left, right) => right.score - left.score || left.candidate.order - right.candidate.order,
+      )[0]?.candidate;
     if (!match?.ref) return row;
     usedRefs.add(match.ref);
     return {
@@ -361,19 +385,69 @@ function attachTargetRefsToVisibleTextRows(
   });
 }
 
+function compactVisibleTextFallbackLines(text: string): string[] {
+  const seenLongLines = new Set<string>();
+  const lines: string[] = [];
+  for (const line of text
+    .split('\n')
+    .map((item) => normalizeText(item))
+    .filter(Boolean)) {
+    if (shouldPreserveRepeatedVisibleTextLine(line)) {
+      lines.push(line);
+      continue;
+    }
+    const key = normalizeComparableText(line);
+    if (seenLongLines.has(key)) continue;
+    seenLongLines.add(key);
+    lines.push(line);
+  }
+  return lines;
+}
+
+function shouldPreserveRepeatedVisibleTextLine(line: string): boolean {
+  if (META_PATTERN.test(line)) return true;
+  if (INTERACTION_PATTERN.test(line)) return true;
+  if (isCompactMetricLine(line)) return true;
+  if (isLikelyAuthorLine(line)) return true;
+  return false;
+}
+
 function rowMatchesInteractiveCandidate(
   row: VisibleRegionRow,
   candidate: ParsedVisibleNode,
 ): boolean {
+  return scoreInteractiveCandidateForRow(row, candidate) > 0;
+}
+
+function scoreInteractiveCandidateForRow(
+  row: VisibleRegionRow,
+  candidate: ParsedVisibleNode,
+): number {
   const candidateName = normalizeComparableText(candidate.name);
-  if (candidateName.length < 6) return false;
-  const fields = uniqueCompactStrings([row.title, ...row.visibleTextFields])
+  if (candidateName.length < 6) return 0;
+  const title = normalizeComparableText(row.title);
+  if (title.length >= 6) {
+    const titleMatches =
+      title === candidateName || title.includes(candidateName) || candidateName.includes(title);
+    if (titleMatches) return candidate.href ? 120 : 90;
+  }
+
+  const supportFields = uniqueCompactStrings([
+    row.primaryText,
+    row.secondaryText,
+    row.summary,
+    row.metaText,
+    row.interactionText,
+    ...(row.visibleTextFields || []).filter((field) => field !== row.title),
+  ])
     .map((field) => normalizeComparableText(field))
     .filter((field) => field.length >= 6);
-  return fields.some(
+  const supportMatches = supportFields.some(
     (field) =>
       field === candidateName || field.includes(candidateName) || candidateName.includes(field),
   );
+  if (!supportMatches) return 0;
+  return candidate.href ? 40 : 20;
 }
 
 function isVisibleTextTargetCandidate(
@@ -425,9 +499,80 @@ function classifyVisibleTextLineRejection(
   return null;
 }
 
+function shouldAppendVisibleTextSupportLine(input: {
+  current: string[];
+  line: string;
+  rejectionReason: VisibleRegionRejectionReason | null;
+  searchShellContext: SearchShellContext;
+  titleLike: boolean;
+}): boolean {
+  const { current, line, rejectionReason, searchShellContext, titleLike } = input;
+  const normalized = normalizeText(line);
+  if (!normalized) return false;
+  if (isFooterLikeText(normalized) || isNavigationLikeText(normalized)) return false;
+  if (SEARCH_CONTROL_TEXT_PATTERN.test(normalized)) return false;
+  if (isSearchShellText(normalized, searchShellContext)) return false;
+  if (current.some((item) => COMPANY_FOOTER_TEXT_PATTERN.test(item))) return false;
+  if (META_PATTERN.test(normalized) || INTERACTION_PATTERN.test(normalized)) return true;
+  if (isCompactMetricLine(normalized)) return true;
+  if (currentHasResultEvidence(current)) return false;
+  if (titleLike) {
+    return current.length === 1 && !currentHasResultEvidence(current);
+  }
+  if (rejectionReason === null) return current.length < 3;
+  return rejectionReason === 'single_isolated_text' && isLikelyAuthorLine(normalized);
+}
+
+function currentHasResultEvidence(group: string[]): boolean {
+  return group.some(
+    (line) =>
+      META_PATTERN.test(line) || INTERACTION_PATTERN.test(line) || isCompactMetricLine(line),
+  );
+}
+
+function isLikelyShortResultTitle(value: string): boolean {
+  const normalized = normalizeText(value);
+  if (normalized.length < 6 || normalized.length > 40) return false;
+  if (isLikelyAuthorLine(normalized) && countCjkCharacters(normalized) < 4) return false;
+  return (
+    countCjkCharacters(normalized) >= 4 ||
+    /[a-z0-9].*[\u3400-\u9fff]|[\u3400-\u9fff].*[a-z0-9]/i.test(normalized)
+  );
+}
+
+function isCompactMetricLine(value: string): boolean {
+  return /^\d+(?:\.\d+)?(?:万|千|k|m)?$/i.test(normalizeText(value));
+}
+
+function isLikelyAuthorLine(value: string): boolean {
+  const normalized = normalizeText(value);
+  if (normalized.length < 2 || normalized.length > 40) return false;
+  if (isMetaOnlyText(normalized) || isCompactMetricLine(normalized)) return false;
+  if (/[<>={}[\]{}]/.test(normalized)) return false;
+  if (FOOTER_LEGAL_REPORT_PATTERN.test(normalized)) return false;
+  if (UTILITY_LINK_TEXT_PATTERN.test(normalized)) return false;
+  if (SEARCH_CONTROL_TEXT_PATTERN.test(normalized)) return false;
+  return /[\p{L}\p{N}]/u.test(normalized);
+}
+
 function isVisibleTextFooterBusinessGroup(group: string[]): boolean {
   if (group.length === 0) return false;
   return group.every((line) => COMPANY_FOOTER_TEXT_PATTERN.test(line));
+}
+
+function isVisibleTextResultGroup(group: string[]): boolean {
+  const title = visibleTextGroupTitle(group);
+  if (!title) return false;
+  const remaining = group.filter((line) => line !== title);
+  const hasMeta = remaining.some((line) => META_PATTERN.test(line));
+  const hasInteraction = remaining.some(
+    (line) => INTERACTION_PATTERN.test(line) || isCompactMetricLine(line),
+  );
+  const hasShortAttribution = remaining.some((line) => isLikelyAuthorLine(line));
+  if (hasInteraction) return true;
+  if (hasMeta && hasShortAttribution) return true;
+  if (hasShortAttribution && group.length >= 3) return true;
+  return false;
 }
 
 function isVisibleTextBusinessLike(line: string): boolean {
@@ -435,6 +580,15 @@ function isVisibleTextBusinessLike(line: string): boolean {
   if (!normalized) return false;
   if (normalized.length >= 24) return true;
   if (countCjkCharacters(normalized) >= 10) return true;
+  if (countCjkCharacters(normalized) >= 6) return true;
+  if (normalized.length >= 8 && countCjkCharacters(normalized) >= 4) return true;
+  if (
+    normalized.length >= 6 &&
+    countCjkCharacters(normalized) >= 4 &&
+    /[a-z0-9]/i.test(normalized)
+  ) {
+    return true;
+  }
   return normalized.split(/\s+/).filter(Boolean).length >= 4;
 }
 
@@ -450,11 +604,14 @@ function buildVisibleTextFallbackRow(input: {
   sourceRegion: string;
   index: number;
 }): VisibleRegionRow | null {
-  const title = input.group.find((line) => isVisibleTextTitleLike(line));
+  const title = visibleTextGroupTitle(input.group);
   if (!title) return null;
   const remaining = input.group.filter((line) => line !== title);
   const metaText = remaining.find((line) => META_PATTERN.test(line)) ?? null;
-  const interactionText = remaining.find((line) => INTERACTION_PATTERN.test(line)) ?? null;
+  const interactionText =
+    remaining.find((line) => INTERACTION_PATTERN.test(line)) ??
+    remaining.find((line) => isCompactMetricLine(line)) ??
+    null;
   const primaryText =
     remaining.find((line) => line !== metaText && line !== interactionText) ?? null;
   const secondaryText =
@@ -492,6 +649,10 @@ function buildVisibleTextFallbackRow(input: {
   };
 }
 
+function visibleTextGroupTitle(group: string[]): string | undefined {
+  return group.find((line) => isVisibleTextTitleLike(line)) ?? group.find(isLikelyShortResultTitle);
+}
+
 function countCjkCharacters(value: string): number {
   return (value.match(/[\u3400-\u9fff]/g) || []).length;
 }
@@ -523,7 +684,7 @@ function supplementGroupsFromInteractiveElements(
   const fallbackNodes: ParsedVisibleNode[] = [];
   fallbackInteractiveElements
     .map((item, index): ParsedVisibleNode => {
-      const role = normalizeText(item?.role ?? item?.type).toLowerCase() || 'generic';
+      const role = normalizeFallbackInteractiveRole(item);
       const name = normalizeText(item?.name ?? item?.text);
       const ref = normalizeText(item?.ref) || null;
       const href = normalizeText(item?.href) || null;
@@ -549,6 +710,10 @@ function supplementGroupsFromInteractiveElements(
       regionId: node.ref || `${sourceRegion}_interactive_${index + 1}`,
     })),
   ];
+}
+
+function normalizeFallbackInteractiveRole(item: FallbackInteractiveElement): string {
+  return normalizeText(item?.role || item?.type).toLowerCase() || 'generic';
 }
 
 function parseVisibleNodes(pageContent: string): ParsedVisibleNode[] {
@@ -955,6 +1120,108 @@ function averageRowQualityBonus(rows: VisibleRegionRow[]): number {
   return total / rows.length / 20;
 }
 
+function preferBusinessRows(rows: VisibleRegionRow[]): VisibleRegionRow[] {
+  if (rows.length < 2) return rows;
+  const businessRows = rows.filter((row) => isBusinessResultRow(row));
+  const preferredRows = businessRows.length >= 2 ? businessRows : rows;
+  return suppressDescriptionRowsWhenTitleRowsExist(preferredRows);
+}
+
+function suppressDescriptionRowsWhenTitleRowsExist(rows: VisibleRegionRow[]): VisibleRegionRow[] {
+  if (rows.length < 2) return rows;
+  const titleRowTargetRefs = new Set(
+    rows
+      .filter((row) => isObjectLikeResultTitle(row.title) && !isSentenceLikeDescriptionTitle(row))
+      .map((row) => normalizeTargetRefFamily(row.targetRef))
+      .filter(Boolean),
+  );
+  if (titleRowTargetRefs.size === 0) return rows;
+  return rows.filter((row) => {
+    const isSentenceLikeDescription = isSentenceLikeDescriptionTitle(row);
+    if (!isSentenceLikeDescription && isObjectLikeResultTitle(row.title)) return true;
+    const targetFamily = normalizeTargetRefFamily(row.targetRef);
+    if (!isSentenceLikeDescription) return true;
+    if (targetFamily && titleRowTargetRefs.has(targetFamily)) return false;
+    return !hasNearbyTitleRow(rows, row);
+  });
+}
+
+function isSentenceLikeDescriptionTitle(row: VisibleRegionRow): boolean {
+  const title = normalizeText(row.title);
+  return title.length > 56 && title.split(/\s+/).filter(Boolean).length >= 7;
+}
+
+function normalizeTargetRefFamily(value: string | null | undefined): string {
+  const normalized = normalizeText(value).toLowerCase();
+  return normalized.replace(/(?:^|_)(?:desc|description)(?:_|$)/g, '_');
+}
+
+function hasNearbyTitleRow(rows: VisibleRegionRow[], row: VisibleRegionRow): boolean {
+  const rowBox = row.boundingBox;
+  if (!rowBox || typeof rowBox.y !== 'number') return false;
+  const rowY = rowBox.y;
+  return rows.some((candidate) => {
+    if (
+      candidate === row ||
+      !isObjectLikeResultTitle(candidate.title) ||
+      isSentenceLikeDescriptionTitle(candidate)
+    ) {
+      return false;
+    }
+    const candidateBox = candidate.boundingBox;
+    if (!candidateBox || typeof candidateBox.y !== 'number') return false;
+    const verticalDistance = Math.abs(candidateBox.y - rowY);
+    if (verticalDistance > 90) return false;
+    if (typeof rowBox.x === 'number' && typeof candidateBox.x === 'number') {
+      return Math.abs(rowBox.x - candidateBox.x) <= 80;
+    }
+    return true;
+  });
+}
+
+function shouldPreferVisibleTextRows(
+  rows: VisibleRegionRow[],
+  visibleTextRows: VisibleRegionRow[],
+): boolean {
+  if (visibleTextRows.length < 2) return false;
+  if (rows.length === 0) return true;
+  return (
+    hasShellDominatedRows(rows) &&
+    visibleTextRows.some((row) => row.primaryText || row.secondaryText)
+  );
+}
+
+function hasShellDominatedRows(rows: VisibleRegionRow[]): boolean {
+  if (rows.length === 0) return false;
+  const weakRows = rows.filter(
+    (row) => !row.primaryText && !row.secondaryText && !row.metaText && !row.interactionText,
+  ).length;
+  return weakRows / rows.length >= 0.5;
+}
+
+function isBusinessResultRow(row: VisibleRegionRow): boolean {
+  if (!row.targetRef) return false;
+  if (!row.boundingBox) return false;
+  if (row.qualityReasons.includes('minimal_visible_text')) return false;
+  if (row.metaText || row.interactionText) return true;
+  return isObjectLikeResultTitle(row.title);
+}
+
+function isObjectLikeResultTitle(value: string): boolean {
+  const normalized = normalizeText(value);
+  if (!normalized) return false;
+  if (isLowValueShellText(normalized)) return false;
+  if (/^[^\s/]{1,80}\/[^\s/]{1,120}$/.test(normalized)) return true;
+  if (/\b[\w.-]+\.[a-z]{2,}\b/i.test(normalized)) return true;
+  if (normalized.length >= 16 && normalized.split(/\s+/).filter(Boolean).length >= 3) {
+    return true;
+  }
+  if (normalized.length >= 10 && /[\u4e00-\u9fff]/.test(normalized)) {
+    return true;
+  }
+  return false;
+}
+
 function buildRow(
   group: CandidateGroup,
   searchShellContext: SearchShellContext,
@@ -981,10 +1248,7 @@ function buildRow(
     remaining.filter((node) => node.name !== primaryText),
     [INTERACTION_PATTERN, META_PATTERN],
   );
-  const targetRef =
-    group.nodes.find((node) => node.href && node.ref)?.ref ||
-    group.nodes.find((node) => node.ref && node.role === 'link')?.ref ||
-    group.container.ref;
+  const targetRef = selectRowTargetRef(group, titleNode, searchShellContext);
   const visibleTextFields = uniqueCompactStrings([
     title,
     primaryText,
@@ -1025,6 +1289,30 @@ function buildRow(
     confidence,
     qualityReasons,
   };
+}
+
+function selectRowTargetRef(
+  group: CandidateGroup,
+  titleNode: ParsedVisibleNode,
+  searchShellContext: SearchShellContext,
+): string | null {
+  if (titleNode.ref && (titleNode.href || titleNode.role === 'link')) return titleNode.ref;
+
+  const title = normalizeComparableText(titleNode.name);
+  const titleLink = group.nodes.find((node) => {
+    if (!node.ref || !node.href) return false;
+    if (!isStandaloneResultLink(node, searchShellContext)) return false;
+    const label = normalizeComparableText(node.name);
+    if (label.length < 6 || title.length < 6) return false;
+    return label === title || label.includes(title) || title.includes(label);
+  });
+  if (titleLink?.ref) return titleLink.ref;
+
+  return (
+    group.nodes.find((node) => node.ref && isStandaloneResultLink(node, searchShellContext))?.ref ||
+    group.nodes.find((node) => node.ref && node.role === 'link' && !isTagLikeLink(node))?.ref ||
+    group.container.ref
+  );
 }
 
 function isMetaOnlyRow(row: VisibleRegionRow): boolean {
@@ -1278,6 +1566,7 @@ function isMetaOnlyText(value: string): boolean {
     return true;
   }
   if (/^(?:刚刚|分钟前|小时前|昨天|今天|发布|更新)$/.test(normalized)) return true;
+  if (/^\d+\s*(?:天|日|小时|分钟)前$/.test(normalized)) return true;
   return false;
 }
 

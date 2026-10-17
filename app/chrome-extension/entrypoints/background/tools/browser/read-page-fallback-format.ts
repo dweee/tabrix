@@ -1,13 +1,39 @@
-export type FallbackRefMap = Array<{ ref: string; selector: string } | null>;
+export type FallbackRefMap = Array<{
+  ref: string;
+  selector: string;
+  rect?: { x: number; y: number; width: number; height: number };
+  valueState?: 'empty' | 'non_empty' | 'unknown';
+} | null>;
+
+function normalizeValueState(value: unknown): 'empty' | 'non_empty' | 'unknown' | null {
+  return value === 'empty' || value === 'non_empty' || value === 'unknown' ? value : null;
+}
 
 /** Parallel to `elements` (same length): entry or `null` when no selector. */
 export function buildFallbackRefMap(elements: any[]): FallbackRefMap {
   return (elements || []).slice(0, 150).map((element: any, index: number) => {
     const selector = typeof element?.selector === 'string' ? element.selector.trim() : '';
     if (!selector) return null;
+    const rect = element?.coordinates?.rect;
+    const valueState = normalizeValueState(element?.valueState);
     return {
       ref: `ref_fallback_${index + 1}`,
       selector,
+      ...(rect &&
+      Number.isFinite(rect.x) &&
+      Number.isFinite(rect.y) &&
+      Number.isFinite(rect.width) &&
+      Number.isFinite(rect.height)
+        ? {
+            rect: {
+              x: Number(rect.x),
+              y: Number(rect.y),
+              width: Number(rect.width),
+              height: Number(rect.height),
+            },
+          }
+        : {}),
+      ...(valueState ? { valueState } : {}),
     };
   });
 }
@@ -28,6 +54,8 @@ export function formatElementsAsPageContent(elements: any[], refMap: any[]): str
         ? ` selector="${element.selector}"`
         : '';
     const href = typeof element?.href === 'string' && element.href ? ` href="${element.href}"` : '';
+    const valueState = normalizeValueState(element?.valueState);
+    const valueStateLabel = valueState ? ` valueState="${valueState}"` : '';
     const refLabel = typeof refMap[index]?.ref === 'string' ? ` [ref=${refMap[index].ref}]` : '';
     const coords =
       element?.coordinates &&
@@ -35,7 +63,7 @@ export function formatElementsAsPageContent(elements: any[], refMap: any[]): str
       Number.isFinite(element.coordinates.y)
         ? ` (x=${Math.round(element.coordinates.x)},y=${Math.round(element.coordinates.y)})`
         : '';
-    out.push(`- ${elementType}${text}${refLabel}${selector}${href}${coords}`);
+    out.push(`- ${elementType}${text}${refLabel}${selector}${href}${valueStateLabel}${coords}`);
     if (out.length >= 150) break;
   }
   return out.join('\n');

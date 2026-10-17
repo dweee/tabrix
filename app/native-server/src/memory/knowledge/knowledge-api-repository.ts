@@ -69,6 +69,10 @@ export interface KnowledgeApiEndpoint {
   sampleCount: number;
   firstSeenAt: string;
   lastSeenAt: string;
+  /** Outcome counters for chooser-selected reuse of this exact endpoint. */
+  successfulUseCount: number;
+  failedUseCount: number;
+  lastValidatedAt: string | null;
   /**
    * Generic classifier output, persisted alongside the original
    * `semanticTag`. `null` for rows written before the classifier
@@ -84,8 +88,8 @@ export interface KnowledgeApiEndpoint {
    * Endpoint Knowledge lineage. Always populated on read:
    *  - `endpointSource` — closed enum, derived from the persisted
    *    column when present; otherwise back-derived from `family`
-   *    (`'observed'` ↔ observed; `'github' | 'npmjs'` ↔ seed_adapter;
-   *    everything else ↔ `'unknown'`).
+   *    (`'observed'` maps to observed; everything else maps to
+   *    `'unknown'`).
    *  - `correlationConfidence` — closed enum from the DOM-endpoint correlator. Single-
    *    session writes are capped at `'low_confidence'`.
    *  - `schemaVersion` — `1` for legacy rows, `2` for lineage-aware
@@ -131,8 +135,7 @@ export interface KnowledgeApiEndpoint {
  * `safe-request-builder.ts`:
  *   - `observed` — captured via `chrome_network_capture` and a
  *     endpoint candidate classifier verdict.
- *   - `seed_adapter` — backed by a hardcoded GitHub/npmjs
- *     seed entry under `app/native-server/src/api/api-knowledge.ts`.
+ *   - `seed_adapter` — historical compatibility value for old seed rows.
  *   - `manual_seed` — operator-curated row (currently unused; kept
  *     for forward-compat so a future maintainer-private seed import
  *     does not need a schema bump).
@@ -382,6 +385,9 @@ interface KnowledgeApiEndpointRow {
   source_lineage_blob: string | null;
   schema_version: number | null;
   last_failure_reason: string | null;
+  successful_use_count: number;
+  failed_use_count: number;
+  last_validated_at: string | null;
 }
 
 const PERSISTED_SEMANTIC_TYPE_VALUES: ReadonlySet<string> = new Set<EndpointSemanticType>([
@@ -424,6 +430,18 @@ const LAST_FAILURE_REASON_VALUES: ReadonlySet<string> = new Set<EndpointLastFail
   'unknown',
 ]);
 
+const BLOCKING_LAST_FAILURE_REASONS: ReadonlySet<EndpointLastFailureReason> =
+  new Set<EndpointLastFailureReason>([
+    'timeout',
+    'status_4xx',
+    'status_5xx',
+    'semantic_mismatch',
+    'shape_drift',
+    'empty_response',
+    'rate_limited',
+    'unknown',
+  ]);
+
 function coerceLastFailureReason(value: string | null): EndpointLastFailureReason | null {
   if (value === null) return null;
   return LAST_FAILURE_REASON_VALUES.has(value) ? (value as EndpointLastFailureReason) : null;
@@ -457,10 +475,9 @@ const CORRELATION_CONFIDENCE_VALUES: ReadonlySet<string> = new Set<CorrelationCo
  *
  * Order of authority:
  *   1. Persisted `endpoint_source` column.
- *   2. Back-compat heuristic on `family`: legacy rows captured by
- *      `api-knowledge-capture.ts` use `family='observed'` for
- *      browser-observed endpoints and `family='github' | 'npmjs'` for
- *      seed-adapter rows.
+ *   2. Back-compat heuristic on `family`: only `family='observed'`
+ *      is trusted as observed Knowledge. Platform family names are not
+ *      promoted into seed adapters.
  *   3. `'unknown'` otherwise. The reader never invents `manual_seed`
  *      from heuristics.
  */
@@ -469,13 +486,8 @@ function deriveEndpointSource(row: KnowledgeApiEndpointRow): EndpointSource {
   if (persisted && ENDPOINT_SOURCE_VALUES.has(persisted)) {
     return persisted as EndpointSource;
   }
-  // Legacy back-compat. We never invent `deprecated_seed`
-  // from the family column because retirement is a writer-only state
-  // transition; legacy rows fall back to
-  // `seed_adapter` (active) so the lookup still considers them.
   const family = (row.family || '').toLowerCase();
   if (family === 'observed') return 'observed';
-  if (family === 'github' || family === 'npmjs') return 'seed_adapter';
   return 'unknown';
 }
 
@@ -543,6 +555,9 @@ function rowToEndpoint(row: KnowledgeApiEndpointRow): KnowledgeApiEndpoint {
     sampleCount: row.sample_count,
     firstSeenAt: row.first_seen_at,
     lastSeenAt: row.last_seen_at,
+    successfulUseCount: row.successful_use_count,
+    failedUseCount: row.failed_use_count,
+    lastValidatedAt: row.last_validated_at,
     semanticTypePersisted: coercePersistedSemanticType(row.semantic_type),
     queryParamsShape: row.query_params_shape,
     responseShapeSummary: row.response_shape_summary,
@@ -854,6 +869,26 @@ export class KnowledgeApiRepository {
     return row ? rowToEndpoint(row) : null;
   }
 
+  /**
+   * Record the result of reusing one chooser-selected endpoint.
+   *
+   * `endpointId` is the only accepted identity. Site/family refs are
+   * intentionally not resolved here because one site can expose many
+   * endpoints and broad attribution would train unrelated Knowledge.
+   */
+  recordUseOutcome(input: { endpointId: string; successful: boolean; nowIso: string }): boolean {
+    const result = this.db
+      .prepare(
+        `UPDATE knowledge_api_endpoints
+         SET successful_use_count = successful_use_count + ?,
+             failed_use_count = failed_use_count + ?,
+             last_validated_at = ?
+         WHERE endpoint_id = ?`,
+      )
+      .run(input.successful ? 1 : 0, input.successful ? 0 : 1, input.nowIso, input.endpointId);
+    return result.changes === 1;
+  }
+
   listBySite(site: string, limit = 100): KnowledgeApiEndpoint[] {
     const rows = this.db
       .prepare(
@@ -881,6 +916,10 @@ export class KnowledgeApiRepository {
       n: number;
     };
     return row.n;
+  }
+
+  clear(): void {
+    this.db.prepare(`DELETE FROM knowledge_api_endpoints`).run();
   }
 }
 
@@ -932,6 +971,9 @@ function deriveEndpointFallbackReason(
   // re-derive a different one.
   if (endpoint.usableForTaskPersisted === false && endpoint.noiseReason) {
     return endpoint.noiseReason;
+  }
+  if (endpoint.lastFailureReason && BLOCKING_LAST_FAILURE_REASONS.has(endpoint.lastFailureReason)) {
+    return `last_failure_${endpoint.lastFailureReason}`;
   }
   if (
     semanticType === 'noise' ||

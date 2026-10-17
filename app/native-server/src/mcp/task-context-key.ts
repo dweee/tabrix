@@ -40,7 +40,7 @@ function extractStableTaskKey(args: unknown): string | null {
  * field as a graceful fallback for any historical client. Returns
  * `null` when neither field carries a value belonging to the closed
  * {@link READ_PAGE_REQUESTED_LAYER_VALUES} enum, which the caller
- * turns into the MCP-schema default (`'L0+L1+L2'`).
+ * turns into the MCP-schema default (`'L0+L1'`).
  *
  * The pre-fix code read `(args as any).layer` exclusively, which
  * silently downgraded every real client request to the gate's
@@ -63,34 +63,31 @@ export function extractRequestedLayer(args: unknown): ReadPageRequestedLayer | n
 
 /**
  * MCP schema default per `packages/shared/src/tools.ts`:
- * "Optional; when omitted preserves the legacy full L0+L1+L2
- * payload." Centralised so the pre-gate and post-success sites
- * cannot drift apart on the default again.
+ * omitted `requestedLayer` means `L0+L1`. Centralised so the pre-gate
+ * and post-success sites cannot drift apart on the default again.
  */
-export const READ_PAGE_DEFAULT_LAYER: ReadPageRequestedLayer = 'L0+L1+L2';
+export const READ_PAGE_DEFAULT_LAYER: ReadPageRequestedLayer = 'L0+L1';
 
 /**
- * Make the read-budget task key visible to schema-following MCP clients
- * that DO NOT (and cannot) pass `taskSessionId / taskId / clientTaskId`,
- * since those fields are not part of the public `chrome_read_page`
- * schema (a strict client may even strip unknown fields).
+ * Keep the read-budget task key useful for schema-following MCP clients
+ * that omit `taskSessionId / taskId / clientTaskId`.
  *
  * Only `chrome_read_page` (the gated tool), `chrome_navigate` (the
  * tool that invalidates the gate's lastReadLayer / targetRefsSeen
- * via `noteUrlChange`), `chrome_network_capture` (the live observed API
- * writer), and `tabrix_choose_context` (the decision writer that the
- * `chrome_read_page` shim consumes via
- * `peekChooseContextDecision`) participate in auto-keying. Every
- * other tool returns `null`, so click/fill/screenshot/etc. cannot
- * accidentally mint phantom external task contexts or pollute the
- * LRU map.
+ * via `noteUrlChange`), click/fill/keyboard interaction tools (the
+ * actions that can make the next read a post-action state check),
+ * single-target `chrome_close_tabs` (the cleanup closeout for a run-owned
+ * tab opened earlier in the same MCP task path), `chrome_network_capture`
+ * (the live observed API writer), and `tabrix_choose_context` (the decision
+ * writer that the `chrome_read_page` shim consumes via
+ * `peekChooseContextDecision`) participate in auto-keying. Every other tool
+ * returns `null`, so screenshots and unrelated helpers cannot accidentally
+ * mint phantom external task contexts or pollute the LRU map.
  *
  * `tabrix_choose_context` joins the auto set so a chooser → reader pair
- * issued back-to-back without an explicit `taskSessionId` lands on the
- * SAME `TaskSessionContext`. This is the only way the orchestrator can
- * read what the chooser wrote without the test having to spy on
- * `getTaskContext`. The chooser's public schema does not advertise
- * `tabId` either, so the auto fallback (primary tab →
+ * issued back-to-back without an explicit `taskSessionId` can land on the
+ * SAME `TaskSessionContext`. The chooser's public schema does not advertise
+ * `tabId`, so the auto fallback (primary tab →
  * `mcp:auto:tab:default`) is what makes the pairing work in the
  * schema-strict path.
  *
@@ -124,9 +121,37 @@ export function resolveTaskContextKey(
   const explicit = extractStableTaskKey(args);
   if (explicit) return explicit;
 
+  if (toolName === TOOL_NAMES.BROWSER.NAVIGATE) {
+    const argsObject = args && typeof args === 'object' ? (args as Record<string, unknown>) : null;
+    const url = argsObject && typeof argsObject.url === 'string' ? argsObject.url : null;
+    const refresh = argsObject?.refresh === true;
+    const tabId = argsObject?.tabId;
+    if (
+      url !== null &&
+      !refresh &&
+      !(typeof tabId === 'number' && Number.isInteger(tabId) && tabId > 0)
+    ) {
+      return null;
+    }
+  }
+
+  if (toolName === TOOL_NAMES.BROWSER.CLOSE_TABS) {
+    const argTabIds =
+      args && typeof args === 'object' ? (args as Record<string, unknown>).tabIds : undefined;
+    if (!Array.isArray(argTabIds)) return null;
+    const tabIds = argTabIds.filter(
+      (tabId): tabId is number => Number.isInteger(tabId) && tabId > 0,
+    );
+    return tabIds.length === 1 ? `mcp:auto:tab:${tabIds[0]}` : null;
+  }
+
   const autoEligible =
     toolName === TOOL_NAMES.BROWSER.READ_PAGE ||
     toolName === TOOL_NAMES.BROWSER.NAVIGATE ||
+    toolName === TOOL_NAMES.BROWSER.CLICK ||
+    toolName === TOOL_NAMES.BROWSER.FILL ||
+    toolName === TOOL_NAMES.BROWSER.KEYBOARD ||
+    toolName === TOOL_NAMES.BROWSER.SWITCH_TAB ||
     toolName === TOOL_NAMES.BROWSER.NETWORK_CAPTURE ||
     toolName === TOOL_NAMES.CONTEXT.CHOOSE;
   if (!autoEligible) return null;
@@ -176,10 +201,78 @@ export function extractTabIdFromCallToolResult(data: unknown): number | null {
             }
           } catch {
             // Not JSON — skip.
+            continue;
           }
         }
       }
     }
   }
   return null;
+}
+
+export function extractInvalidTabIdsFromCallToolResult(data: unknown): number[] {
+  return extractPositiveIntegerArrayFromCallToolResult(data, 'invalidTabIds');
+}
+
+export function extractClosedTabIdsFromCallToolResult(data: unknown): number[] {
+  return extractPositiveIntegerArrayFromCallToolResult(data, 'closedTabIds');
+}
+
+export function extractCreatedTabForUrlFromCallToolResult(data: unknown): boolean {
+  for (const payload of extractObjectPayloadsFromCallToolResult(data)) {
+    if (payload.createdTabForUrl === true) return true;
+  }
+  return false;
+}
+
+export function extractPostActionIdFromCallToolResult(data: unknown): string | null {
+  for (const payload of extractObjectPayloadsFromCallToolResult(data)) {
+    const postActionDelta =
+      payload.postActionDelta && typeof payload.postActionDelta === 'object'
+        ? (payload.postActionDelta as Record<string, unknown>)
+        : null;
+    const actionId = postActionDelta?.actionId;
+    if (typeof actionId === 'string' && actionId.trim().length > 0) {
+      return actionId.trim();
+    }
+  }
+  return null;
+}
+
+function extractPositiveIntegerArrayFromCallToolResult(data: unknown, key: string): number[] {
+  const payloads = extractObjectPayloadsFromCallToolResult(data);
+  const ids = new Set<number>();
+  for (const payload of payloads) {
+    const values = payload[key];
+    if (!Array.isArray(values)) continue;
+    for (const value of values) {
+      if (Number.isInteger(value) && value > 0) ids.add(value as number);
+    }
+  }
+  return Array.from(ids).sort((left, right) => left - right);
+}
+
+function extractObjectPayloadsFromCallToolResult(data: unknown): Array<Record<string, unknown>> {
+  const payloads: Array<Record<string, unknown>> = [];
+  if (data && typeof data === 'object' && !Array.isArray(data)) {
+    payloads.push(data as Record<string, unknown>);
+    const content = (data as { content?: unknown }).content;
+    if (Array.isArray(content)) {
+      for (const entry of content) {
+        if (!entry || typeof entry !== 'object') continue;
+        const text = (entry as { text?: unknown }).text;
+        if (typeof text !== 'string' || text.length === 0) continue;
+        try {
+          const parsed = JSON.parse(text);
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            payloads.push(parsed as Record<string, unknown>);
+          }
+        } catch {
+          // Not JSON — skip.
+          continue;
+        }
+      }
+    }
+  }
+  return payloads;
 }

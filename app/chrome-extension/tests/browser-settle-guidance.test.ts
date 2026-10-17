@@ -2,10 +2,31 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { navigateTool, switchTabTool } from '@/entrypoints/background/tools/browser/common';
 import { webFetcherTool } from '@/entrypoints/background/tools/browser/web-fetcher';
 import { readPageTool } from '@/entrypoints/background/tools/browser/read-page';
+import * as cdpPageSensing from '@/utils/cdp-page-sensing';
+import {
+  getBrowserWorldSnapshot,
+  initBrowserWorldInventory,
+  resetBrowserWorldInventoryForTests,
+} from '@/entrypoints/background/browser-world-inventory';
+import { cdpSessionManager } from '@/utils/cdp-session-manager';
+
+function makeStorageArea(store: Record<string, unknown>) {
+  return {
+    get: vi.fn(async (keys: string[]) => {
+      const result: Record<string, unknown> = {};
+      for (const key of keys) result[key] = store[key];
+      return result;
+    }),
+    set: vi.fn(async (items: Record<string, unknown>) => {
+      Object.assign(store, items);
+    }),
+  };
+}
 
 describe('browser settle guidance', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    resetBrowserWorldInventoryForTests();
     if (!chrome.tabs.reload) {
       (chrome.tabs as any).reload = vi.fn().mockResolvedValue(undefined);
     } else {
@@ -55,6 +76,28 @@ describe('browser settle guidance', () => {
     } as chrome.tabs.Tab);
   });
 
+  it('retries content script injection once when Chrome swaps away the main frame', async () => {
+    vi.mocked(chrome.tabs.sendMessage).mockRejectedValue(new Error('receiver missing'));
+    vi.mocked(chrome.scripting.executeScript)
+      .mockRejectedValueOnce(new Error('Frame with ID 0 was removed.'))
+      .mockResolvedValueOnce([]);
+
+    await expect(
+      (readPageTool as any).injectContentScript(20, [
+        '/inject-scripts/accessibility-tree-helper.js',
+      ]),
+    ).resolves.toBeUndefined();
+
+    expect(chrome.scripting.executeScript).toHaveBeenCalledTimes(2);
+    expect(chrome.scripting.executeScript).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        target: { tabId: 20 },
+        files: ['/inject-scripts/accessibility-tree-helper.js'],
+      }),
+    );
+  });
+
   it('returns settle metadata after navigating a newly created tab', async () => {
     vi.spyOn(navigateTool as any, 'tryGetTab').mockResolvedValue(null);
     vi.spyOn(navigateTool as any, 'waitForTabSettled').mockResolvedValue({
@@ -93,6 +136,183 @@ describe('browser settle guidance', () => {
     });
   });
 
+  it('opens new tabs in an existing same-site window before falling back to last-focused', async () => {
+    const localStore: Record<string, unknown> = {};
+    (chrome.storage as any).local = makeStorageArea(localStore);
+    vi.spyOn(navigateTool as any, 'tryGetTab').mockResolvedValue(null);
+    (chrome.windows.get as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      async (id: number) => ({ id }),
+    );
+    vi.mocked(chrome.tabs.query)
+      .mockResolvedValueOnce([
+        {
+          id: 90,
+          windowId: 9,
+          active: false,
+          discarded: false,
+          status: 'complete',
+          url: 'https://code.example/dashboard',
+          title: 'WorkspaceHost',
+        } as chrome.tabs.Tab,
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: 90,
+          windowId: 9,
+          active: false,
+          discarded: false,
+          status: 'complete',
+          url: 'https://code.example/dashboard',
+          title: 'WorkspaceHost',
+        } as chrome.tabs.Tab,
+      ]);
+    vi.mocked(chrome.tabs.create).mockResolvedValue({
+      id: 91,
+      windowId: 9,
+      active: false,
+      status: 'loading',
+      url: 'https://code.example/search?q=ACP&type=repositories&s=stars&o=desc',
+      title: 'Loading',
+    } as chrome.tabs.Tab);
+    vi.spyOn(navigateTool as any, 'waitForTabSettled').mockResolvedValue({
+      tab: {
+        id: 91,
+        windowId: 9,
+        active: false,
+        status: 'complete',
+        url: 'https://code.example/search?q=ACP&type=repositories&s=stars&o=desc',
+        title: 'Search',
+      },
+      settled: true,
+      timedOut: false,
+      reason: 'complete',
+      waitedMs: 300,
+      readyState: 'complete',
+    });
+
+    const result = await navigateTool.execute({
+      url: 'https://code.example/search?q=ACP&type=repositories&s=stars&o=desc',
+      background: true,
+    });
+
+    expect(result.isError).toBe(false);
+    expect(chrome.windows.get).toHaveBeenCalledWith(9, { populate: false });
+    expect(chrome.windows.getLastFocused).not.toHaveBeenCalled();
+    expect(chrome.tabs.create).toHaveBeenCalledWith({
+      url: 'https://code.example/search?q=ACP&type=repositories&s=stars&o=desc',
+      windowId: 9,
+      active: false,
+    });
+    expect(chrome.windows.update).not.toHaveBeenCalled();
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+    expect(payload).toMatchObject({
+      success: true,
+      windowId: 9,
+      targetWindowReason: 'same_site_existing_window',
+      activated: false,
+      focusPolicy: 'background',
+      pageReadable: true,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(localStore['tabrix.browserWorld.aiTabOwnership.v1']).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          tabId: 91,
+          aiRunId: expect.stringMatching(/^navigate-navigate_new_tab-91-\d+$/),
+          aiClaimId: 'navigate_new_tab_91',
+          aiClaimState: 'claimed',
+          aiClaimReason: 'background_navigation_claim',
+        }),
+      ]),
+    );
+  });
+
+  it('keeps fallback window creation in background mode when no existing window is available', async () => {
+    vi.spyOn(navigateTool as any, 'tryGetTab').mockResolvedValue(null);
+    vi.mocked(chrome.tabs.query).mockResolvedValue([]);
+    (chrome.windows.getLastFocused as unknown as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('no window'),
+    );
+    (chrome.windows.create as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 17,
+      tabs: [
+        {
+          id: 171,
+          windowId: 17,
+          active: false,
+          status: 'loading',
+          url: 'https://background-fallback.example/',
+          title: 'Loading',
+        } as chrome.tabs.Tab,
+      ],
+    } as chrome.windows.Window);
+    vi.spyOn(navigateTool as any, 'waitForTabSettled').mockResolvedValue({
+      tab: {
+        id: 171,
+        windowId: 17,
+        active: false,
+        status: 'complete',
+        url: 'https://background-fallback.example/',
+        title: 'Fallback',
+      },
+      settled: true,
+      timedOut: false,
+      reason: 'complete',
+      waitedMs: 120,
+      readyState: 'complete',
+    });
+
+    const result = await navigateTool.execute({
+      url: 'https://background-fallback.example/',
+      background: true,
+    });
+
+    expect(result.isError).toBe(false);
+    expect(chrome.windows.create).toHaveBeenCalledWith({
+      url: 'https://background-fallback.example/',
+      width: 1280,
+      height: 720,
+      focused: false,
+    });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+    expect(payload).toMatchObject({
+      success: true,
+      windowId: 17,
+      tabId: 171,
+      activated: false,
+      focusPolicy: 'background',
+      pageReadable: true,
+    });
+  });
+
+  it('passes a bounded custom settle timeout to new-tab navigation waits', async () => {
+    vi.spyOn(navigateTool as any, 'tryGetTab').mockResolvedValue(null);
+    const waitForTabSettled = vi.spyOn(navigateTool as any, 'waitForTabSettled').mockResolvedValue({
+      tab: {
+        id: 20,
+        windowId: 1,
+        active: false,
+        status: 'complete',
+        url: 'https://example.com/search?q=browser',
+        title: 'Search',
+      },
+      settled: true,
+      timedOut: false,
+      reason: 'complete',
+      waitedMs: 9000,
+      readyState: 'complete',
+    });
+
+    const result = await navigateTool.execute({
+      url: 'https://example.com/search?q=browser',
+      background: true,
+      settleTimeoutMs: 90000,
+    } as any);
+
+    expect(result.isError).toBe(false);
+    expect(waitForTabSettled).toHaveBeenCalledWith(20, { timeoutMs: 60000 });
+  });
+
   it('allows structured reads when navigation is interactive with a document URL', async () => {
     vi.spyOn(navigateTool as any, 'tryGetTab').mockResolvedValue(null);
     vi.spyOn(navigateTool as any, 'waitForTabSettled').mockResolvedValue({
@@ -101,7 +321,7 @@ describe('browser settle guidance', () => {
         windowId: 1,
         active: true,
         status: 'loading',
-        url: 'https://github.com/search?type=repositories&q=ACP&s=stars&o=desc',
+        url: 'https://code.example/search?type=repositories&q=ACP&s=stars&o=desc',
         title: 'Repository search results',
       },
       settled: false,
@@ -112,14 +332,14 @@ describe('browser settle guidance', () => {
     });
 
     const result = await navigateTool.execute({
-      url: 'https://github.com/search?type=repositories&q=ACP&s=stars&o=desc',
+      url: 'https://code.example/search?type=repositories&q=ACP&s=stars&o=desc',
     });
 
     expect(result.isError).toBe(false);
     const payload = JSON.parse((result.content[0] as { text: string }).text);
     expect(payload).toMatchObject({
       success: true,
-      finalUrl: 'https://github.com/search?type=repositories&q=ACP&s=stars&o=desc',
+      finalUrl: 'https://code.example/search?type=repositories&q=ACP&s=stars&o=desc',
       status: 'loading',
       settled: false,
       settleReason: 'timeout',
@@ -129,6 +349,34 @@ describe('browser settle guidance', () => {
       canAttemptStructuredRead: true,
       nextStepHint: 'navigation_interactive; structured_read_may_succeed',
     });
+  });
+
+  it('treats an interactive document URL as settled before waiting for full load', async () => {
+    vi.useFakeTimers();
+    (chrome as any).scripting = {
+      executeScript: vi
+        .fn()
+        .mockResolvedValue([{ result: 'interactive' } as chrome.scripting.InjectionResult<string>]),
+    };
+    vi.mocked(chrome.tabs.get).mockResolvedValue({
+      id: 20,
+      windowId: 1,
+      active: false,
+      status: 'loading',
+      url: 'https://example.com/search?q=browser',
+      title: 'Loading',
+    } as chrome.tabs.Tab);
+
+    const result = await (navigateTool as any).waitForTabSettled(20);
+
+    expect(result).toMatchObject({
+      settled: true,
+      timedOut: false,
+      reason: 'interactive',
+      readyState: 'interactive',
+    });
+    expect(chrome.tabs.onUpdated.addListener).not.toHaveBeenCalled();
+    vi.useRealTimers();
   });
 
   it('marks timed out new-tab navigation as not readable before read_page', async () => {
@@ -150,14 +398,14 @@ describe('browser settle guidance', () => {
     });
 
     const result = await navigateTool.execute({
-      url: 'https://github.com/search?q=ACP&type=repositories&s=stars&o=desc',
+      url: 'https://code.example/search?q=ACP&type=repositories&s=stars&o=desc',
     });
 
     expect(result.isError).toBe(false);
     const payload = JSON.parse((result.content[0] as { text: string }).text);
     expect(payload).toMatchObject({
       success: true,
-      requestedUrl: 'https://github.com/search?q=ACP&type=repositories&s=stars&o=desc',
+      requestedUrl: 'https://code.example/search?q=ACP&type=repositories&s=stars&o=desc',
       status: 'loading',
       settled: false,
       settleReason: 'timeout',
@@ -170,6 +418,285 @@ describe('browser settle guidance', () => {
     });
   });
 
+  it('allows structured reads when navigation reaches a document URL but readyState probing times out', async () => {
+    vi.spyOn(navigateTool as any, 'tryGetTab').mockResolvedValue(null);
+    vi.spyOn(navigateTool as any, 'waitForTabSettled').mockResolvedValue({
+      tab: {
+        id: 20,
+        windowId: 1,
+        active: true,
+        status: 'loading',
+        url: 'https://packages.example/search?q=playwright',
+        title: 'Search | npm',
+      },
+      settled: false,
+      timedOut: true,
+      reason: 'timeout',
+      waitedMs: 8000,
+      readyState: null,
+    });
+
+    const result = await navigateTool.execute({
+      url: 'https://packages.example/search?q=playwright',
+      background: true,
+    });
+
+    expect(result.isError).toBe(false);
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+    expect(payload).toMatchObject({
+      success: true,
+      requestedUrl: 'https://packages.example/search?q=playwright',
+      finalUrl: 'https://packages.example/search?q=playwright',
+      status: 'loading',
+      settled: false,
+      settleReason: 'timeout',
+      waitedMs: 8000,
+      readyState: null,
+      pageReadable: false,
+      canAttemptStructuredRead: true,
+      nextStepHint: 'navigation_document_url_detected; structured_read_may_succeed',
+    });
+  });
+
+  it('uses pendingUrl for timed out new-tab navigation readiness guidance', async () => {
+    vi.spyOn(navigateTool as any, 'tryGetTab').mockResolvedValue(null);
+    vi.spyOn(navigateTool as any, 'waitForTabSettled').mockResolvedValue({
+      tab: {
+        id: 20,
+        windowId: 1,
+        active: true,
+        status: 'loading',
+        url: '',
+        pendingUrl: 'https://code.example/search?q=ACP&type=repositories',
+        title: 'Repository search results',
+      },
+      settled: false,
+      timedOut: true,
+      reason: 'timeout',
+      waitedMs: 8000,
+      readyState: 'interactive',
+    });
+
+    const result = await navigateTool.execute({
+      url: 'https://code.example/search?q=ACP&type=repositories',
+      background: true,
+    });
+
+    expect(result.isError).toBe(false);
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+    expect(payload).toMatchObject({
+      success: true,
+      requestedUrl: 'https://code.example/search?q=ACP&type=repositories',
+      finalUrl: 'https://code.example/search?q=ACP&type=repositories',
+      status: 'loading',
+      settled: false,
+      settleReason: 'timeout',
+      waitedMs: 8000,
+      readyState: 'interactive',
+      pageReadable: false,
+      canAttemptStructuredRead: true,
+      nextStepHint: 'navigation_interactive; structured_read_may_succeed',
+    });
+  });
+
+  it('bounds new background tab creation timeout and cleans only newly-created blank tabs', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(navigateTool as any, 'tryGetTab').mockResolvedValue(null);
+    vi.mocked(chrome.tabs.query)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: 11,
+          windowId: 1,
+          active: false,
+          status: 'complete',
+          url: 'about:blank',
+          title: 'Existing Blank',
+        } as chrome.tabs.Tab,
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: 11,
+          windowId: 1,
+          active: false,
+          status: 'complete',
+          url: 'about:blank',
+          title: 'Existing Blank',
+        } as chrome.tabs.Tab,
+        {
+          id: 20,
+          windowId: 1,
+          active: false,
+          status: 'loading',
+          url: '',
+          title: '',
+        } as chrome.tabs.Tab,
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: 11,
+          windowId: 1,
+          active: false,
+          status: 'complete',
+          url: 'about:blank',
+          title: 'Existing Blank',
+        } as chrome.tabs.Tab,
+        {
+          id: 20,
+          windowId: 1,
+          active: false,
+          status: 'loading',
+          url: '',
+          title: '',
+        } as chrome.tabs.Tab,
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: 11,
+          windowId: 1,
+          active: false,
+          status: 'complete',
+          url: 'about:blank',
+          title: 'Existing Blank',
+        } as chrome.tabs.Tab,
+        {
+          id: 20,
+          windowId: 1,
+          active: false,
+          status: 'loading',
+          url: '',
+          title: '',
+        } as chrome.tabs.Tab,
+      ]);
+    vi.mocked(chrome.tabs.create).mockImplementation(() => new Promise<chrome.tabs.Tab>(() => {}));
+    vi.mocked(chrome.tabs.get).mockImplementation(async (tabId: number) => {
+      if (tabId === 20) {
+        return {
+          id: 20,
+          windowId: 1,
+          active: false,
+          status: 'loading',
+          url: '',
+          title: '',
+        } as chrome.tabs.Tab;
+      }
+      return {
+        id: tabId,
+        windowId: 1,
+        active: false,
+        status: 'complete',
+        url: 'about:blank',
+        title: 'Existing Blank',
+      } as chrome.tabs.Tab;
+    });
+
+    const executePromise = navigateTool.execute({
+      url: 'https://code.example/search?q=ACP&type=repositories&s=stars&o=desc',
+      background: true,
+    });
+    await vi.advanceTimersByTimeAsync(5250);
+    const result = await executePromise;
+
+    expect(result.isError).toBe(true);
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+    expect(payload).toMatchObject({
+      success: false,
+      message: 'Failed to create navigation tab within bounded timeout',
+      requestedUrl: 'https://code.example/search?q=ACP&type=repositories&s=stars&o=desc',
+      windowId: 1,
+      cleanupTabIds: [20],
+      pageReadable: false,
+      canAttemptStructuredRead: false,
+    });
+    expect(chrome.tabs.remove).toHaveBeenCalledWith(20);
+    expect(chrome.tabs.remove).not.toHaveBeenCalledWith(11);
+    vi.useRealTimers();
+  });
+
+  it('returns a readable tab when tab creation times out after the document tab appears', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(navigateTool as any, 'tryGetTab').mockResolvedValue(null);
+    vi.spyOn(navigateTool as any, 'waitForTabSettled');
+    vi.mocked(chrome.tabs.query)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: 20,
+          windowId: 1,
+          active: false,
+          status: 'loading',
+          url: 'https://nextjs.org/docs/app/getting-started/installation',
+          title: 'Getting Started: Installation | Next.js',
+        } as chrome.tabs.Tab,
+      ]);
+    vi.mocked(chrome.tabs.create).mockImplementation(() => new Promise<chrome.tabs.Tab>(() => {}));
+
+    const executePromise = navigateTool.execute({
+      url: 'https://nextjs.org/docs/app/getting-started/installation',
+      background: true,
+    });
+    await vi.advanceTimersByTimeAsync(5000);
+    const result = await executePromise;
+
+    expect(result.isError).toBe(false);
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+    expect(payload).toMatchObject({
+      success: true,
+      message: 'Opened URL in new tab after create timeout',
+      tabId: 20,
+      requestedUrl: 'https://nextjs.org/docs/app/getting-started/installation',
+      finalUrl: 'https://nextjs.org/docs/app/getting-started/installation',
+      status: 'loading',
+      settled: false,
+      settleReason: 'create_timeout_but_document_tab_found',
+      readyState: 'interactive',
+      pageReadable: false,
+      canAttemptStructuredRead: true,
+      nextStepHint: 'navigation_interactive; structured_read_may_succeed',
+    });
+    expect(chrome.tabs.remove).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it('waits briefly for a pending URL tab after creation timeout', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(navigateTool as any, 'tryGetTab').mockResolvedValue(null);
+    vi.mocked(chrome.tabs.query)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: 21,
+          windowId: 1,
+          active: false,
+          status: 'loading',
+          url: '',
+          pendingUrl: 'https://nextjs.org/docs/app/getting-started/installation',
+          title: 'Getting Started: Installation | Next.js',
+        } as chrome.tabs.Tab,
+      ]);
+    vi.mocked(chrome.tabs.create).mockImplementation(() => new Promise<chrome.tabs.Tab>(() => {}));
+
+    const executePromise = navigateTool.execute({
+      url: 'https://nextjs.org/docs/app/getting-started/installation',
+      background: true,
+    });
+    await vi.advanceTimersByTimeAsync(5250);
+    const result = await executePromise;
+
+    expect(result.isError).toBe(false);
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+    expect(payload).toMatchObject({
+      success: true,
+      tabId: 21,
+      finalUrl: 'https://nextjs.org/docs/app/getting-started/installation',
+      canAttemptStructuredRead: true,
+    });
+    vi.useRealTimers();
+  });
+
   it('returns structured-read guidance after explicit tab navigation times out at interactive', async () => {
     vi.mocked(chrome.tabs.query).mockResolvedValue([
       {
@@ -177,7 +704,7 @@ describe('browser settle guidance', () => {
         windowId: 1,
         active: true,
         status: 'complete',
-        url: 'https://github.com/example/project',
+        url: 'https://code.example/example/project',
         title: 'example/project',
       } as chrome.tabs.Tab,
     ]);
@@ -186,7 +713,7 @@ describe('browser settle guidance', () => {
       windowId: 1,
       active: true,
       status: 'complete',
-      url: 'https://github.com/example/project',
+      url: 'https://code.example/example/project',
       title: 'example/project',
     } as chrome.tabs.Tab);
     vi.spyOn(navigateTool as any, 'waitForTabSettled').mockResolvedValue({
@@ -195,7 +722,7 @@ describe('browser settle guidance', () => {
         windowId: 1,
         active: true,
         status: 'loading',
-        url: 'https://github.com/search?type=repositories&q=ACP&s=stars&o=desc',
+        url: 'https://code.example/search?type=repositories&q=ACP&s=stars&o=desc',
         title: 'Repository search results',
       },
       settled: false,
@@ -207,7 +734,7 @@ describe('browser settle guidance', () => {
 
     const result = await navigateTool.execute({
       tabId: 10,
-      url: 'https://github.com/search?type=repositories&q=ACP&s=stars&o=desc',
+      url: 'https://code.example/search?type=repositories&q=ACP&s=stars&o=desc',
     });
 
     expect(result.isError).toBe(false);
@@ -216,7 +743,7 @@ describe('browser settle guidance', () => {
       success: true,
       usedExistingTab: true,
       navigatedExplicitTab: true,
-      finalUrl: 'https://github.com/search?type=repositories&q=ACP&s=stars&o=desc',
+      finalUrl: 'https://code.example/search?type=repositories&q=ACP&s=stars&o=desc',
       settled: false,
       readyState: 'interactive',
       pageReadable: false,
@@ -232,7 +759,7 @@ describe('browser settle guidance', () => {
         windowId: 1,
         active: true,
         status: 'complete',
-        url: 'https://github.com/example/project',
+        url: 'https://code.example/example/project',
         title: 'example/project',
       } as chrome.tabs.Tab,
     ]);
@@ -241,7 +768,7 @@ describe('browser settle guidance', () => {
       windowId: 1,
       active: true,
       status: 'complete',
-      url: 'https://github.com/example/project',
+      url: 'https://code.example/example/project',
       title: 'example/project',
     } as chrome.tabs.Tab);
     vi.spyOn(navigateTool as any, 'waitForTabSettled').mockResolvedValue({
@@ -250,7 +777,7 @@ describe('browser settle guidance', () => {
         windowId: 1,
         active: true,
         status: 'loading',
-        url: 'https://github.com/example/project',
+        url: 'https://code.example/example/project',
         title: 'example/project',
       },
       settled: false,
@@ -262,14 +789,14 @@ describe('browser settle guidance', () => {
 
     const result = await navigateTool.execute({
       tabId: 10,
-      url: 'https://github.com/search?type=repositories&q=ACP&s=stars&o=desc',
+      url: 'https://code.example/search?type=repositories&q=ACP&s=stars&o=desc',
     });
 
     expect(result.isError).toBe(false);
     const payload = JSON.parse((result.content[0] as { text: string }).text);
     expect(payload).toMatchObject({
       success: true,
-      finalUrl: 'https://github.com/example/project',
+      finalUrl: 'https://code.example/example/project',
       settled: false,
       readyState: 'complete',
       pageReadable: false,
@@ -317,6 +844,19 @@ describe('browser settle guidance', () => {
       waitedMs: 380,
       readyState: 'complete',
     });
+    vi.spyOn(switchTabTool as any, 'waitForTabForegroundProof').mockResolvedValue({
+      kind: 'tab_foreground_proof_v1',
+      verdict: 'proven_foreground',
+      tabId: 30,
+      chromeWindowFocused: true,
+      chromeTabActive: true,
+      documentVisibilityState: 'visible',
+      documentHasFocus: true,
+      documentHidden: false,
+      waitedMs: 40,
+      timedOut: false,
+      reason: 'document is visible and focused after tab/window activation',
+    });
 
     const result = await switchTabTool.execute({ tabId: 30 });
 
@@ -327,11 +867,199 @@ describe('browser settle guidance', () => {
       activated: true,
       activationTimedOut: false,
       activationWaitedMs: 120,
+      foregroundActivationVerdict: 'proven_foreground',
+      documentVisibilityState: 'visible',
+      documentHasFocus: true,
       settled: true,
       settleReason: 'complete',
       settleWaitedMs: 380,
       readyState: 'complete',
     });
+    expect(payload.foregroundActivation).toMatchObject({
+      kind: 'tab_foreground_proof_v1',
+      verdict: 'proven_foreground',
+      tabId: 30,
+      chromeWindowFocused: true,
+      chromeTabActive: true,
+      documentVisibilityState: 'visible',
+      documentHasFocus: true,
+    });
+  });
+
+  it('recovers a Chrome-active but document-hidden tab through CDP before proving foreground', async () => {
+    vi.mocked(chrome.tabs.get).mockResolvedValue({
+      id: 32,
+      windowId: 2,
+      active: false,
+      status: 'complete',
+      url: 'https://example.com/search',
+      title: 'Search',
+    } as chrome.tabs.Tab);
+    vi.spyOn(switchTabTool as any, 'waitForTabActivated').mockResolvedValue({
+      tab: {
+        id: 32,
+        windowId: 2,
+        active: true,
+        status: 'complete',
+        url: 'https://example.com/search',
+        title: 'Search',
+      },
+      activated: true,
+      timedOut: false,
+      waitedMs: 20,
+      windowFocused: true,
+    });
+    vi.spyOn(switchTabTool as any, 'waitForTabForegroundProof')
+      .mockResolvedValueOnce({
+        kind: 'tab_foreground_proof_v1',
+        verdict: 'not_proven',
+        tabId: 32,
+        chromeWindowFocused: true,
+        chromeTabActive: true,
+        documentVisibilityState: 'hidden',
+        documentHasFocus: true,
+        documentHidden: true,
+        waitedMs: 1500,
+        timedOut: true,
+        reason: 'document foreground proof did not reach visible+focused before timeout',
+      })
+      .mockResolvedValueOnce({
+        kind: 'tab_foreground_proof_v1',
+        verdict: 'proven_foreground',
+        tabId: 32,
+        chromeWindowFocused: true,
+        chromeTabActive: true,
+        documentVisibilityState: 'visible',
+        documentHasFocus: true,
+        documentHidden: false,
+        waitedMs: 40,
+        timedOut: false,
+        reason: 'document is visible and focused after tab/window activation',
+      });
+    const sendCommand = vi.spyOn(cdpSessionManager, 'sendCommand').mockResolvedValue({});
+    vi.spyOn(cdpSessionManager, 'withSession').mockImplementation(
+      async (_tabId, _owner, callback) => await callback(),
+    );
+
+    const result = await switchTabTool.execute({ tabId: 32 });
+
+    expect(result.isError).toBe(false);
+    expect(sendCommand).toHaveBeenCalledWith(32, 'Page.bringToFront', undefined);
+    expect(sendCommand).toHaveBeenCalledWith(32, 'Emulation.setFocusEmulationEnabled', {
+      enabled: true,
+    });
+    expect(sendCommand).toHaveBeenCalledWith(32, 'Page.setWebLifecycleState', {
+      state: 'active',
+    });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+    expect(payload).toMatchObject({
+      foregroundActivationVerdict: 'proven_foreground',
+      documentVisibilityState: 'visible',
+      documentHasFocus: true,
+      cdpForegroundRecovery: {
+        attempted: true,
+        succeeded: true,
+        methodsAttempted: [
+          'Page.bringToFront',
+          'Emulation.setFocusEmulationEnabled',
+          'Page.setWebLifecycleState',
+        ],
+        methodsSucceeded: [
+          'Page.bringToFront',
+          'Emulation.setFocusEmulationEnabled',
+          'Page.setWebLifecycleState',
+        ],
+        errors: [],
+      },
+    });
+  });
+
+  it('surfaces when Chrome activation is not enough to prove page foreground focus', async () => {
+    vi.mocked(chrome.windows.getAll).mockResolvedValue([
+      {
+        id: 2,
+        focused: true,
+        state: 'normal',
+        type: 'normal',
+        tabs: [
+          {
+            id: 31,
+            windowId: 2,
+            active: true,
+            status: 'complete',
+            url: 'http://127.0.0.1:62100/page4',
+            title: 'Page 4',
+          },
+        ],
+      },
+    ] as chrome.windows.Window[]);
+    initBrowserWorldInventory();
+    await getBrowserWorldSnapshot();
+
+    vi.mocked(chrome.tabs.get).mockResolvedValue({
+      id: 31,
+      windowId: 2,
+      active: false,
+      status: 'complete',
+      url: 'http://127.0.0.1:62100/page4',
+      title: 'Page 4',
+    } as chrome.tabs.Tab);
+    vi.spyOn(switchTabTool as any, 'waitForTabActivated').mockResolvedValue({
+      tab: {
+        id: 31,
+        windowId: 2,
+        active: true,
+        status: 'complete',
+        url: 'http://127.0.0.1:62100/page4',
+        title: 'Page 4',
+      },
+      activated: true,
+      timedOut: false,
+      waitedMs: 100,
+      windowFocused: true,
+    });
+    vi.spyOn(switchTabTool as any, 'waitForTabForegroundProof').mockResolvedValue({
+      kind: 'tab_foreground_proof_v1',
+      verdict: 'needs_os_foreground_activation',
+      tabId: 31,
+      chromeWindowFocused: true,
+      chromeTabActive: true,
+      documentVisibilityState: 'visible',
+      documentHasFocus: false,
+      documentHidden: false,
+      waitedMs: 1500,
+      timedOut: true,
+      reason: 'Chrome reports the tab/window active, but the page document is not focused',
+    });
+
+    const result = await switchTabTool.execute({ tabId: 31 });
+
+    expect(result.isError).toBe(false);
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+    expect(payload).toMatchObject({
+      success: true,
+      activated: true,
+      windowFocused: true,
+      foregroundActivationVerdict: 'needs_os_foreground_activation',
+      documentVisibilityState: 'visible',
+      documentHasFocus: false,
+      settled: true,
+      settleReason: 'already_complete',
+    });
+
+    const snapshot = await getBrowserWorldSnapshot();
+    expect(snapshot.summary.aiOperationState).toMatchObject({
+      latestAiOperatedTabId: 31,
+      latestAiOperation: 'switch_tab',
+      latestAiOperationConfidence: 0.45,
+      latestAiOperationReason:
+        'marked_by_tabrix_tool_execution:switch_tab:needs_os_foreground_activation',
+      relationToBrowserActiveTab: 'same_as_browser_active',
+      canContinueOnLatestAiOperatedTab: false,
+    });
+    expect(snapshot.summary.routingDecisionSummary).toBe(
+      'routing=operation_evidence_not_proven, blockingReason=latest_ai_operation_low_confidence_or_tab_not_operable, next=prove_foreground_or_refresh_browser_snapshot',
+    );
   });
 
   it('waits for a new tab to settle before extracting visible text', async () => {
@@ -357,22 +1085,543 @@ describe('browser settle guidance', () => {
         'Line one describes the feature in detail.\nLine two explains the safe path for browser automation.\nLine three confirms the page is stable and ready for structured extraction.\nLine four adds enough visible text to move this sample beyond sparse mode.',
       metadata: { lang: 'en' },
     });
+    vi.mocked(chrome.tabs.get).mockResolvedValue({
+      id: 20,
+      windowId: 1,
+      active: true,
+      status: 'complete',
+      url: 'http://127.0.0.1:62100/page2',
+      title: 'Settled Page',
+    } as chrome.tabs.Tab);
 
     const result = await webFetcherTool.execute({
       url: 'http://127.0.0.1:62100/page2',
     });
 
-    expect((webFetcherTool as any).waitForTabSettled).toHaveBeenCalledWith(20);
+    expect((webFetcherTool as any).waitForTabSettled).toHaveBeenCalledWith(20, {
+      timeoutMs: 30000,
+    });
     expect(result.isError).toBe(false);
     const payload = JSON.parse((result.content[0] as { text: string }).text);
     expect(payload).toMatchObject({
       success: true,
+      tabId: 20,
+      createdTabForUrl: true,
       url: 'http://127.0.0.1:62100/page2',
       title: 'Settled Page',
+      settle: {
+        settled: true,
+        timedOut: false,
+        reason: 'complete',
+      },
+      textContentRequest: {
+        attempts: 1,
+        timedOutBeforeRetry: false,
+      },
     });
     expect(payload.textSummary).toMatchObject({
       quality: 'usable',
       sparse: false,
+    });
+  });
+
+  it('honors a bounded custom settle timeout before extracting web content', async () => {
+    const waitForTabSettled = vi
+      .spyOn(webFetcherTool as any, 'waitForTabSettled')
+      .mockResolvedValue({
+        tab: {
+          id: 20,
+          windowId: 1,
+          active: false,
+          status: 'loading',
+          url: 'https://nextjs.org/docs/app/getting-started/installation',
+          title: 'Getting Started: Installation | Next.js',
+        },
+        settled: false,
+        timedOut: true,
+        reason: 'timeout',
+        waitedMs: 1000,
+        readyState: 'interactive',
+      });
+    vi.spyOn(webFetcherTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(webFetcherTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      textContent:
+        'Manual installation\nSystem requirements\nRun the development server\nCreate the app directory',
+      textMode: 'body',
+      textContentSource: 'readability_body_text',
+      metadata: { lang: 'en' },
+    });
+    vi.mocked(chrome.tabs.get).mockResolvedValue({
+      id: 20,
+      windowId: 1,
+      active: false,
+      status: 'loading',
+      url: 'https://nextjs.org/docs/app/getting-started/installation',
+      title: 'Getting Started: Installation | Next.js',
+    } as chrome.tabs.Tab);
+
+    const result = await webFetcherTool.execute({
+      url: 'https://nextjs.org/docs/app/getting-started/installation',
+      background: true,
+      settleTimeoutMs: 90000,
+    } as any);
+
+    expect(waitForTabSettled).toHaveBeenCalledWith(20, { timeoutMs: 60000 });
+    expect(result.isError).toBe(false);
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+    expect(payload.settle).toMatchObject({
+      timedOut: true,
+      reason: 'timeout',
+      readyState: 'interactive',
+    });
+    expect(payload.textContent).toContain('Manual installation');
+  });
+
+  it('does not hang when document readyState probing never resolves', async () => {
+    const originalScripting = chrome.scripting;
+    try {
+      vi.mocked(chrome.tabs.get).mockResolvedValue({
+        id: 20,
+        windowId: 1,
+        active: false,
+        status: 'loading',
+        url: 'https://nextjs.org/docs/app/getting-started/installation',
+        title: 'Loading',
+      } as chrome.tabs.Tab);
+      (chrome as any).scripting = {
+        executeScript: vi.fn().mockImplementation(() => new Promise(() => {})),
+      };
+
+      const result = await (webFetcherTool as any).waitForTabSettled(20, { timeoutMs: 1 });
+
+      expect(result).toMatchObject({
+        settled: false,
+        timedOut: true,
+        reason: 'timeout',
+        readyState: null,
+      });
+    } finally {
+      (chrome as any).scripting = originalScripting;
+    }
+  });
+
+  it('retries visible text extraction when the first content request hangs', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(webFetcherTool as any, 'waitForTabSettled').mockResolvedValue({
+      tab: {
+        id: 20,
+        windowId: 1,
+        active: false,
+        status: 'complete',
+        url: 'https://nextjs.org/docs/app/getting-started/installation',
+        title: 'Getting Started: Installation | Next.js',
+      },
+      settled: true,
+      timedOut: false,
+      reason: 'complete',
+      waitedMs: 200,
+      readyState: 'complete',
+    });
+    const injectContentScript = vi
+      .spyOn(webFetcherTool as any, 'injectContentScript')
+      .mockResolvedValue(undefined);
+    const sendMessageToTab = vi
+      .spyOn(webFetcherTool as any, 'sendMessageToTab')
+      .mockImplementationOnce(() => new Promise(() => {}))
+      .mockResolvedValueOnce({
+        success: true,
+        textContent:
+          'Manual installation. Create a new Next.js app. Terminal examples and package manager options are visible in the page body. This text proves the real document body can be extracted after a bounded retry.',
+        article: {
+          title: 'Getting Started: Installation',
+          byline: 'Vercel',
+          siteName: 'Next.js',
+          excerpt: '',
+        },
+      });
+
+    const executePromise = webFetcherTool.execute({
+      url: 'https://nextjs.org/docs/app/getting-started/installation',
+      background: true,
+      textContent: true,
+    });
+
+    await vi.advanceTimersByTimeAsync(15_000);
+    await vi.advanceTimersByTimeAsync(1_000);
+    const result = await executePromise;
+
+    expect(result.isError).toBe(false);
+    expect(injectContentScript).toHaveBeenCalledTimes(2);
+    expect(sendMessageToTab).toHaveBeenCalledTimes(2);
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+    expect(payload).toMatchObject({
+      success: true,
+      tabId: 20,
+      createdTabForUrl: true,
+      textContentRequest: {
+        attempts: 2,
+        timedOutBeforeRetry: true,
+      },
+      article: {
+        title: 'Getting Started: Installation',
+        byline: 'Vercel',
+      },
+    });
+    expect(payload.textContent).toContain('Manual installation');
+    vi.useRealTimers();
+  });
+
+  it('retries empty visible text from a newly created dynamic page before reporting success', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(webFetcherTool as any, 'waitForTabSettled').mockResolvedValue({
+      tab: {
+        id: 20,
+        windowId: 1,
+        active: false,
+        status: 'complete',
+        url: 'https://chat.deepseek.com/share/example',
+        title: 'DeepSeek - 探索未至之境',
+      },
+      settled: true,
+      timedOut: false,
+      reason: 'complete',
+      waitedMs: 200,
+      readyState: 'complete',
+    });
+    vi.spyOn(webFetcherTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    const sendMessageToTab = vi
+      .spyOn(webFetcherTool as any, 'sendMessageToTab')
+      .mockResolvedValueOnce({
+        success: true,
+        textContent: '',
+        textMode: 'full-visible',
+        textContentSource: 'document_body_innerText',
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        textContent: '物模型包含静态属性、时序属性和可控调节属性。延迟渲染后的分享页正文已经可见。',
+        textMode: 'full-visible',
+        textContentSource: 'document_body_innerText',
+      });
+
+    const executePromise = webFetcherTool.execute({
+      url: 'https://chat.deepseek.com/share/example',
+      background: true,
+      textMode: 'full-visible',
+    });
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    const result = await executePromise;
+
+    expect(result.isError).toBe(false);
+    expect(sendMessageToTab).toHaveBeenCalledTimes(2);
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+    expect(payload).toMatchObject({
+      success: true,
+      createdTabForUrl: true,
+      textContentRequest: {
+        attempts: 2,
+        emptyContentRetries: 1,
+      },
+      textMode: 'full-visible',
+      textContentSource: 'document_body_innerText',
+    });
+    expect(payload.textContent).toContain('可控调节属性');
+    vi.useRealTimers();
+  });
+
+  it('recovers a readable web content tab when tab creation times out after the document appears', async () => {
+    vi.useFakeTimers();
+    vi.mocked(chrome.tabs.query)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: 20,
+          windowId: 1,
+          active: false,
+          status: 'loading',
+          url: 'https://nextjs.org/docs/app/getting-started/installation',
+          pendingUrl: undefined,
+          title: 'Getting Started: Installation | Next.js',
+        } as chrome.tabs.Tab,
+      ]);
+    vi.mocked(chrome.tabs.create).mockImplementation(() => new Promise<chrome.tabs.Tab>(() => {}));
+    vi.spyOn(webFetcherTool as any, 'waitForTabSettled').mockResolvedValue({
+      tab: {
+        id: 20,
+        windowId: 1,
+        active: false,
+        status: 'complete',
+        url: 'https://nextjs.org/docs/app/getting-started/installation',
+        title: 'Getting Started: Installation | Next.js',
+      },
+      settled: true,
+      timedOut: false,
+      reason: 'complete',
+      waitedMs: 200,
+      readyState: 'complete',
+    });
+    vi.spyOn(webFetcherTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(webFetcherTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      textContent:
+        'Next.js installation docs are visible after recovering the tab created by Chrome even though tabs.create did not resolve in time.',
+    });
+    vi.mocked(chrome.tabs.get).mockResolvedValue({
+      id: 20,
+      windowId: 1,
+      active: false,
+      status: 'complete',
+      url: 'https://nextjs.org/docs/app/getting-started/installation',
+      title: 'Getting Started: Installation | Next.js',
+    } as chrome.tabs.Tab);
+
+    const executePromise = webFetcherTool.execute({
+      url: 'https://nextjs.org/docs/app/getting-started/installation',
+      background: true,
+      textContent: true,
+    });
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.advanceTimersByTimeAsync(250);
+    const result = await executePromise;
+
+    expect(result.isError).toBe(false);
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+    expect(payload).toMatchObject({
+      success: true,
+      tabId: 20,
+      createdTabForUrl: true,
+      createTimedOutRecovered: true,
+      url: 'https://nextjs.org/docs/app/getting-started/installation',
+      title: 'Getting Started: Installation | Next.js',
+    });
+    expect(payload.textContent).toContain('recovering the tab');
+    vi.useRealTimers();
+  });
+
+  it('does not treat long single-line article text as incomplete sparse content', async () => {
+    const articleText = [
+      'If Codex does not feel useful yet, the missing piece is often the browser and skill context around it.',
+      'This article walks through five concrete tools, explains when each one matters, and includes enough detail for a reader to recover the full list without opening another page.',
+      'The body is intentionally normalized into one visible text line because many article pages collapse readable content that way after extraction.',
+      'A quality model should still tell the assistant that the text body is available, while separately warning that UI structure and target refs require chrome_read_page.',
+      'awesome-codex-skills, repomix, follow-builders, codex-plusplus, and keep-codex-fast are all present in the extracted text body.',
+    ].join(' ');
+
+    vi.spyOn(webFetcherTool as any, 'waitForTabSettled').mockResolvedValue({
+      tab: {
+        id: 20,
+        windowId: 1,
+        active: false,
+        status: 'complete',
+        url: 'https://example.com/article',
+        title: 'Long Article',
+      },
+      settled: true,
+      timedOut: false,
+      reason: 'complete',
+      waitedMs: 200,
+      readyState: 'complete',
+    });
+    vi.spyOn(webFetcherTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(webFetcherTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      textContent: articleText,
+      article: { title: 'Long Article', byline: 'Author', siteName: 'Example', excerpt: '' },
+    });
+
+    const result = await webFetcherTool.execute({
+      url: 'https://example.com/article',
+      background: true,
+    });
+
+    expect(result.isError).toBe(false);
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+    expect(payload.textSummary).toMatchObject({
+      quality: 'complete_text_sparse_structure',
+      sparse: false,
+      structureSparse: true,
+      contentSparse: false,
+      completeTextAvailable: true,
+    });
+    expect(payload.extractionHint).toContain('structurally sparse');
+    expect(payload.extractionHint).not.toContain('higher-risk tools');
+  });
+
+  it('labels full-visible web content mode without changing the default body mode', async () => {
+    vi.spyOn(webFetcherTool as any, 'waitForTabSettled').mockResolvedValue({
+      tab: {
+        id: 20,
+        windowId: 1,
+        active: false,
+        status: 'complete',
+        url: 'https://nextjs.org/docs/app/getting-started/installation',
+        title: 'Getting Started: Installation | Next.js',
+      },
+      settled: true,
+      timedOut: false,
+      reason: 'complete',
+      waitedMs: 200,
+      readyState: 'complete',
+    });
+    vi.spyOn(webFetcherTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    const sendMessageToTab = vi.spyOn(webFetcherTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      textContent:
+        'Docs API Reference Version 16 Installation Manual installation and system requirements are visible.',
+      textMode: 'full-visible',
+      textContentSource: 'document_body_innerText',
+      metadata: { lang: 'en' },
+    });
+
+    const result = await webFetcherTool.execute({
+      url: 'https://nextjs.org/docs/app/getting-started/installation',
+      background: true,
+      textMode: 'full-visible',
+    });
+
+    expect(sendMessageToTab).toHaveBeenCalledWith(
+      20,
+      expect.objectContaining({
+        action: 'getTextContent',
+        textMode: 'full-visible',
+      }),
+    );
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+    expect(payload).toMatchObject({
+      textMode: 'full-visible',
+      textContentSource: 'document_body_innerText',
+    });
+    expect(payload.textContent).toContain('API Reference');
+  });
+
+  it('does not call medium single-line text complete when structure is sparse', async () => {
+    vi.spyOn(webFetcherTool as any, 'waitForTabSettled').mockResolvedValue({
+      tab: {
+        id: 20,
+        windowId: 1,
+        active: false,
+        status: 'complete',
+        url: 'https://chat.deepseek.com/share/example',
+        title: 'DeepSeek',
+      },
+      settled: true,
+      timedOut: false,
+      reason: 'complete',
+      waitedMs: 200,
+      readyState: 'complete',
+    });
+    vi.mocked(chrome.tabs.create).mockResolvedValue({
+      id: 20,
+      windowId: 1,
+      active: false,
+      status: 'loading',
+      url: 'https://chat.deepseek.com/share/example',
+      title: 'Loading',
+    } as chrome.tabs.Tab);
+    vi.spyOn(webFetcherTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(webFetcherTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      textContent:
+        'Shared conversation prompt text is visible, but the generated answer body is not present in the current DOM.',
+      contentDiagnostics: {
+        extractedLength: 98,
+        scrollContainerCandidateCount: 1,
+        bestScrollableTextLength: 900,
+        longScrollableContentLikely: true,
+        scrollContainers: [
+          {
+            tagName: 'TEXTAREA',
+            className: 'conversation-scroll-area',
+            scrollTop: 0,
+            scrollHeight: 1600,
+            clientHeight: 320,
+            textLength: 900,
+            textPreview: null,
+            textPreviewRedacted: true,
+          },
+        ],
+      },
+      metadata: { lang: 'en' },
+    });
+
+    const result = await webFetcherTool.execute({
+      url: 'https://chat.deepseek.com/share/example',
+      background: true,
+      textContent: true,
+    });
+
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+    expect(payload.textSummary).toMatchObject({
+      quality: 'sparse',
+      sparse: true,
+      structureSparse: true,
+      contentSparse: false,
+      completeTextAvailable: false,
+      warning:
+        'Visible text has limited structure and may be incomplete. Prefer chrome_read_page or htmlContent when completeness matters.',
+    });
+    expect(payload.extractionHint).toBe(
+      'Visible text has limited structure and may be incomplete for this route. Use chrome_read_page or htmlContent when completeness matters.',
+    );
+    expect(payload.extractionHint).not.toContain('appears complete');
+    expect(payload.contentDiagnostics).toMatchObject({
+      scrollContainerCandidateCount: 1,
+      longScrollableContentLikely: true,
+    });
+  });
+
+  it('returns plain text evidence when htmlContent is requested', async () => {
+    vi.spyOn(webFetcherTool as any, 'waitForTabSettled').mockResolvedValue({
+      tab: {
+        id: 20,
+        windowId: 1,
+        active: false,
+        status: 'complete',
+        url: 'https://chat.deepseek.com/share/example',
+        title: 'DeepSeek',
+      },
+      settled: true,
+      timedOut: false,
+      reason: 'complete',
+      waitedMs: 200,
+      readyState: 'complete',
+    });
+    vi.mocked(chrome.tabs.create).mockResolvedValue({
+      id: 20,
+      windowId: 1,
+      active: false,
+      status: 'loading',
+      url: 'https://chat.deepseek.com/share/example',
+      title: 'Loading',
+    } as chrome.tabs.Tab);
+    vi.spyOn(webFetcherTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(webFetcherTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      htmlContent:
+        '<html><body><main>物模型 静态属性 时序属性 可控调节属性 服务/动作</main></body></html>',
+      htmlTextContent:
+        '物模型 静态属性 时序属性 可控调节属性 服务/动作。这个 HTML 派生文本比可见文本路径更完整，用于长内容完整度证据。',
+      htmlTextContentSource: 'cleaned_html_textContent',
+    });
+
+    const result = await webFetcherTool.execute({
+      url: 'https://chat.deepseek.com/share/example',
+      background: true,
+      htmlContent: true,
+    });
+
+    expect(result.isError).toBe(false);
+    expect((webFetcherTool as any).sendMessageToTab).toHaveBeenCalledTimes(1);
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+    expect(payload.htmlContent).toContain('物模型');
+    expect(payload.htmlTextContent).toContain('可控调节属性');
+    expect(payload.htmlTextContentSource).toBe('cleaned_html_textContent');
+    expect(payload.htmlTextSummary).toMatchObject({
+      quality: 'sparse',
+      completeTextAvailable: false,
     });
   });
 
@@ -386,6 +1635,24 @@ describe('browser settle guidance', () => {
       title: 'Smoke',
     });
     vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    (chrome.windows.getAll as any).mockResolvedValueOnce([
+      {
+        id: 1,
+        focused: true,
+        state: 'normal',
+        type: 'normal',
+        tabs: [
+          {
+            id: 41,
+            windowId: 1,
+            active: true,
+            status: 'complete',
+            url: 'http://127.0.0.1:62100/',
+            title: 'Smoke',
+          },
+        ],
+      },
+    ]);
     vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
       success: true,
       pageContent:
@@ -410,24 +1677,539 @@ describe('browser settle guidance', () => {
     expect(payload.page).toMatchObject({
       pageType: 'web_page',
     });
+    expect(payload.pageProjection).toMatchObject({
+      ownerType: 'user_owned',
+    });
+    expect(payload.pageContext.loadReadiness).toMatchObject({
+      status: 'stable',
+      pageStability: 'stable',
+      waitedForPendingDocument: false,
+      canUseSnapshotForBusinessAction: true,
+      nextStepAction: 'proceed',
+      nextStepHint: 'safe_to_use_structured_refs_with_postcondition_verification',
+    });
+    expect(payload.ownershipRuntime).toMatchObject({
+      currentOwnerType: 'user_owned',
+    });
     expect(Array.isArray(payload.interactiveElements)).toBe(true);
     expect(Array.isArray(payload.candidateActions)).toBe(true);
     expect(Array.isArray(payload.artifactRefs)).toBe(true);
   });
 
-  it('classifies github issues_list pages in read_page metadata (public baseline)', async () => {
+  it('attaches CDP page sensing to read_page load readiness when available', async () => {
+    vi.spyOn(cdpPageSensing, 'captureCDPPageSensingSnapshot').mockResolvedValue({
+      tabId: 41,
+      capturedAt: Date.parse('2026-06-13T10:00:00.000Z'),
+      source: 'cdp',
+      available: true,
+      readiness: 'complete',
+      likelyLoading: false,
+      stabilityHint: 'stable',
+      visibilityState: 'visible',
+      focused: true,
+      activeElement: {
+        tagName: 'INPUT',
+        type: 'search',
+        role: 'searchbox',
+        idPresent: true,
+        namePresent: true,
+      },
+      frameCount: 2,
+      navigation: {
+        type: 'navigate',
+        responseEndMs: 24,
+        domContentLoadedMs: 48,
+        loadEventMs: 72,
+      },
+      networkActivity: {
+        requestStartedCount: 17,
+        inFlightCount: 3,
+        failedRequestCount: 1,
+      },
+      networkResources: {
+        resourceEntryCount: 64,
+        resourceInFlightCount: 2,
+        failedResourceStatusCount: 4,
+      },
+      console: {
+        errorCount: 1,
+        warningCount: 0,
+      },
+      accessibility: {
+        totalNodes: 8,
+        actionableNodeCount: 2,
+        actionableRoleTop: [
+          { role: 'button', count: 1 },
+          { role: 'textbox', count: 1 },
+        ],
+        actionableSampleLabels: ['Search', 'Submit'],
+        stateSignals: {
+          checkedCount: 0,
+          selectedCount: 0,
+          expandedCount: 0,
+          disabledCount: 0,
+        },
+        locatorCoverage: {
+          locatorCandidateCount: 2,
+          axNodeIdCount: 2,
+          backendDOMNodeIdCount: 1,
+          locatorCoverageRate: 1,
+        },
+        objectCandidates: [
+          {
+            role: 'textbox',
+            label: 'Search',
+            locator: {
+              source: 'cdp_ax',
+              axNodeId: 'ax-search',
+              backendDOMNodeId: 101,
+            },
+            actionTypes: ['focus', 'set_value'],
+            state: {
+              disabled: false,
+            },
+          },
+          {
+            role: 'button',
+            label: 'Submit',
+            locator: {
+              source: 'cdp_ax',
+              axNodeId: 'ax-submit',
+            },
+            actionTypes: ['press'],
+            state: {
+              disabled: false,
+            },
+          },
+        ],
+      },
+    });
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 41,
+      windowId: 1,
+      active: true,
+      status: 'complete',
+      url: 'https://example.test/search?q=private',
+      title: 'Search',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    (chrome.windows.get as any).mockResolvedValue({
+      id: 1,
+      focused: true,
+      state: 'normal',
+      tabs: [
+        {
+          id: 41,
+          windowId: 1,
+          active: true,
+          status: 'complete',
+          url: 'https://example.test/search?q=private',
+          title: 'Search',
+        },
+      ],
+    });
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: [
+        'Textbox "Search"',
+        'Button "Submit"',
+        'List "Results"',
+        'Link "Docs"',
+        'Status "Ready"',
+        'Panel "Search filters"',
+        'Section "Result cards"',
+        'Card "First result"',
+        'Hint "Use ref based actions"',
+        'Footer "End"',
+      ].join('\n'),
+      refMap: ['ref_search', 'ref_submit'],
+      stats: {
+        processed: 16,
+        included: 10,
+        durationMs: 10,
+      },
+      viewport: { width: 1280, height: 720, dpr: 1 },
+    });
+
+    const result = await readPageTool.execute({ tabId: 41, mode: 'compact' });
+
+    expect(result.isError).toBe(false);
+    expect(cdpPageSensing.captureCDPPageSensingSnapshot).toHaveBeenCalledWith(41);
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+    expect(payload.evidenceSource).toContain('cdp');
+    expect(payload.pageContext.loadReadiness.cdpSensing).toMatchObject({
+      source: 'cdp_page_sensing',
+      available: true,
+      readiness: 'complete',
+      likelyLoading: false,
+      visibilityState: 'visible',
+      focused: true,
+      activeElement: {
+        tagName: 'INPUT',
+        type: 'search',
+        role: 'searchbox',
+        idPresent: true,
+        namePresent: true,
+      },
+      frameCount: 2,
+      networkActivity: {
+        requestStartedCount: 17,
+        inFlightCount: 3,
+        failedRequestCount: 1,
+      },
+      networkResources: {
+        resourceEntryCount: 64,
+        resourceInFlightCount: 2,
+        failedResourceStatusCount: 4,
+      },
+      console: {
+        errorCount: 1,
+        warningCount: 0,
+      },
+      accessibility: {
+        totalNodes: 8,
+        actionableNodeCount: 2,
+        locatorCoverage: {
+          locatorCandidateCount: 2,
+          axNodeIdCount: 2,
+          backendDOMNodeIdCount: 1,
+          locatorCoverageRate: 1,
+        },
+        objectCandidates: [
+          {
+            role: 'textbox',
+            label: 'Search',
+            locator: {
+              source: 'cdp_ax',
+              axNodeId: 'ax-search',
+              backendDOMNodeId: 101,
+            },
+          },
+          {
+            role: 'button',
+            label: 'Submit',
+            locator: {
+              source: 'cdp_ax',
+              axNodeId: 'ax-submit',
+            },
+          },
+        ],
+      },
+      navigation: {
+        responseEndMs: 24,
+        domContentLoadedMs: 48,
+        loadEventMs: 72,
+      },
+    });
+    expect(payload.pageContext.loadReadiness).toMatchObject({
+      canUseSnapshotForBusinessAction: false,
+      nextStepAction: 'block',
+      nextStepHint: 'inspect_errors_then_reread_after_recovery_before_structured_actions',
+    });
+    expect(payload.pageContext.loadReadiness.nextStepHint).not.toContain(
+      'safe_to_use_structured_refs_with_postcondition_verification',
+    );
+    expect(payload.pageContext.loadReadiness.claimBoundary).toContain('cdp_errors_are_high');
+    expect(JSON.stringify(payload.pageContext.loadReadiness.cdpSensing)).not.toContain('private');
+  });
+
+  it('returns bounded CDP and AX object evidence when DOM accessibility sensing hangs', async () => {
+    vi.spyOn(cdpPageSensing, 'captureCDPPageSensingSnapshot').mockResolvedValue({
+      tabId: 41,
+      capturedAt: Date.parse('2026-06-13T10:00:00.000Z'),
+      source: 'cdp',
+      available: true,
+      readiness: 'complete',
+      likelyLoading: false,
+      stabilityHint: 'stable',
+      accessibility: {
+        totalNodes: 3,
+        actionableNodeCount: 1,
+        actionableRoleTop: [{ role: 'searchbox', count: 1 }],
+        actionableSampleLabels: ['Search'],
+        stateSignals: {
+          checkedCount: 0,
+          selectedCount: 0,
+          expandedCount: 0,
+          disabledCount: 0,
+        },
+        locatorCoverage: {
+          locatorCandidateCount: 1,
+          axNodeIdCount: 1,
+          backendDOMNodeIdCount: 1,
+          locatorCoverageRate: 1,
+        },
+        objectCandidates: [
+          {
+            role: 'searchbox',
+            label: 'Search',
+            locator: {
+              source: 'cdp_ax',
+              axNodeId: 'ax-search',
+              backendDOMNodeId: 101,
+              cssSelector: 'input[aria-label="Search"]',
+              visualBounds: { x: 80, y: 24, width: 320, height: 40 },
+            },
+            actionTypes: ['focus', 'set_value'],
+            state: { disabled: false },
+          },
+        ],
+      },
+    } as any);
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 41,
+      windowId: 1,
+      active: true,
+      status: 'complete',
+      url: 'https://example.test/search?q=private',
+      title: 'Search',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(readPageTool as any, 'getDomSensingTimeoutMs').mockReturnValue(5);
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockImplementation(
+      () => new Promise(() => undefined),
+    );
+    (chrome.windows.get as any).mockResolvedValue({
+      id: 1,
+      focused: true,
+      state: 'normal',
+      tabs: [
+        {
+          id: 41,
+          windowId: 1,
+          active: true,
+          status: 'complete',
+          url: 'https://example.test/search?q=private',
+          title: 'Search',
+        },
+      ],
+    });
+
+    const result = await readPageTool.execute({ tabId: 41, mode: 'compact', depth: 2 });
+
+    expect(result.isError).toBe(false);
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+    expect(payload).toMatchObject({
+      pageContext: {
+        fallbackUsed: true,
+        fallbackSource: 'cdp_ax_dom_unavailable',
+      },
+    });
+    expect(payload.evidenceSource).toContain('cdp');
+    expect(payload.candidateActions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          actionType: 'fill',
+          targetRef: 'ref_fallback_cdp_ax_backend_101',
+          snapshotRect: { x: 80, y: 24, width: 320, height: 40 },
+        }),
+      ]),
+    );
+    expect(payload.pageContext.sensingDiagnostics).toMatchObject({
+      coverageStatus: 'partial',
+      partialErrors: [
+        expect.objectContaining({
+          source: 'read_page.dom_accessibility_timeout',
+        }),
+      ],
+    });
+  });
+
+  it('downgrades stable pages to changing when CDP detects SPA navigation', async () => {
+    vi.spyOn(cdpPageSensing, 'captureCDPPageSensingSnapshot').mockResolvedValue({
+      tabId: 44,
+      capturedAt: Date.parse('2026-06-13T10:00:00.000Z'),
+      source: 'cdp',
+      available: true,
+      readiness: 'complete',
+      likelyLoading: true,
+      stabilityHint: 'spa_navigating',
+      visibilityState: 'visible',
+      focused: true,
+      networkActivity: {
+        requestStartedCount: 4,
+        inFlightCount: 2,
+        failedRequestCount: 0,
+      },
+      navigation: {
+        type: 'navigate',
+        responseEndMs: 20,
+        domContentLoadedMs: 35,
+        loadEventMs: 50,
+      },
+    });
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 44,
+      windowId: 1,
+      active: true,
+      status: 'complete',
+      url: 'https://example.test/search',
+      title: 'Search',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    (chrome.windows.get as any).mockResolvedValue({
+      id: 1,
+      focused: true,
+      state: 'normal',
+      tabs: [
+        {
+          id: 44,
+          windowId: 1,
+          active: true,
+          status: 'complete',
+          url: 'https://example.test/search',
+          title: 'Search',
+        },
+      ],
+    });
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: [
+        'Textbox "Search"',
+        'Button "Submit"',
+        'List "Results"',
+        'Link "Docs"',
+        'Status "Ready"',
+        'Panel "Search filters"',
+        'Section "Result cards"',
+        'Card "First result"',
+        'Hint "Use ref based actions"',
+        'Footer "End"',
+      ].join('\n'),
+      refMap: ['ref_search', 'ref_submit'],
+      stats: {
+        processed: 16,
+        included: 10,
+        durationMs: 10,
+      },
+      viewport: { width: 1280, height: 720, dpr: 1 },
+    });
+
+    const result = await readPageTool.execute({ tabId: 44, mode: 'compact' });
+
+    expect(result.isError).toBe(false);
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+    expect(payload.pageContext.loadReadiness).toMatchObject({
+      status: 'unknown',
+      pageStability: 'changing',
+      canUseSnapshotForBusinessAction: false,
+      nextStepAction: 'wait',
+      nextStepHint:
+        'spa_navigation_detected; wait_then_force_fresh_read_page_before_business_actions',
+    });
+    expect(payload.pageContext.loadReadiness.claimBoundary).toContain(
+      'cdp_detected_post_ready_spa_navigation',
+    );
+  });
+
+  it('exposes provisional read_page load evidence when a target tab is still loading after wait', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 43,
+      windowId: 1,
+      active: true,
+      status: 'loading',
+      url: 'http://127.0.0.1:62100/loading',
+      title: 'Loading',
+    });
+    vi.spyOn(readPageTool as any, 'waitForTabSettled').mockResolvedValue({
+      tab: {
+        id: 43,
+        windowId: 1,
+        active: true,
+        status: 'loading',
+        url: 'http://127.0.0.1:62100/loading',
+        title: 'Loading',
+      },
+      settled: false,
+      timedOut: true,
+      reason: 'timeout',
+      waitedMs: 5000,
+      readyState: 'interactive',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    (chrome.windows.get as any).mockResolvedValue({
+      id: 1,
+      focused: true,
+      state: 'normal',
+      tabs: [
+        {
+          id: 43,
+          windowId: 1,
+          active: true,
+          status: 'loading',
+          url: 'http://127.0.0.1:62100/loading',
+          title: 'Loading',
+        },
+      ],
+    });
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: [
+        'generic "Loading shell one"',
+        'generic "Loading shell two"',
+        'generic "Loading shell three"',
+        'generic "Loading shell four"',
+        'generic "Loading shell five"',
+        'generic "Loading shell six"',
+        'generic "Loading shell seven"',
+        'generic "Loading shell eight"',
+        'generic "Loading shell nine"',
+        'generic "Loading shell ten"',
+      ].join('\n'),
+      refMap: ['ref_1', 'ref_2', 'ref_3'],
+      stats: {
+        processed: 10,
+        included: 10,
+        durationMs: 16,
+      },
+      viewport: { width: 1280, height: 720, dpr: 1 },
+    });
+
+    const result = await readPageTool.execute({ tabId: 43, mode: 'normal' });
+
+    expect((readPageTool as any).waitForTabSettled).toHaveBeenCalledWith(43, {
+      timeoutMs: 5000,
+    });
+    expect(result.isError).toBe(false);
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+    expect(payload.readinessVerdict).toBe('blocked');
+    expect(payload.readinessReason).toBe('page_load_not_stable');
+    expect(payload.pageProjection).toMatchObject({
+      stability: 'loading',
+    });
+    expect(payload.pageContext.loadReadiness).toMatchObject({
+      status: 'loading_after_wait',
+      pageStability: 'loading',
+      initialTabStatus: 'loading',
+      finalTabStatus: 'loading',
+      waitedForPendingDocument: true,
+      settled: false,
+      timedOut: true,
+      settleReason: 'timeout',
+      waitedMs: 5000,
+      readyState: 'interactive',
+      canUseSnapshotForBusinessAction: false,
+      nextStepAction: 'wait',
+      nextStepHint: 'wait_then_force_fresh_read_page_before_business_actions',
+    });
+    expect(payload.pageContext.loadReadiness.claimBoundary).toContain(
+      'candidate objects as provisional',
+    );
+  });
+
+  it('does not assign platform page roles in read_page metadata by default', async () => {
     vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
       id: 42,
       windowId: 1,
       active: true,
       status: 'complete',
-      url: 'https://github.com/example/project/issues',
-      title: 'Issues · example/project',
+      url: 'https://content.example/search?q=ai',
+      title: 'Search results',
     });
     vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
     vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
       success: true,
-      pageContent: 'Search Issues\nFilter by assignee\nLabels\nMilestone\nNew issue\nissue entries',
+      pageContent: 'Search results\nFilter by type\nSort by newest\nResult entries',
       refMap: ['ref_10', 'ref_11', 'ref_12'],
       stats: {
         processed: 18,
@@ -448,9 +2230,9 @@ describe('browser settle guidance', () => {
       scheme: 'https',
     });
     expect(payload.summary).toMatchObject({
-      pageRole: 'issues_list',
-      primaryRegion: 'issues_results',
-      primaryRegionConfidence: 'high',
+      pageRole: 'unknown',
+      primaryRegion: null,
+      primaryRegionConfidence: null,
       footerOnly: false,
     });
   });

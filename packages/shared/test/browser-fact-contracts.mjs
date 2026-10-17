@@ -9,6 +9,10 @@ import {
   CONTEXT_LEVELS,
   FACT_OBSERVATION_EVENT_KINDS,
   LIFECYCLE_EVENT_KINDS,
+  LIFECYCLE_EVIDENCE_ARTIFACT_SECTIONS,
+  LIFECYCLE_EVIDENCE_BROWSER_HYGIENE_CHECK_KINDS,
+  LIFECYCLE_EVIDENCE_BROWSER_HYGIENE_CHECK_REASONS,
+  LIFECYCLE_EVIDENCE_BROWSER_HYGIENE_CHECK_VERDICTS,
   LIFECYCLE_FLAGS,
   LIFECYCLE_STATES,
   NAVIGATION_INTENTS,
@@ -16,11 +20,16 @@ import {
   NETWORK_FACT_NOISE_CLASSES,
   NETWORK_FACT_SIZE_CLASSES,
   OBSERVATION_KINDS,
+  POSTCONDITION_SOURCE_ORIGINS,
+  POSTCONDITION_VERDICTS,
   READINESS_STATES,
   RECOMMENDED_LAYERS,
   RECOMMENDED_LAYER_REASONS,
+  SEMANTIC_SIGNAL_KINDS,
+  SEMANTIC_SIGNAL_SOURCE_ORIGINS,
   STABLE_REF_REVALIDATION_OUTCOMES,
   TAB_WINDOW_EVENT_KINDS,
+  WATCH_SCOPE_KINDS,
 } from '../dist/index.mjs';
 
 function assertClosedVocabulary(name, actual, expected) {
@@ -110,6 +119,8 @@ assertClosedVocabulary('ACTION_KINDS', ACTION_KINDS, [
   'fill',
   'submit',
   'navigate',
+  'read',
+  'close',
   'keyboard',
   'unknown',
 ]);
@@ -119,6 +130,7 @@ assertClosedVocabulary('ACTION_SIGNAL_KINDS', ACTION_SIGNAL_KINDS, [
   'tab_created',
   'dom_region_changed',
   'network_completed',
+  'network_failed',
   'dialog_opened',
   'unknown',
 ]);
@@ -128,11 +140,77 @@ assertClosedVocabulary('ACTION_OUTCOMES', ACTION_OUTCOMES, [
   'navigated_new_tab',
   'spa_partial_update',
   'modal_opened',
+  'error_observed',
   'no_observed_change',
   'multiple_signals',
   'ambiguous',
   'unknown',
 ]);
+
+assertClosedVocabulary('POSTCONDITION_VERDICTS', POSTCONDITION_VERDICTS, [
+  'passed',
+  'failed',
+  'unknown',
+]);
+
+assertClosedVocabulary('POSTCONDITION_SOURCE_ORIGINS', POSTCONDITION_SOURCE_ORIGINS, [
+  'runtime',
+  'action_outcome_classifier',
+  'inference',
+  'unknown',
+]);
+
+assertClosedVocabulary('LIFECYCLE_EVIDENCE_ARTIFACT_SECTIONS', LIFECYCLE_EVIDENCE_ARTIFACT_SECTIONS, [
+  'scenario_baseline',
+  'event_timeline',
+  'signal_sequence',
+  'scope_transitions',
+  'action_log',
+  'browser_hygiene_closeout',
+  'source_truth_chain',
+  'claim_boundary',
+  'final_verdict',
+  'unknown',
+]);
+
+assertClosedVocabulary(
+  'LIFECYCLE_EVIDENCE_BROWSER_HYGIENE_CHECK_KINDS',
+  LIFECYCLE_EVIDENCE_BROWSER_HYGIENE_CHECK_KINDS,
+  [
+    'tab_window_baseline',
+    'active_tab_restore',
+    'run_owned_cleanup',
+    'user_owned_protection',
+    'failure_cleanup',
+    'unknown',
+  ],
+);
+
+assertClosedVocabulary(
+  'LIFECYCLE_EVIDENCE_BROWSER_HYGIENE_CHECK_VERDICTS',
+  LIFECYCLE_EVIDENCE_BROWSER_HYGIENE_CHECK_VERDICTS,
+  ['pass', 'fail', 'unknown'],
+);
+
+assertClosedVocabulary(
+  'LIFECYCLE_EVIDENCE_BROWSER_HYGIENE_CHECK_REASONS',
+  LIFECYCLE_EVIDENCE_BROWSER_HYGIENE_CHECK_REASONS,
+  [
+    'pre_post_tab_window_baseline_unchanged',
+    'pre_post_tab_window_baseline_changed',
+    'active_tab_restored',
+    'active_tab_not_restored',
+    'run_owned_tabs_cleaned',
+    'run_owned_tabs_left_open',
+    'user_owned_tabs_protected',
+    'user_owned_tab_closed',
+    'failure_cleanup_completed',
+    'failure_cleanup_failed',
+    'failure_cleanup_not_needed',
+    'browser_hygiene_check_not_reported',
+    'unknown',
+  ],
+);
 
 assertClosedVocabulary('READINESS_STATES', READINESS_STATES, [
   'error',
@@ -206,10 +284,43 @@ assertClosedVocabulary('OBSERVATION_KINDS', OBSERVATION_KINDS, [
   'unknown',
 ]);
 
+assertClosedVocabulary('SEMANTIC_SIGNAL_KINDS', SEMANTIC_SIGNAL_KINDS, [
+  'wait_for_stability',
+  'ready_to_act',
+  'user_took_over',
+  'login_required',
+  'challenge_required',
+  'results_changed',
+  'error_page_detected',
+  'postcondition_failed',
+  'unknown',
+]);
+
+assertClosedVocabulary('SEMANTIC_SIGNAL_SOURCE_ORIGINS', SEMANTIC_SIGNAL_SOURCE_ORIGINS, [
+  'browser_stream',
+  'page_projection',
+  'runtime_inference',
+  'unknown',
+]);
+
+assertClosedVocabulary('WATCH_SCOPE_KINDS', WATCH_SCOPE_KINDS, [
+  'search',
+  'form',
+  'auth',
+  'challenge',
+  'long_content',
+  'multi_tab',
+  'error_recovery',
+  'user_takeover',
+  'loading',
+  'idle',
+  'unknown',
+]);
+
 console.log(
   JSON.stringify({
     status: 'PASS',
     contract: 'browser-fact',
-    vocabularyCount: 19,
+    vocabularyCount: 27,
   }),
 );

@@ -5,116 +5,120 @@ import {
   __resetCompiledKnowledgeRegistryForTest,
 } from '@/entrypoints/background/knowledge/registry/knowledge-registry';
 import type { KnowledgeSeeds } from '@/entrypoints/background/knowledge/types';
-import { GITHUB_KNOWLEDGE_SEEDS } from '@/entrypoints/background/knowledge/seeds/github';
-import { DOUYIN_KNOWLEDGE_SEEDS } from '@/entrypoints/background/knowledge/seeds/douyin';
+
+const GENERIC_KNOWLEDGE_SEEDS: KnowledgeSeeds = {
+  siteProfiles: [{ siteId: 'example_site', match: { hosts: ['example.test'] } }],
+  pageRoleRules: [
+    {
+      siteId: 'example_site',
+      pageRole: 'content_detail',
+      match: { urlPatterns: ['^/items/[a-z0-9_-]+'] },
+      primaryRegions: [
+        {
+          region: 'detail_content',
+          patterns: ['\\btitle\\b', '\\bcomments\\b'],
+          confidence: 'medium',
+        },
+      ],
+      fallback: { primaryRegion: 'detail_content', primaryRegionConfidence: 'low' },
+    },
+    {
+      siteId: 'example_site',
+      pageRole: 'search_results',
+      match: { urlPatterns: ['^/search'], titlePatterns: ['search'] },
+      primaryRegions: [
+        {
+          region: 'result_list',
+          patterns: ['\\bresults?\\b', '\\bfilter\\b'],
+          confidence: 'medium',
+        },
+      ],
+    },
+  ],
+  objectClassifiers: [
+    {
+      siteId: 'example_site',
+      pageRole: 'search_results',
+      match: { hrefPatterns: ['^/items/[a-z0-9_-]+'] },
+      objectType: 'card',
+      objectSubType: 'result_card',
+      region: 'result_list',
+    },
+    {
+      siteId: 'example_site',
+      pageRole: 'search_results',
+      match: { labelPatterns: ['open detail'] },
+      objectType: 'button',
+      objectSubType: 'open_detail',
+      region: 'result_list',
+    },
+  ],
+};
 
 describe('knowledge-registry compile', () => {
-  it('loads the stage 1 seed sets without throwing', () => {
+  it('loads with no bundled platform seeds', () => {
     __resetCompiledKnowledgeRegistryForTest();
     const registry = getCompiledKnowledgeRegistry();
     expect(registry).not.toBeNull();
-    expect(registry?.siteProfiles.has('github')).toBe(true);
+    expect(registry?.siteProfiles.size).toBe(0);
+    expect(registry?.pageRoleRulesBySite.size).toBe(0);
   });
 
-  it('exposes GitHub page role rules in declaration order', () => {
-    const compiled = compileKnowledgeRegistry([GITHUB_KNOWLEDGE_SEEDS]);
-    const rules = compiled.pageRoleRulesBySite.get('github');
-    expect(rules).toBeDefined();
-    const names = (rules ?? []).map((r) => r.pageRole);
-    expect(names).toEqual(['workflow_run_detail', 'actions_list', 'issues_list', 'repo_home']);
+  it('exposes authored page role rules in declaration order', () => {
+    const compiled = compileKnowledgeRegistry([GENERIC_KNOWLEDGE_SEEDS]);
+    const rules = compiled.pageRoleRulesBySite.get('example_site');
+    expect(rules?.map((r) => r.pageRole)).toEqual(['content_detail', 'search_results']);
   });
 
-  it('compiles every GitHub pattern to a valid RegExp with the i flag', () => {
-    const compiled = compileKnowledgeRegistry([GITHUB_KNOWLEDGE_SEEDS]);
-    const profile = compiled.siteProfiles.get('github');
+  it('compiles every authored pattern to a case-insensitive RegExp', () => {
+    const compiled = compileKnowledgeRegistry([GENERIC_KNOWLEDGE_SEEDS]);
+    const profile = compiled.siteProfiles.get('example_site');
     expect(profile).toBeDefined();
     for (const p of profile?.match.urlPatterns ?? []) {
       expect(p.pattern.flags).toContain('i');
     }
-    for (const rule of compiled.pageRoleRulesBySite.get('github') ?? []) {
+    for (const rule of compiled.pageRoleRulesBySite.get('example_site') ?? []) {
       for (const p of rule.match.urlPatterns) expect(p.pattern.flags).toContain('i');
+      for (const p of rule.match.titlePatterns) expect(p.pattern.flags).toContain('i');
       for (const region of rule.primaryRegions) {
         for (const pat of region.patterns) expect(pat.pattern.flags).toContain('i');
       }
     }
   });
 
-  it('tolerates sites whose seed set is intentionally empty', () => {
-    const compiled = compileKnowledgeRegistry([DOUYIN_KNOWLEDGE_SEEDS]);
+  it('tolerates intentionally empty seed sets', () => {
+    const compiled = compileKnowledgeRegistry([{ siteProfiles: [], pageRoleRules: [] }]);
     expect(compiled.siteProfiles.size).toBe(0);
     expect(compiled.pageRoleRulesBySite.size).toBe(0);
+    expect(compiled.objectClassifiersBySite.size).toBe(0);
   });
 
   it('rejects duplicate siteId across seed sets', () => {
     const duplicate: KnowledgeSeeds = {
-      siteProfiles: [{ siteId: 'github', match: { hosts: ['github.io'] } }],
+      siteProfiles: [{ siteId: 'example_site', match: { hosts: ['mirror.example.test'] } }],
       pageRoleRules: [],
     };
-    expect(() => compileKnowledgeRegistry([GITHUB_KNOWLEDGE_SEEDS, duplicate])).toThrowError(
+    expect(() => compileKnowledgeRegistry([GENERIC_KNOWLEDGE_SEEDS, duplicate])).toThrowError(
       /duplicate siteId/,
     );
   });
 
-  it('keeps workflow_run_detail stable without dualOutcome (T5.4.5 contract)', () => {
-    const compiled = compileKnowledgeRegistry([GITHUB_KNOWLEDGE_SEEDS]);
-    const rules = compiled.pageRoleRulesBySite.get('github') ?? [];
-    const wrd = rules.find((r) => r.pageRole === 'workflow_run_detail');
-    expect(wrd).toBeDefined();
-    expect(wrd?.dualOutcome).toBeNull();
-    expect(wrd?.fallback.primaryRegion).toBe('workflow_run_shell');
-  });
-
   describe('stage 2 object classifiers', () => {
-    it('compiles the full GitHub classifier catalog (7 URL + 27 label = 34)', () => {
-      const compiled = compileKnowledgeRegistry([GITHUB_KNOWLEDGE_SEEDS]);
-      const list = compiled.objectClassifiersBySite.get('github');
-      expect(list).toBeDefined();
-      const hrefOnly = list?.filter((r) => r.match.hrefPatterns.length > 0) ?? [];
-      const labelOnly = list?.filter((r) => r.match.labelPatterns.length > 0) ?? [];
-      expect(hrefOnly.length).toBe(7);
-      expect(labelOnly.length).toBe(27);
-      expect(list?.length).toBe(34);
-    });
-
-    it('declares URL rules before label rules so URL-first dispatch is preserved', () => {
-      const compiled = compileKnowledgeRegistry([GITHUB_KNOWLEDGE_SEEDS]);
-      const list = compiled.objectClassifiersBySite.get('github') ?? [];
-      const firstLabelIndex = list.findIndex((r) => r.match.labelPatterns.length > 0);
-      const lastHrefIndex = (() => {
-        for (let i = list.length - 1; i >= 0; i -= 1) {
-          if (list[i].match.hrefPatterns.length > 0) return i;
-        }
-        return -1;
-      })();
-      expect(lastHrefIndex).toBeGreaterThanOrEqual(0);
-      expect(firstLabelIndex).toBeGreaterThan(lastHrefIndex);
-    });
-
-    it('preserves declaration order inside URL rules (specific before generic /actions)', () => {
-      const compiled = compileKnowledgeRegistry([GITHUB_KNOWLEDGE_SEEDS]);
-      const list = compiled.objectClassifiersBySite.get('github') ?? [];
-      const sources = list
-        .filter((r) => r.match.hrefPatterns.length > 0)
-        .map((r) => r.match.hrefPatterns[0].source);
-      const runsIdx = sources.findIndex((s) => s.includes('/actions/runs/'));
-      const actionsIdx = sources.findIndex((s) => /\^\/actions\(\?:/.test(s));
-      expect(runsIdx).toBeGreaterThanOrEqual(0);
-      expect(actionsIdx).toBeGreaterThanOrEqual(0);
-      expect(runsIdx).toBeLessThan(actionsIdx);
+    it('compiles object classifiers without relying on a built-in site adapter', () => {
+      const compiled = compileKnowledgeRegistry([GENERIC_KNOWLEDGE_SEEDS]);
+      const list = compiled.objectClassifiersBySite.get('example_site');
+      expect(list?.length).toBe(2);
+      expect(list?.[0].match.hrefPatterns[0].pattern).toBeInstanceOf(RegExp);
+      expect(list?.[1].match.labelPatterns[0].pattern).toBeInstanceOf(RegExp);
     });
 
     it('applies the i flag to every object classifier pattern', () => {
-      const compiled = compileKnowledgeRegistry([GITHUB_KNOWLEDGE_SEEDS]);
-      const list = compiled.objectClassifiersBySite.get('github') ?? [];
+      const compiled = compileKnowledgeRegistry([GENERIC_KNOWLEDGE_SEEDS]);
+      const list = compiled.objectClassifiersBySite.get('example_site') ?? [];
       for (const rule of list) {
         for (const p of rule.match.hrefPatterns) expect(p.pattern.flags).toContain('i');
         for (const p of rule.match.labelPatterns) expect(p.pattern.flags).toContain('i');
       }
-    });
-
-    it('tolerates seeds with no object classifiers (Douyin placeholder)', () => {
-      const compiled = compileKnowledgeRegistry([DOUYIN_KNOWLEDGE_SEEDS]);
-      expect(compiled.objectClassifiersBySite.size).toBe(0);
     });
   });
 });

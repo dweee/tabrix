@@ -1,4 +1,4 @@
-/* global chrome, window, document, Element, HTMLInputElement, HTMLTextAreaElement, HTMLSelectElement */
+/* global chrome, window, document, Element, InputEvent, HTMLInputElement, HTMLTextAreaElement, HTMLSelectElement */
 
 // fill-helper.js
 // This script is injected into the page to handle form filling operations
@@ -10,6 +10,23 @@ if (window.__FILL_HELPER_INITIALIZED__) {
 
   const SCROLL_READY_MAX_MS = 150;
   const RECT_STABLE_EPSILON_PX = 1;
+  const DIAGNOSTICS_KEY = '__TABRIX_INJECT_SCRIPT_DIAGNOSTICS__';
+
+  function recordDiagnostic(source, error) {
+    try {
+      const bucket = (window[DIAGNOSTICS_KEY] = Array.isArray(window[DIAGNOSTICS_KEY])
+        ? window[DIAGNOSTICS_KEY]
+        : []);
+      bucket.push({
+        source,
+        message: String(error && error.message ? error.message : error),
+        at: Date.now(),
+      });
+      if (bucket.length > 25) bucket.splice(0, bucket.length - 25);
+    } catch (_diagnosticError) {
+      return;
+    }
+  }
 
   function nowMs() {
     return window.performance && typeof window.performance.now === 'function'
@@ -49,8 +66,11 @@ if (window.__FILL_HELPER_INITIALIZED__) {
     return new Promise((resolve) => {
       let lastRect = null;
       let stableFrames = 0;
+      let done = false;
       const deadline = startedAt + Math.max(0, maxMs);
       const finish = (reason, ready) => {
+        if (done) return;
+        done = true;
         resolve({
           waitedMs: Math.max(0, Math.round(nowMs() - startedAt)),
           reason,
@@ -71,7 +91,7 @@ if (window.__FILL_HELPER_INITIALIZED__) {
             finish('timeout_disconnected', false);
             return;
           }
-          if (!requestNextFrame(check)) finish('raf_unavailable', false);
+          if (!requestNextFrame(check)) setTimeout(check, 16);
           return;
         }
         const rect = element.getBoundingClientRect();
@@ -102,9 +122,10 @@ if (window.__FILL_HELPER_INITIALIZED__) {
           finish('timeout', false);
           return;
         }
-        if (!requestNextFrame(check)) finish('raf_unavailable', false);
+        if (!requestNextFrame(check)) setTimeout(check, 16);
       };
       check();
+      setTimeout(() => finish('watchdog_timeout', false), Math.max(0, maxMs) + 50);
     });
   }
 
@@ -114,25 +135,86 @@ if (window.__FILL_HELPER_INITIALIZED__) {
    * @param {string} value - Value to fill into the element
    * @returns {Promise<Object>} - Result of the fill operation
    */
+  function isDirectlyFillableElement(element) {
+    if (!element || !(element instanceof Element)) return false;
+    return (
+      element.tagName === 'INPUT' || element.tagName === 'TEXTAREA' || element.tagName === 'SELECT'
+    );
+  }
+
+  function isInteractiveOverlay(element) {
+    if (!element || !(element instanceof Element)) return true;
+    const tagName = String(element.tagName || '').toLowerCase();
+    const role = String(element.getAttribute('role') || '').toLowerCase();
+    const tabIndex = Number(element.getAttribute('tabindex'));
+    return (
+      ['a', 'button', 'input', 'select', 'textarea', 'summary'].includes(tagName) ||
+      /^(button|link|checkbox|radio|menuitem|option|tab|textbox|combobox)$/.test(role) ||
+      element.hasAttribute('contenteditable') ||
+      (element.hasAttribute('tabindex') && Number.isFinite(tabIndex) && tabIndex >= 0)
+    );
+  }
+
+  function isLocalDecorativeOverlay(target, hitTarget) {
+    if (!target || !hitTarget || !(hitTarget instanceof Element)) return false;
+    if (isInteractiveOverlay(hitTarget)) return false;
+    if (
+      hitTarget.closest(
+        'dialog,[role="dialog"],[role="alertdialog"],[aria-modal="true"],[inert],[popover]',
+      )
+    ) {
+      return false;
+    }
+    const hitStyle = window.getComputedStyle(hitTarget);
+    if (hitStyle.position === 'fixed' || hitStyle.position === 'sticky') return false;
+
+    let localContainer = target.parentElement;
+    for (let depth = 0; localContainer && depth < 3; depth += 1) {
+      if (localContainer === document.body || localContainer === document.documentElement) {
+        return false;
+      }
+      if (localContainer.contains(hitTarget)) return true;
+      localContainer = localContainer.parentElement;
+    }
+    return false;
+  }
+
+  function resolveElementForSelector(selector) {
+    if (!selector) return null;
+    const matches = Array.from(document.querySelectorAll(selector));
+    if (matches.length === 0) return null;
+
+    const visibleFillable = matches.find(
+      (candidate) => isDirectlyFillableElement(candidate) && isElementVisible(candidate),
+    );
+    if (visibleFillable) return visibleFillable;
+
+    const visibleCandidate = matches.find((candidate) => isElementVisible(candidate));
+    return visibleCandidate || matches[0];
+  }
+
   async function fillElement(selector, value, ref = null) {
     try {
       // Find the element
       let element = null;
+      let refLookupError = null;
       if (ref && typeof ref === 'string') {
         try {
           const map = window.__claudeElementMap;
           const weak = map && map[ref];
           element = weak && typeof weak.deref === 'function' ? weak.deref() : null;
         } catch (e) {
-          // ignore
+          refLookupError = e instanceof Error ? e.message : String(e);
         }
         if (!element || !(element instanceof Element)) {
           return {
-            error: `Element ref "${ref}" not found. Please call chrome_read_page first and ensure the ref is still valid.`,
+            error: refLookupError
+              ? `Element ref "${ref}" lookup failed: ${refLookupError}. Please call chrome_read_page again before retrying.`
+              : `Element ref "${ref}" not found. Please call chrome_read_page first and ensure the ref is still valid.`,
           };
         }
       } else {
-        element = document.querySelector(selector);
+        element = resolveElementForSelector(selector);
       }
       if (!element) {
         return {
@@ -217,7 +299,9 @@ if (window.__FILL_HELPER_INITIALIZED__) {
                 if (innerSr && innerSr.children) {
                   for (let i = 0; i < innerSr.children.length; i++) queue.push(innerSr.children[i]);
                 }
-              } catch (_) {}
+              } catch (error) {
+                recordDiagnostic('fill_helper.shadow_fillable_scan', error);
+              }
             }
             if (!validTags.includes(element.tagName)) {
               return {
@@ -253,6 +337,51 @@ if (window.__FILL_HELPER_INITIALIZED__) {
 
       const scrollWait = await waitForElementReadyAfterScroll(element);
       elementInfo.waitDiagnostics = { scroll: scrollWait };
+
+      const valueStateFor = (target) => {
+        const value = typeof target?.value === 'string' ? target.value : '';
+        return value.length > 0 ? 'non_empty' : 'empty';
+      };
+
+      const setNativeValue = (target, nextValue) => {
+        const prototype = Object.getPrototypeOf(target);
+        const ownSetter = Object.getOwnPropertyDescriptor(target, 'value')?.set;
+        const prototypeSetter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+        try {
+          if (prototypeSetter && ownSetter !== prototypeSetter) {
+            prototypeSetter.call(target, nextValue);
+            return 'native_prototype';
+          }
+          if (ownSetter) {
+            ownSetter.call(target, nextValue);
+            return 'native_own';
+          }
+        } catch (error) {
+          recordDiagnostic('fill_helper.native_value_setter', error);
+        }
+        target.value = nextValue;
+        return 'direct_fallback';
+      };
+
+      const createInputEvent = (inputType, data = null) => {
+        try {
+          if (typeof InputEvent === 'function') {
+            return new InputEvent('input', {
+              bubbles: true,
+              cancelable: true,
+              inputType,
+              data,
+            });
+          }
+        } catch (error) {
+          recordDiagnostic('fill_helper.input_event_constructor', error);
+        }
+        return new Event('input', { bubbles: true });
+      };
+
+      const dispatchInput = (inputType, data = null) => {
+        element.dispatchEvent(createInputEvent(inputType, data));
+      };
 
       // Focus the element
       element.focus();
@@ -314,15 +443,15 @@ if (window.__FILL_HELPER_INITIALIZED__) {
           return { error: 'Range input requires a numeric value', elementInfo };
         }
         const previous = element.value;
-        element.value = String(numericValue);
+        setNativeValue(element, String(numericValue));
         element.focus();
-        element.dispatchEvent(new Event('input', { bubbles: true }));
+        dispatchInput('insertReplacementText', String(numericValue));
         element.dispatchEvent(new Event('change', { bubbles: true }));
         element.blur();
         return {
           success: true,
-          message: `Set range to ${element.value} (min: ${element.min}, max: ${element.max})`,
-          elementInfo: { ...elementInfo, value: element.value },
+          message: 'Set range input successfully',
+          elementInfo: { ...elementInfo, valueState: valueStateFor(element) },
         };
       }
 
@@ -331,15 +460,15 @@ if (window.__FILL_HELPER_INITIALIZED__) {
           return { error: 'Number input requires a numeric value', elementInfo };
         }
         const previous = element.value;
-        element.value = String(value ?? '');
+        setNativeValue(element, String(value ?? ''));
         element.focus();
-        element.dispatchEvent(new Event('input', { bubbles: true }));
+        dispatchInput('insertReplacementText', String(value ?? ''));
         element.dispatchEvent(new Event('change', { bubbles: true }));
         element.blur();
         return {
           success: true,
-          message: `Set number input to ${element.value} (previous: ${previous})`,
-          elementInfo: { ...elementInfo, value: element.value },
+          message: 'Set number input successfully',
+          elementInfo: { ...elementInfo, valueState: valueStateFor(element) },
         };
       }
 
@@ -349,7 +478,7 @@ if (window.__FILL_HELPER_INITIALIZED__) {
         let optionFound = false;
         for (const option of element.options) {
           if (option.value === value || option.text === value) {
-            element.value = option.value;
+            setNativeValue(element, option.value);
             optionFound = true;
             break;
           }
@@ -367,12 +496,12 @@ if (window.__FILL_HELPER_INITIALIZED__) {
       } else {
         // For input and textarea elements
         // Clear the current value then set new value
-        element.value = '';
-        element.dispatchEvent(new Event('input', { bubbles: true }));
+        setNativeValue(element, '');
+        dispatchInput('deleteContentBackward');
 
-        element.value = String(value);
+        setNativeValue(element, String(value));
 
-        element.dispatchEvent(new Event('input', { bubbles: true }));
+        dispatchInput('insertText', String(value));
         element.dispatchEvent(new Event('change', { bubbles: true }));
       }
 
@@ -384,7 +513,7 @@ if (window.__FILL_HELPER_INITIALIZED__) {
         message: 'Element filled successfully',
         elementInfo: {
           ...elementInfo,
-          value: element.value, // Include the final value in the response
+          valueState: valueStateFor(element),
         },
       };
     } catch (error) {
@@ -402,9 +531,13 @@ if (window.__FILL_HELPER_INITIALIZED__) {
   function isElementVisible(element) {
     if (!element) return false;
 
-    const style = window.getComputedStyle(element);
-    if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
-      return false;
+    let current = element;
+    while (current && current instanceof Element) {
+      const style = window.getComputedStyle(current);
+      if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+        return false;
+      }
+      current = current.parentElement;
     }
 
     const rect = element.getBoundingClientRect();
@@ -429,7 +562,8 @@ if (window.__FILL_HELPER_INITIALIZED__) {
     const elementAtPoint = document.elementFromPoint(centerX, centerY);
     if (!elementAtPoint) return false;
 
-    return element === elementAtPoint || element.contains(elementAtPoint);
+    if (element === elementAtPoint || element.contains(elementAtPoint)) return true;
+    return isDirectlyFillableElement(element) && isLocalDecorativeOverlay(element, elementAtPoint);
   }
 
   // Listen for messages from the extension

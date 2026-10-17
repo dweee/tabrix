@@ -17,6 +17,7 @@ import type {
 } from '@tabrix/shared';
 import {
   ACTION_OUTCOME_MIN_AMBIGUOUS_CONFIDENCE,
+  ACTION_OUTCOME_NO_SIGNAL_CONFIDENCE,
   classifyActionOutcome,
   describeDomRegionSelectionRule,
   isKnownActionSignalKind,
@@ -52,11 +53,12 @@ function makeEnvelope(
 describe('action-outcome-classifier — classifyActionOutcome', () => {
   const now = () => T0 + 9_999;
 
-  it('returns no_observed_change with confidence 1.0 for an empty timeline', () => {
+  it('returns no_observed_change with low confidence for an empty timeline', () => {
     const env = makeEnvelope({ signals: [] });
     const out = classifyActionOutcome(env, { now });
     expect(out.outcome).toBe('no_observed_change');
-    expect(out.outcomeConfidence).toBe(1);
+    expect(out.outcomeConfidence).toBe(ACTION_OUTCOME_NO_SIGNAL_CONFIDENCE);
+    expect(out.outcomeConfidence).toBeLessThan(1);
     expect(out.observedSignalKinds).toEqual([]);
     expect(out.actionId).toBe('act-1');
     expect(out.producedAtMs).toBe(T0 + 9_999);
@@ -103,7 +105,18 @@ describe('action-outcome-classifier — classifyActionOutcome', () => {
     expect(out.outcomeConfidence).toBeCloseTo(0.85, 5);
   });
 
-  it('classifies dom_region_changed without navigation as spa_partial_update', () => {
+  it('returns ambiguous for unscoped dom_region_changed without corroboration', () => {
+    const env = makeEnvelope({
+      signals: [makeSignal({ kind: 'dom_region_changed' })],
+    });
+    const out = classifyActionOutcome(env, { now });
+    expect(out.outcome).toBe('ambiguous');
+    expect(out.outcomeConfidence).toBeGreaterThanOrEqual(ACTION_OUTCOME_MIN_AMBIGUOUS_CONFIDENCE);
+    expect(out.outcomeConfidence).toBeLessThan(0.85);
+    expect(out.observedSignalKinds).toEqual(['dom_region_changed']);
+  });
+
+  it('classifies scoped dom_region_changed without navigation as spa_partial_update', () => {
     const env = makeEnvelope({
       signals: [makeSignal({ kind: 'dom_region_changed', regionTag: 'main_list' })],
     });
@@ -115,7 +128,7 @@ describe('action-outcome-classifier — classifyActionOutcome', () => {
   it('boosts spa_partial_update confidence to 0.95 with corroborating network signal', () => {
     const env = makeEnvelope({
       signals: [
-        makeSignal({ kind: 'dom_region_changed', regionTag: 'main_list' }),
+        makeSignal({ kind: 'dom_region_changed' }),
         makeSignal({
           kind: 'network_completed',
           host: 'example.test',
@@ -136,6 +149,22 @@ describe('action-outcome-classifier — classifyActionOutcome', () => {
     expect(out.outcome).toBe('multiple_signals');
     expect(out.outcomeConfidence).toBeGreaterThanOrEqual(ACTION_OUTCOME_MIN_AMBIGUOUS_CONFIDENCE);
     expect(out.observedSignalKinds).toEqual(['dialog_opened', 'lifecycle_committed']);
+  });
+
+  it('classifies a network_failed signal as error_observed', () => {
+    const env = makeEnvelope({
+      signals: [
+        makeSignal({
+          kind: 'network_failed',
+          host: 'example.test',
+          pathPattern: '/api/items',
+        }),
+      ],
+    });
+    const out = classifyActionOutcome(env, { now });
+    expect(out.outcome).toBe('error_observed');
+    expect(out.outcomeConfidence).toBeCloseTo(0.9, 5);
+    expect(out.observedSignalKinds).toEqual(['network_failed']);
   });
 
   it('returns ambiguous when only network fires (every page emits ambient XHR)', () => {
@@ -187,7 +216,8 @@ describe('action-outcome-classifier — classifyActionOutcome', () => {
     const out = classifyActionOutcome(env, { now, settleWindowMs: 1_500 });
     // Late signal => empty effective timeline => no_observed_change.
     expect(out.outcome).toBe('no_observed_change');
-    expect(out.outcomeConfidence).toBe(1);
+    expect(out.outcomeConfidence).toBe(ACTION_OUTCOME_NO_SIGNAL_CONFIDENCE);
+    expect(out.outcomeConfidence).toBeLessThan(1);
   });
 
   it('drops signals dated before the action observedAtMs (clock skew guard)', () => {
@@ -196,6 +226,8 @@ describe('action-outcome-classifier — classifyActionOutcome', () => {
     });
     const out = classifyActionOutcome(env, { now });
     expect(out.outcome).toBe('no_observed_change');
+    expect(out.outcomeConfidence).toBe(ACTION_OUTCOME_NO_SIGNAL_CONFIDENCE);
+    expect(out.outcomeConfidence).toBeLessThan(1);
   });
 
   it('clamps producer confidence to the [0, 1] interval', () => {
@@ -231,6 +263,7 @@ describe('action-outcome-classifier — isKnownActionSignalKind', () => {
       'tab_created',
       'dom_region_changed',
       'network_completed',
+      'network_failed',
       'dialog_opened',
     ];
     for (const k of known) expect(isKnownActionSignalKind(k)).toBe(true);

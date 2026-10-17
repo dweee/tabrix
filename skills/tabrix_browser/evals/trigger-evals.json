@@ -1,0 +1,42 @@
+{
+  "skill": "tabrix_browser",
+  "purpose": "Public routing evals for Tabrix browser-control assistance.",
+  "should_trigger": [
+    {
+      "name": "real_chrome_browser_task",
+      "prompt": "用我当前 Chrome 打开网页并读取当前页面有哪些可操作对象。",
+      "expected": [
+        "prefers Tabrix",
+        "uses real Chrome session",
+        "asks for runtime status or tools/list when needed",
+        "looks for page objects and actionable targets"
+      ]
+    },
+    {
+      "name": "memory_knowledge_experience_explanation",
+      "prompt": "对象库、记忆库、知识库、经验库分别有什么用？",
+      "expected": [
+        "Object as page/tab/object facts",
+        "Memory as AI-to-Tabrix calls and AI feedback",
+        "Knowledge distilled from Object",
+        "Experience distilled from AI-reviewed Memory"
+      ]
+    },
+    {
+      "name": "cdp_not_default_control",
+      "prompt": "能不能直接用 CDP 接管 Tabrix 的浏览器控制？",
+      "expected": [
+        "CDP as bounded sensing and diagnostics",
+        "Chrome APIs and extension remain default path",
+        "does not bypass privacy or Memory/Object records"
+      ]
+    }
+  ],
+  "should_not_trigger": [
+    {
+      "name": "generic_web_search",
+      "prompt": "帮我查今天的新闻。",
+      "expected": ["do not force Tabrix unless user asks to use their browser"]
+    }
+  ]
+}

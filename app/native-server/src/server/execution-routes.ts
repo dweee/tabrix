@@ -1,7 +1,7 @@
 /**
  * Sidepanel "Execution" tab read-only HTTP routes.
  *
- * Surface layer-dispatch and ranked-replay telemetry
+ * Surface layer-dispatch and read-source telemetry
  * persisted in `tabrix_choose_context_decisions` and
  * `tabrix_choose_context_outcomes`. These routes intentionally
  * mirror the read-only invariant of `memory-routes.ts`:
@@ -14,8 +14,8 @@
  * Privacy contract (enforced by negative tests in
  * `execution-routes.test.ts`):
  *   - response bodies MUST NOT contain full URLs / query strings
- *   - response bodies MUST NOT include any field from
- *     `memory_sessions.user_input`
+ *   - response bodies MUST NOT include raw user free text captured during
+ *     tool execution
  *   - response bodies MUST NOT include cookie or auth header values
  *   - intent is only echoed as the structural `intent_signature`
  *     (lower-cased + redacted upstream)
@@ -23,7 +23,7 @@
  * Routes:
  *   - `GET /execution/decisions/recent?limit=`
  *   - `GET /execution/savings/summary`
- *   - `GET /execution/action-paths/top?limit=`
+ *   - `GET /execution/action-paths/top?limit=` (legacy compatibility)
  *   - `GET /execution/reliability/signals`
  */
 
@@ -96,9 +96,9 @@ function emptyReliability(
     fallbackSafeRate: 0,
     sourceRouteCounts: {
       read_page_required: 0,
-      experience_replay_skip_read: 0,
       knowledge_supported_read: 0,
       dispatcher_fallback_safe: 0,
+      experience_reuse: 0,
       unknown: 0,
     },
     replayBlockedByCounts: {},

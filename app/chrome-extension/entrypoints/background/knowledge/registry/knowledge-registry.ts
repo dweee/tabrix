@@ -16,8 +16,6 @@ import type {
   KnowledgeUIMapLocatorHint,
   KnowledgeUIMapRule,
 } from '../types';
-import { GITHUB_KNOWLEDGE_SEEDS } from '../seeds/github';
-import { DOUYIN_KNOWLEDGE_SEEDS } from '../seeds/douyin';
 
 /**
  * Loads Stage 1 Knowledge seeds, compiles regex sources once, and indexes
@@ -32,11 +30,11 @@ import { DOUYIN_KNOWLEDGE_SEEDS } from '../seeds/douyin';
  */
 
 /**
- * Canonical seed load order. GitHub first, then Douyin placeholder.
- * Stage 2 adds `objectClassifiers` to each seed; the registry loader
- * compiles them into the new `objectClassifiersBySite` index.
+ * Site-specific seeds are intentionally not bundled in the product runtime.
+ * Learned Knowledge should come from observed browser/object data, not from
+ * hardcoded platform profiles.
  */
-const SEED_SETS: readonly KnowledgeSeeds[] = [GITHUB_KNOWLEDGE_SEEDS, DOUYIN_KNOWLEDGE_SEEDS];
+const SEED_SETS: readonly KnowledgeSeeds[] = [];
 
 let cachedRegistry: CompiledKnowledgeRegistry | null = null;
 

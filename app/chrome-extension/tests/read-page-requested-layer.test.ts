@@ -2,8 +2,8 @@
  * V25-02 — `chrome_read_page` `requestedLayer` envelope tests.
  *
  * Verifies:
- *  - Default behaviour (no `requestedLayer`) returns L0+L1+L2 — byte-
- *    identical contract to the legacy snapshot.
+ *  - Default behaviour (no `requestedLayer`) returns L0+L1; callers must
+ *    explicitly request L0+L1+L2 for the full expansion.
  *  - `'L0'` strips L1 + L2 + candidateActions; the L0 task layer and
  *    HVO `targetRef` registry inputs MUST stay populated so
  *    chrome_click_element resolution (V25-04 contract) keeps working.
@@ -20,7 +20,7 @@ const FIXTURE_TAB = {
   windowId: 1,
   active: true,
   status: 'complete',
-  url: 'https://github.com/owner/repo/pull/42',
+  url: 'https://code.example/owner/repo/pull/42',
   title: 'PR #42 — owner/repo',
 };
 
@@ -74,12 +74,12 @@ describe('read_page requestedLayer envelope', () => {
     vi.restoreAllMocks();
   });
 
-  it('defaults to L0+L1+L2 (legacy contract preserved)', async () => {
+  it('defaults to L0+L1 and suppresses L2', async () => {
     setupExecutorMocks();
     const { payload } = await readWithLayer();
     expect(payload.L0).toBeDefined();
     expect(payload.L1).toBeDefined();
-    expect(payload.L2).toBeDefined();
+    expect(payload.L2 ?? null).toBeNull();
     expect(Array.isArray(payload.candidateActions)).toBe(true);
   });
 

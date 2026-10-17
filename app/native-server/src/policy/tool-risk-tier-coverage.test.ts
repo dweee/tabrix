@@ -1,13 +1,9 @@
 import {
-  ALL_TABRIX_CAPABILITIES,
-  CAPABILITY_GATED_TOOLS,
   P3_EXPLICIT_OPT_IN_TOOLS,
   TOOL_NAMES,
   TOOL_RISK_TIERS,
   TOOL_SCHEMAS,
-  getRequiredCapability,
   getToolRiskTier,
-  isCapabilityGatedTool,
   isExplicitOptInTool,
 } from '@tabrix/shared';
 
@@ -69,22 +65,21 @@ describe('TOOL_RISK_TIERS coverage invariants', () => {
     expect(TOOL_RISK_TIERS[TOOL_NAMES.BROWSER.BOOKMARK_DELETE]).toBe('P3');
     expect(TOOL_RISK_TIERS[TOOL_NAMES.BROWSER.INJECT_SCRIPT]).toBe('P3');
     expect(TOOL_RISK_TIERS[TOOL_NAMES.BROWSER.SEND_COMMAND_TO_INJECT_SCRIPT]).toBe('P3');
-    expect(TOOL_RISK_TIERS[TOOL_NAMES.BROWSER.USERSCRIPT]).toBe('P3');
   });
 
-  it('every capability-gated tool maps to a known TabrixCapability', () => {
-    const allCaps = new Set<string>(ALL_TABRIX_CAPABILITIES);
-    const offenders: string[] = [];
-    for (const [toolName, capability] of CAPABILITY_GATED_TOOLS) {
-      if (!allCaps.has(capability)) offenders.push(`${toolName}->${capability}`);
-    }
-    expect(offenders).toEqual([]);
-  });
+  it('chrome_javascript schema makes caller-side script review responsibility explicit', () => {
+    const javascriptTool = TOOL_SCHEMAS.find((tool) => tool.name === TOOL_NAMES.BROWSER.JAVASCRIPT);
+    expect(javascriptTool).toBeDefined();
+    expect(javascriptTool?.description).toContain('advanced fallback');
+    expect(javascriptTool?.description).toContain('The calling AI/client must review');
 
-  it('experience_replay is P1 + capability-gated (V24-01 invariant)', () => {
-    expect(TOOL_RISK_TIERS[TOOL_NAMES.EXPERIENCE.REPLAY]).toBe('P1');
-    expect(isCapabilityGatedTool(TOOL_NAMES.EXPERIENCE.REPLAY)).toBe(true);
-    expect(P3_EXPLICIT_OPT_IN_TOOLS).not.toContain(TOOL_NAMES.EXPERIENCE.REPLAY);
+    const inputSchema = javascriptTool?.inputSchema as
+      | { properties?: Record<string, { description?: string }> }
+      | undefined;
+    expect(inputSchema?.properties?.code?.description).toContain(
+      'calling AI/client is responsible',
+    );
+    expect(inputSchema?.properties?.code?.description).toContain('user-visible side effects');
   });
 
   it('known-safe tools are classified P0 (regression guard)', () => {
@@ -125,6 +120,7 @@ describe('TOOL_RISK_TIERS coverage invariants', () => {
       'performance_stop_trace',
       'performance_analyze_insight',
       'chrome_read_page',
+      'chrome_collect_result_cards',
       'chrome_computer',
       'chrome_navigate',
       'chrome_screenshot',
@@ -148,27 +144,14 @@ describe('TOOL_RISK_TIERS coverage invariants', () => {
       'chrome_javascript',
       'chrome_click_element',
       'chrome_fill_or_select',
-      'chrome_request_element_selection',
       'chrome_keyboard',
       'chrome_console',
       'chrome_upload_file',
       'chrome_handle_dialog',
-      'chrome_gif_recorder',
-      'experience_suggest_plan',
-      'experience_replay',
-      'experience_score_step',
       'tabrix_choose_context',
       'tabrix_choose_context_record_outcome',
+      'memory_record_ai_feedback',
     ]);
-  });
-
-  it('every CAPABILITY_GATED_TOOLS key exists in flattened TOOL_NAMES', () => {
-    const allKnownNames = flattenToolNames();
-    const missing: string[] = [];
-    for (const name of CAPABILITY_GATED_TOOLS.keys()) {
-      if (!allKnownNames.has(name)) missing.push(name);
-    }
-    expect(missing).toEqual([]);
   });
 
   it('getToolRiskTier is consistent with TOOL_RISK_TIERS', () => {
@@ -183,19 +166,5 @@ describe('TOOL_RISK_TIERS coverage invariants', () => {
     }
     expect(isExplicitOptInTool(TOOL_NAMES.BROWSER.READ_PAGE)).toBe(false);
     expect(isExplicitOptInTool(TOOL_NAMES.BROWSER.NAVIGATE)).toBe(false);
-  });
-
-  it('isCapabilityGatedTool is consistent with CAPABILITY_GATED_TOOLS', () => {
-    for (const name of CAPABILITY_GATED_TOOLS.keys()) {
-      expect(isCapabilityGatedTool(name)).toBe(true);
-    }
-    expect(isCapabilityGatedTool(TOOL_NAMES.BROWSER.READ_PAGE)).toBe(false);
-  });
-
-  it('getRequiredCapability is consistent with CAPABILITY_GATED_TOOLS', () => {
-    for (const [name, cap] of CAPABILITY_GATED_TOOLS) {
-      expect(getRequiredCapability(name)).toBe(cap);
-    }
-    expect(getRequiredCapability(TOOL_NAMES.BROWSER.READ_PAGE)).toBeUndefined();
   });
 });

@@ -3,9 +3,13 @@ import type { ToolResult } from '@/common/tool-handler';
 import { TIMEOUTS, ERROR_MESSAGES } from '@/common/constants';
 
 const PING_TIMEOUT_MS = 300;
+const DOCUMENT_READY_STATE_TIMEOUT_MS = 500;
 const TAB_SETTLE_TIMEOUT_MS = 8000;
 const TAB_ACTIVATION_TIMEOUT_MS = 1500;
+const TAB_FOREGROUND_PROOF_TIMEOUT_MS = 1500;
 const TAB_POLL_INTERVAL_MS = 100;
+const TRANSIENT_FRAME_REMOVED_RETRY_DELAY_MS = 150;
+const TRANSIENT_FRAME_REMOVED_RETRY_LIMIT = 1;
 
 interface WaitForTabSettledOptions {
   timeoutMs?: number;
@@ -17,7 +21,13 @@ interface WaitForTabSettledResult {
   tab: chrome.tabs.Tab;
   settled: boolean;
   timedOut: boolean;
-  reason: 'already_complete' | 'complete' | 'complete_after_url_change' | 'timeout' | 'tab_missing';
+  reason:
+    | 'already_complete'
+    | 'complete'
+    | 'complete_after_url_change'
+    | 'interactive'
+    | 'timeout'
+    | 'tab_missing';
   waitedMs: number;
   readyState: string | null;
 }
@@ -34,6 +44,51 @@ interface WaitForTabActivatedResult {
   timedOut: boolean;
   waitedMs: number;
   windowFocused: boolean | null;
+}
+
+interface WaitForTabForegroundProofOptions {
+  timeoutMs?: number;
+  chromeWindowFocused?: boolean | null;
+  chromeTabActive?: boolean | null;
+}
+
+export interface TabForegroundProof {
+  kind: 'tab_foreground_proof_v1';
+  verdict: 'proven_foreground' | 'needs_os_foreground_activation' | 'not_proven';
+  tabId: number;
+  chromeWindowFocused: boolean | null;
+  chromeTabActive: boolean | null;
+  documentVisibilityState: string | null;
+  documentHasFocus: boolean | null;
+  documentHidden: boolean | null;
+  waitedMs: number;
+  timedOut: boolean;
+  reason: string;
+}
+
+interface ContentScriptInjectionTiming {
+  pingMs: number;
+  pingStatus: 'pong' | 'failed_or_timeout' | 'unexpected_response';
+  executeScriptMs: number | null;
+  injected: boolean;
+  totalMs: number;
+}
+
+function isStructuredClickHelperError(message: unknown, response: unknown): boolean {
+  if (!message || typeof message !== 'object') return false;
+  if ((message as { action?: unknown }).action !== 'clickElement') return false;
+  if (!response || typeof response !== 'object') return false;
+  if (!('error' in response)) return false;
+  return (
+    'reason' in response ||
+    'targetConsistency' in response ||
+    'actionRecovery' in response ||
+    'dispatchSucceeded' in response
+  );
+}
+
+function isTransientFrameRemovedError(message: string): boolean {
+  return /Frame with ID \d+ was removed/i.test(message);
 }
 
 /**
@@ -72,17 +127,15 @@ export abstract class BaseBrowserToolExecutor implements ToolExecutor {
     world: 'MAIN' | 'ISOLATED' = 'ISOLATED',
     allFrames: boolean = false,
     frameIds?: number[],
+    onTiming?: (timing: ContentScriptInjectionTiming) => void,
   ): Promise<void> {
+    const startedAt = Date.now();
+    let pingMs = 0;
     try {
-      const pingFrameId = frameIds?.[0];
+      const pingFrameId = frameIds?.[0] ?? 0;
+      const pingStartedAt = Date.now();
       const response = await Promise.race([
-        typeof pingFrameId === 'number'
-          ? chrome.tabs.sendMessage(
-              tabId,
-              { action: `${this.name}_ping` },
-              { frameId: pingFrameId },
-            )
-          : chrome.tabs.sendMessage(tabId, { action: `${this.name}_ping` }),
+        chrome.tabs.sendMessage(tabId, { action: `${this.name}_ping` }, { frameId: pingFrameId }),
         new Promise((_, reject) =>
           setTimeout(
             () => reject(new Error(`${this.name} Ping action to tab ${tabId} timed out`)),
@@ -90,33 +143,67 @@ export abstract class BaseBrowserToolExecutor implements ToolExecutor {
           ),
         ),
       ]);
+      pingMs = Date.now() - pingStartedAt;
 
       if (response && response.status === 'pong') {
+        onTiming?.({
+          pingMs,
+          pingStatus: 'pong',
+          executeScriptMs: null,
+          injected: false,
+          totalMs: Date.now() - startedAt,
+        });
         return;
       }
+      onTiming?.({
+        pingMs,
+        pingStatus: 'unexpected_response',
+        executeScriptMs: null,
+        injected: false,
+        totalMs: Date.now() - startedAt,
+      });
     } catch {
+      pingMs = Date.now() - startedAt;
       // Ping failure is expected when the script hasn't been injected yet.
     }
 
-    try {
-      const target: { tabId: number; allFrames?: boolean; frameIds?: number[] } = { tabId };
-      if (frameIds && frameIds.length > 0) {
-        target.frameIds = frameIds;
-      } else if (allFrames) {
-        target.allFrames = true;
+    for (let attempt = 0; attempt <= TRANSIENT_FRAME_REMOVED_RETRY_LIMIT; attempt += 1) {
+      try {
+        const executeScriptStartedAt = Date.now();
+        const target: { tabId: number; allFrames?: boolean; frameIds?: number[] } = { tabId };
+        if (frameIds && frameIds.length > 0) {
+          target.frameIds = frameIds;
+        } else if (allFrames) {
+          target.allFrames = true;
+        }
+        await chrome.scripting.executeScript({
+          target,
+          files,
+          injectImmediately,
+          world,
+        } as any);
+        onTiming?.({
+          pingMs,
+          pingStatus: 'failed_or_timeout',
+          executeScriptMs: Date.now() - executeScriptStartedAt,
+          injected: true,
+          totalMs: Date.now() - startedAt,
+        });
+        return;
+      } catch (injectionError) {
+        const errorMessage =
+          injectionError instanceof Error ? injectionError.message : String(injectionError);
+        const canRetry =
+          attempt < TRANSIENT_FRAME_REMOVED_RETRY_LIMIT &&
+          isTransientFrameRemovedError(errorMessage);
+        if (canRetry) {
+          await this.sleep(TRANSIENT_FRAME_REMOVED_RETRY_DELAY_MS);
+          continue;
+        }
+        throw new Error(
+          `${ERROR_MESSAGES.TOOL_EXECUTION_FAILED}: Failed to inject content script in tab ${tabId}: ${errorMessage}`,
+        );
       }
-      await chrome.scripting.executeScript({
-        target,
-        files,
-        injectImmediately,
-        world,
-      } as any);
-    } catch (injectionError) {
-      const errorMessage =
-        injectionError instanceof Error ? injectionError.message : String(injectionError);
-      throw new Error(
-        `${ERROR_MESSAGES.TOOL_EXECUTION_FAILED}: Failed to inject content script in tab ${tabId}: ${errorMessage}`,
-      );
     }
   }
 
@@ -124,12 +211,11 @@ export abstract class BaseBrowserToolExecutor implements ToolExecutor {
    * Send message to tab
    */
   protected async sendMessageToTab(tabId: number, message: any, frameId?: number): Promise<any> {
-    const response =
-      typeof frameId === 'number'
-        ? await chrome.tabs.sendMessage(tabId, message, { frameId })
-        : await chrome.tabs.sendMessage(tabId, message);
+    const response = await chrome.tabs.sendMessage(tabId, message, {
+      frameId: frameId ?? 0,
+    });
 
-    if (response && response.error) {
+    if (response && response.error && !isStructuredClickHelperError(message, response)) {
       throw new Error(String(response.error));
     }
 
@@ -177,6 +263,92 @@ export abstract class BaseBrowserToolExecutor implements ToolExecutor {
     await new Promise((resolve) => setTimeout(resolve, ms));
   }
 
+  protected async waitForTabForegroundProof(
+    tabId: number,
+    options: WaitForTabForegroundProofOptions = {},
+  ): Promise<TabForegroundProof> {
+    const timeoutMs = options.timeoutMs ?? TAB_FOREGROUND_PROOF_TIMEOUT_MS;
+    const startedAt = Date.now();
+    let lastProbe: {
+      visibilityState: string | null;
+      hasFocus: boolean | null;
+      hidden: boolean | null;
+    } | null = null;
+    let probeFailed = false;
+
+    while (Date.now() - startedAt < timeoutMs) {
+      try {
+        const [injection] = await Promise.race([
+          chrome.scripting.executeScript({
+            target: { tabId },
+            func: () => ({
+              visibilityState:
+                typeof document.visibilityState === 'string' ? document.visibilityState : null,
+              hasFocus: typeof document.hasFocus === 'function' ? document.hasFocus() : null,
+              hidden: typeof document.hidden === 'boolean' ? document.hidden : null,
+            }),
+          }),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('foreground proof timed out')), 500),
+          ),
+        ]);
+        const result = injection?.result as
+          | { visibilityState?: unknown; hasFocus?: unknown; hidden?: unknown }
+          | undefined;
+        lastProbe = {
+          visibilityState:
+            typeof result?.visibilityState === 'string' ? result.visibilityState : null,
+          hasFocus: typeof result?.hasFocus === 'boolean' ? result.hasFocus : null,
+          hidden: typeof result?.hidden === 'boolean' ? result.hidden : null,
+        };
+        if (lastProbe.visibilityState === 'visible' && lastProbe.hasFocus === true) {
+          return {
+            kind: 'tab_foreground_proof_v1',
+            verdict: 'proven_foreground',
+            tabId,
+            chromeWindowFocused: options.chromeWindowFocused ?? null,
+            chromeTabActive: options.chromeTabActive ?? null,
+            documentVisibilityState: lastProbe.visibilityState,
+            documentHasFocus: lastProbe.hasFocus,
+            documentHidden: lastProbe.hidden,
+            waitedMs: Date.now() - startedAt,
+            timedOut: false,
+            reason: 'document is visible and focused after tab/window activation',
+          };
+        }
+      } catch {
+        probeFailed = true;
+      }
+      await this.sleep(TAB_POLL_INTERVAL_MS);
+    }
+
+    const documentVisibilityState = lastProbe?.visibilityState ?? null;
+    const documentHasFocus = lastProbe?.hasFocus ?? null;
+    const documentHidden = lastProbe?.hidden ?? null;
+    const canDiagnoseOsForeground =
+      options.chromeWindowFocused === true &&
+      options.chromeTabActive === true &&
+      documentVisibilityState === 'visible' &&
+      documentHasFocus === false;
+    return {
+      kind: 'tab_foreground_proof_v1',
+      verdict: canDiagnoseOsForeground ? 'needs_os_foreground_activation' : 'not_proven',
+      tabId,
+      chromeWindowFocused: options.chromeWindowFocused ?? null,
+      chromeTabActive: options.chromeTabActive ?? null,
+      documentVisibilityState,
+      documentHasFocus,
+      documentHidden,
+      waitedMs: Date.now() - startedAt,
+      timedOut: true,
+      reason: canDiagnoseOsForeground
+        ? 'Chrome reports the tab/window active, but the page document is not focused'
+        : probeFailed
+          ? 'document foreground proof could not be read from the tab'
+          : 'document foreground proof did not reach visible+focused before timeout',
+    };
+  }
+
   private normalizeComparableUrl(url?: string): string {
     if (!url) return '';
     try {
@@ -193,10 +365,23 @@ export abstract class BaseBrowserToolExecutor implements ToolExecutor {
 
   private async getTabDocumentReadyState(tabId: number): Promise<string | null> {
     try {
-      const [{ result }] = await chrome.scripting.executeScript({
-        target: { tabId },
-        func: () => document.readyState,
-      });
+      const [{ result }] = await Promise.race([
+        chrome.scripting.executeScript({
+          target: { tabId },
+          func: () => document.readyState,
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () =>
+              reject(
+                new Error(
+                  `document.readyState probe timed out after ${DOCUMENT_READY_STATE_TIMEOUT_MS}ms`,
+                ),
+              ),
+            DOCUMENT_READY_STATE_TIMEOUT_MS,
+          ),
+        ),
+      ]);
       return typeof result === 'string' ? result : null;
     } catch {
       return null;
@@ -225,11 +410,19 @@ export abstract class BaseBrowserToolExecutor implements ToolExecutor {
       readyState: await this.getTabDocumentReadyState(tabId),
     });
 
-    const isSettledTab = (tab: chrome.tabs.Tab): WaitForTabSettledResult['reason'] | null => {
+    const isSettledTab = async (
+      tab: chrome.tabs.Tab,
+    ): Promise<WaitForTabSettledResult['reason'] | null> => {
       const currentUrl = this.normalizeComparableUrl(tab.url || tab.pendingUrl);
       const urlChanged = !requireUrlChange || !previousUrl || currentUrl !== previousUrl;
       if (tab.status === 'complete' && urlChanged) {
         return previousUrl && requireUrlChange ? 'complete_after_url_change' : 'complete';
+      }
+      if (urlChanged && currentUrl && currentUrl !== 'about:blank') {
+        const readyState = await this.getTabDocumentReadyState(tabId);
+        if (readyState === 'interactive' || readyState === 'complete') {
+          return 'interactive';
+        }
       }
       return null;
     };
@@ -248,17 +441,18 @@ export abstract class BaseBrowserToolExecutor implements ToolExecutor {
       };
     }
 
-    const initialReason = isSettledTab(currentTab);
+    const initialReason = await isSettledTab(currentTab);
     if (initialReason) {
-      return buildState(
-        currentTab,
-        previousUrl && requireUrlChange ? 'complete_after_url_change' : 'already_complete',
-        false,
-      );
+      const reason =
+        initialReason === 'complete' && !(previousUrl && requireUrlChange)
+          ? 'already_complete'
+          : initialReason;
+      return buildState(currentTab, reason, false);
     }
 
     return await new Promise<WaitForTabSettledResult>((resolve) => {
       let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+      let finished = false;
 
       const cleanup = () => {
         chrome.tabs.onUpdated.removeListener(handleUpdated);
@@ -273,6 +467,8 @@ export abstract class BaseBrowserToolExecutor implements ToolExecutor {
         timedOut: boolean,
         updatedTab?: chrome.tabs.Tab,
       ) => {
+        if (finished) return;
+        finished = true;
         cleanup();
         let finalTab = updatedTab;
         if (!finalTab) {
@@ -299,10 +495,12 @@ export abstract class BaseBrowserToolExecutor implements ToolExecutor {
         updatedTab: chrome.tabs.Tab,
       ) => {
         if (updatedTabId !== tabId) return;
-        const reason = isSettledTab(updatedTab);
-        if (reason || changeInfo.status === 'complete') {
-          void finish(reason || 'complete', false, updatedTab);
-        }
+        void (async () => {
+          const reason = await isSettledTab(updatedTab);
+          if (reason || changeInfo.status === 'complete') {
+            await finish(reason || 'complete', false, updatedTab);
+          }
+        })();
       };
 
       chrome.tabs.onUpdated.addListener(handleUpdated);

@@ -23,6 +23,7 @@ import {
   getDefaultFactCollector,
   resetDefaultFactCollector,
 } from '../runtime/browser-fact-collector';
+import { sessionManager } from '../execution/session-manager';
 
 async function listen(server: HttpServer): Promise<number> {
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
@@ -44,6 +45,7 @@ describe('BridgeCommandChannelManager', () => {
   let port: number;
 
   beforeEach(async () => {
+    sessionManager.reset();
     bridgeRuntimeState.reset();
     bridgeRuntimeState.setBrowserProcessRunning(true);
     manager = new BridgeCommandChannelManager();
@@ -57,6 +59,7 @@ describe('BridgeCommandChannelManager', () => {
 
   afterEach(async () => {
     manager.reset();
+    sessionManager.reset();
     bridgeRuntimeState.reset();
     await new Promise<void>((resolve) => server.close(() => resolve()));
   });
@@ -83,6 +86,34 @@ describe('BridgeCommandChannelManager', () => {
       tabCount: 3,
       windowCount: 1,
       autoConnectEnabled: true,
+      browserWorld: {
+        status: 'fresh',
+        recentActivityLedger: {
+          latestPageClosed: {
+            kind: 'page_closed',
+            tabId: 201,
+            windowId: 100,
+            url: 'https://example.test/closed?token=secret',
+            title: 'Closed Dashboard',
+            openedBy: 'user_or_page',
+            occurredAtMs: Date.now() - 1000,
+            evidence: 'browser_world_closed_tab_snapshot',
+          },
+        },
+        windows: [{ windowId: 100, focused: true, state: 'normal', tabCount: 1 }],
+        tabs: [
+          {
+            tabId: 200,
+            windowId: 100,
+            active: true,
+            status: 'complete',
+            openedBy: 'user_or_page',
+            canTabrixOperate: true,
+            url: 'https://example.test/dashboard?token=secret',
+            title: 'Dashboard',
+          },
+        ],
+      },
     };
     ws.send(JSON.stringify(heartbeat));
 
@@ -100,6 +131,7 @@ describe('BridgeCommandChannelManager', () => {
         windowCount: 1,
       },
     });
+    expect(sessionManager.countMkeBrowserObjects()).toBe(2);
 
     ws.close();
   });

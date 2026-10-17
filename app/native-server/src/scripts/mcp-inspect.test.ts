@@ -58,7 +58,7 @@ describe('mcp inspect script', () => {
     }
   });
 
-  test('lists tools for a remote GitHub troubleshooting workflow', async () => {
+  test('lists tools for a remote Workspace troubleshooting workflow', async () => {
     const remoteUrl = 'http://192.168.1.50:12306/mcp';
     const authToken = 'tabrix-test-token';
     const fetchMock = jest
@@ -123,7 +123,108 @@ describe('mcp inspect script', () => {
     });
   });
 
-  test('calls chrome_read_page with GitHub repo style args and prints parsed result', async () => {
+  test('keeps tools output successful when session cleanup fails during shutdown', async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce(
+        createResponse({
+          headers: { 'mcp-session-id': 'session-cleanup-race' },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            result: { protocolVersion: '2025-03-26' },
+          }),
+        }),
+      )
+      .mockResolvedValueOnce(createResponse({ body: '' }))
+      .mockResolvedValueOnce(
+        createResponse({
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 2,
+            result: {
+              tools: [{ name: 'get_windows_and_tabs', description: 'List current tabs' }],
+            },
+          }),
+        }),
+      )
+      .mockRejectedValueOnce(new Error('session already closing'));
+    globalThis.fetch = fetchMock as unknown as FetchMock;
+
+    const code = await runMcpTools();
+
+    expect(code).toBe(0);
+    const output = stdoutSpy.mock.calls.map(([chunk]) => String(chunk)).join('');
+    expect(output).toContain('Available tools: 1');
+    expect(output).toContain('get_windows_and_tabs');
+    expect(stderrSpy).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  test('auto-retries local tools list with the current auth token after HTTP 401', async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce(
+        createResponse({
+          status: 401,
+          body: JSON.stringify({
+            status: 'error',
+            message: 'Unauthorized',
+          }),
+        }),
+      )
+      .mockResolvedValueOnce(
+        createResponse({
+          body: JSON.stringify({
+            status: 'ok',
+            data: { token: 'local-current-token' },
+          }),
+        }),
+      )
+      .mockResolvedValueOnce(
+        createResponse({
+          headers: { 'mcp-session-id': 'session-auto-token' },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            result: { protocolVersion: '2025-03-26' },
+          }),
+        }),
+      )
+      .mockResolvedValueOnce(createResponse({ body: '' }))
+      .mockResolvedValueOnce(
+        createResponse({
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 2,
+            result: {
+              tools: [{ name: 'chrome_read_page', description: 'Read current page' }],
+            },
+          }),
+        }),
+      )
+      .mockResolvedValueOnce(createResponse({ status: 204 }));
+    globalThis.fetch = fetchMock as unknown as FetchMock;
+
+    const code = await runMcpTools();
+
+    expect(code).toBe(0);
+    expect(stdoutSpy.mock.calls.map(([chunk]) => String(chunk)).join('')).toContain(
+      'chrome_read_page',
+    );
+    expect(stderrSpy).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+    expect((fetchMock as unknown as jest.Mock).mock.calls[1][0]).toBe(
+      `http://127.0.0.1:${NATIVE_SERVER_PORT}/auth/token`,
+    );
+    expect(
+      ((fetchMock as unknown as jest.Mock).mock.calls[2] as [string, RequestInit])[1].headers,
+    ).toMatchObject({
+      Authorization: 'Bearer local-current-token',
+    });
+  });
+
+  test('calls chrome_read_page with Workspace repo style args and prints parsed result', async () => {
     const fetchMock = jest
       .fn()
       .mockResolvedValueOnce(
@@ -307,6 +408,127 @@ describe('mcp inspect script', () => {
     const toolCall = (fetchMock as unknown as jest.Mock).mock.calls[2] as [string, RequestInit];
     expect(toolCall[0]).toBe(`http://127.0.0.1:${NATIVE_SERVER_PORT}/mcp`);
     expect(String(toolCall[1].body)).toContain('"meta":{"source":"tabrix","enabled":true}');
+  });
+
+  test('supports --arg @json:file values for nested candidateAction payloads', async () => {
+    const argsFileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tabrix-arg-json-'));
+    const candidateActionFile = path.join(argsFileDir, 'candidate-action.json');
+    tempFiles.push(argsFileDir);
+    tempFiles.push(candidateActionFile);
+    fs.writeFileSync(
+      candidateActionFile,
+      JSON.stringify({
+        actionId: 'ca_click_ref_64',
+        actionType: 'click',
+        label: 'About',
+        targetRef: 'ref_64',
+        selector: '[data-testid="about"]',
+        evidence: {
+          source: 'page_projection',
+          confidence: 0.91,
+        },
+      }),
+      'utf8',
+    );
+
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce(
+        createResponse({
+          headers: { 'mcp-session-id': 'session-arg-json-1' },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            result: { protocolVersion: '2025-03-26' },
+          }),
+        }),
+      )
+      .mockResolvedValueOnce(createResponse({ body: '' }))
+      .mockResolvedValueOnce(
+        createResponse({
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 2,
+            result: {
+              content: [{ type: 'text', text: JSON.stringify({ ok: true }) }],
+            },
+          }),
+        }),
+      )
+      .mockResolvedValueOnce(createResponse({ status: 204 }));
+    globalThis.fetch = fetchMock as unknown as FetchMock;
+
+    const code = await runMcpCall('chrome_click_element', {
+      arg: [`candidateAction=@json:${candidateActionFile}`, 'tabId=1850319377'],
+    });
+
+    expect(code).toBe(0);
+    const output = stdoutSpy.mock.calls.map(([chunk]) => String(chunk)).join('');
+    expect(output).toContain('"candidateAction"');
+    expect(output).toContain('"actionId": "ca_click_ref_64"');
+    expect(output).toContain('"targetRef": "ref_64"');
+    expect(output).toContain('"confidence": 0.91');
+
+    const toolCall = (fetchMock as unknown as jest.Mock).mock.calls[2] as [string, RequestInit];
+    const body = String(toolCall[1].body);
+    expect(body).toContain('"name":"chrome_click_element"');
+    expect(body).toContain('"candidateAction":{"actionId":"ca_click_ref_64"');
+    expect(body).toContain('"tabId":1850319377');
+  });
+
+  test('keeps plain string values that start with @ unless @json: is explicit', async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce(
+        createResponse({
+          headers: { 'mcp-session-id': 'session-arg-at-string-1' },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            result: { protocolVersion: '2025-03-26' },
+          }),
+        }),
+      )
+      .mockResolvedValueOnce(createResponse({ body: '' }))
+      .mockResolvedValueOnce(
+        createResponse({
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 2,
+            result: {
+              content: [{ type: 'text', text: JSON.stringify({ ok: true }) }],
+            },
+          }),
+        }),
+      )
+      .mockResolvedValueOnce(createResponse({ status: 204 }));
+    globalThis.fetch = fetchMock as unknown as FetchMock;
+
+    const code = await runMcpCall('chrome_read_page', {
+      arg: ['query=@literal-value'],
+    });
+
+    expect(code).toBe(0);
+    const output = stdoutSpy.mock.calls.map(([chunk]) => String(chunk)).join('');
+    expect(output).toContain('"query": "@literal-value"');
+  });
+
+  test('fails fast when an explicit --arg @json:file value is invalid', async () => {
+    const argsFileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tabrix-arg-json-invalid-'));
+    const invalidFile = path.join(argsFileDir, 'candidate-action.json');
+    tempFiles.push(argsFileDir);
+    tempFiles.push(invalidFile);
+    fs.writeFileSync(invalidFile, '{not-valid-json', 'utf8');
+
+    const code = await runMcpCall('chrome_click_element', {
+      arg: [`candidateAction=@json:${invalidFile}`],
+    });
+
+    expect(code).toBe(1);
+    const errorOutput = stderrSpy.mock.calls.map(([chunk]) => String(chunk)).join('');
+    expect(errorOutput).toContain('MCP call failed');
+    expect(errorOutput).toContain('candidateAction JSON file is invalid');
+    expect(stdoutSpy).not.toHaveBeenCalled();
   });
 
   test('loads args from --args-file and lets --arg override file values', async () => {

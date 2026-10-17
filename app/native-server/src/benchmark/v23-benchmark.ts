@@ -8,13 +8,13 @@
  * (probe count, lane-integrity violations, click attempts per step,
  * task completion).
  *
- * Why a transformer rather than a runner: the actual GitHub baseline
+ * Why a transformer rather than a runner: the actual public-site baseline
  * runs require a real Chrome session (`AGENTS.md` rule 14 + V23-02 §3).
  * That step is maintainer-only and intentionally not invoked from this
  * file. The maintainer's loop is:
  *
  *   1. Run the real-browser scenarios listed in
- *      `docs/RELEASE_NOTES_v2.3.0.md` §"Maintainer command list".
+ *      `docs/releases/RELEASE_NOTES_v2.3.0.md` §"Maintainer command list".
  *   2. The runner appends one `BenchmarkToolCallRecord`-shaped JSON line
  *      per tool invocation to `~/.chrome-mcp-agent/benchmarks/v23/<run>.ndjson`.
  *   3. `pnpm run benchmark:v23 -- --input <file>` calls
@@ -38,8 +38,6 @@ export const BENCHMARK_REPORT_VERSION = 1 as const;
 
 /**
  * Closed enum of tool-call statuses the v2.3.0 benchmark cares about.
- * Mirrors the existing `memory_steps.status` shape so the runner does
- * not need a translation layer.
  */
 export type BenchmarkToolCallStatus = 'ok' | 'failed' | 'aborted';
 

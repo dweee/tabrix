@@ -21,34 +21,23 @@
  */
 
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { TOOL_NAMES, type ExperienceSuggestPlanResult } from '@tabrix/shared';
+import { TOOL_NAMES } from '@tabrix/shared';
 import { sessionManager as defaultSessionManager } from '../execution/session-manager';
-import {
-  ExperienceSuggestPlanInputError,
-  buildSuggestPlanResult,
-  parseExperienceSuggestPlanInput,
-} from '../memory/experience';
 import {
   runTabrixChooseContext,
   runTabrixChooseContextRecordOutcome,
   runTabrixChooseContextWithDirectApi,
   type TabrixChooseContextRouterTelemetry,
 } from './choose-context';
-import { createLivePageContextProvider } from './page-context-provider';
-import { getCurrentCapabilityEnv, type CapabilityEnv } from '../policy/capabilities';
+import { createLivePageContextProvider, type PageSnapshotReader } from './page-context-provider';
 import type { SessionManager } from '../execution/session-manager';
 import type { TaskSessionContext } from '../execution/task-session-context';
 import type { ChooseContextDecisionSnapshot } from '../execution/skip-read-orchestrator';
 import type { LayerSourceRoute, TabrixChooseContextResult } from '@tabrix/shared';
 import { resolveApiKnowledgeCandidate } from '../api/api-knowledge';
-import {
-  experienceReplayNativeHandler,
-  type DispatchBridgedFn,
-  type ReplayOutcomeWriter,
-  type ReplayStepRecorder,
-  type UpdateTaskIntentFn,
-} from './experience-replay';
-import { experienceScoreStepNativeHandler } from './experience-score-step';
+import { handleMemoryRecordAiFeedback } from './native-memory-feedback-handler';
+import type { BrowserObject, BrowserObjectRepository } from '../memory/db';
+import { normalizeUrlPattern } from '../memory/mke-memory-sanitizer';
 
 type AcceptanceApiFault = 'network_timeout' | 'semantic_mismatch';
 
@@ -58,45 +47,149 @@ function readAcceptanceApiFault(args: unknown): AcceptanceApiFault | null {
   return value === 'network_timeout' || value === 'semantic_mismatch' ? value : null;
 }
 
+function createTaskPageContextReader(
+  taskContext: TaskSessionContext | null,
+): PageSnapshotReader | null {
+  if (!taskContext) return null;
+  const toSnapshot = () => {
+    const measurement = taskContext.peekReadPageContextMeasurement();
+    if (!measurement) return undefined;
+    return {
+      contextSource: 'live_snapshot' as const,
+      currentPageValidated: true,
+      fullReadByteLength: measurement.fullReadByteLength,
+      candidateActionCount: measurement.candidateActionsCount,
+      highValueObjectCount: measurement.highValueObjectCount,
+      pageRole: measurement.pageRole,
+    };
+  };
+  return {
+    findLatestForUrl(url: string) {
+      const measurement = taskContext.peekReadPageContextMeasurement();
+      if (!measurement || measurement.url !== url) return undefined;
+      return toSnapshot();
+    },
+    findLatestForPageRole(pageRole: string) {
+      const measurement = taskContext.peekReadPageContextMeasurement();
+      if (!measurement || measurement.pageRole !== pageRole) return undefined;
+      return toSnapshot();
+    },
+  };
+}
+
+type ObjectLibraryContextRepository = Pick<BrowserObjectRepository, 'listReusableForPage'>;
+
+function createObjectLibraryPageContextReader(
+  browserObjects: ObjectLibraryContextRepository | null | undefined,
+  rawArgs: unknown,
+): PageSnapshotReader | null {
+  if (!browserObjects) return null;
+  const argsObj = readObjectArg(rawArgs);
+  const requestedPageRole =
+    typeof argsObj.pageRole === 'string' && argsObj.pageRole.trim().length > 0
+      ? argsObj.pageRole.trim()
+      : 'page';
+
+  const lookup = (url: string | null, pageRole: string) => {
+    const urlFields = normalizeUrlPattern(url, {
+      allowPersonalBrowserStateStorage: false,
+    });
+    if (!urlFields.siteFamily) return undefined;
+    const pageModelKey = `page:${urlFields.siteFamily}:${pageRole || 'page'}`;
+    const objects = browserObjects.listReusableForPage({
+      siteFamily: urlFields.siteFamily,
+      pageModelKey,
+      rootRoute: urlFields.rootRoute,
+      currentRoute: urlFields.currentRoute,
+      pageUrlPattern: urlFields.pattern,
+      limit: 24,
+    });
+    return projectObjectLibraryPageContext(objects, pageRole);
+  };
+
+  return {
+    findLatestForUrl(url: string) {
+      return lookup(url, requestedPageRole);
+    },
+    findLatestForPageRole(pageRole: string) {
+      const url = typeof argsObj.url === 'string' ? argsObj.url : null;
+      return lookup(url, pageRole);
+    },
+  };
+}
+
+function createCompositePageContextReader(
+  readers: Array<PageSnapshotReader | null | undefined>,
+): PageSnapshotReader | null {
+  const activeReaders = readers.filter((reader): reader is PageSnapshotReader => Boolean(reader));
+  if (activeReaders.length === 0) return null;
+  return {
+    findLatestForUrl(url: string) {
+      for (const reader of activeReaders) {
+        const snapshot = reader.findLatestForUrl(url);
+        if (snapshot) return snapshot;
+      }
+      return undefined;
+    },
+    findLatestForPageRole(pageRole: string) {
+      for (const reader of activeReaders) {
+        const snapshot = reader.findLatestForPageRole(pageRole);
+        if (snapshot) return snapshot;
+      }
+      return undefined;
+    },
+  };
+}
+
+function projectObjectLibraryPageContext(
+  objects: BrowserObject[],
+  pageRole: string,
+): ReturnType<PageSnapshotReader['findLatestForUrl']> {
+  const eligibleObjects = objects.filter(isObjectLibraryContextEligible);
+  if (eligibleObjects.length === 0) return undefined;
+  let candidateActionCount = 0;
+  for (const object of eligibleObjects) {
+    const hasActionTypes = Array.isArray(object.actionTypes) && object.actionTypes.length > 0;
+    if (
+      hasActionTypes ||
+      object.objectType === 'action_target' ||
+      object.objectType === 'result_card'
+    ) {
+      candidateActionCount += 1;
+    }
+  }
+  return {
+    contextSource: 'object_library_snapshot',
+    candidateActionCount,
+    highValueObjectCount: eligibleObjects.length,
+    pageRole,
+  };
+}
+
+function isObjectLibraryContextEligible(object: BrowserObject): boolean {
+  if (object.archivedAt || object.closedAt) return false;
+  if (object.redactionState !== 'redacted') return false;
+  if (object.canTabrixOperate === false) return false;
+  const freshness = typeof object.sourceFreshness === 'string' ? object.sourceFreshness : '';
+  return !['stale', 'expired', 'needs_refresh'].includes(freshness);
+}
+
 export interface NativeToolHandlerDeps {
   sessionManager: Pick<
     SessionManager,
-    | 'experience'
     | 'getPersistenceStatus'
     | 'knowledgeApi'
     | 'chooseContextTelemetry'
-    | 'pageSnapshots'
-  >;
-  /**
-   * Capability allowlist source. Optional so existing handler tests
-   * (which only need `sessionManager`) keep compiling; missing means
-   * "no capabilities enabled" — i.e. the safest default.
-   */
-  capabilityEnv?: CapabilityEnv;
-  /**
-   * Bridge into the existing extension-side dispatch path
-   * (`invokeExtensionCommand('call_tool', …)`). Required at runtime
-   * for `experience_replay`; other handlers ignore it. Optional so
-   * existing handler tests (and the SUGGEST_PLAN / CONTEXT
-   * handlers themselves) stay source-compatible.
-   */
-  dispatchBridged?: DispatchBridgedFn;
-  /**
-   * Per-step `memory_steps` recorder bound to the wrapper's current
-   * session. Required for `experience_replay`.
-   */
-  recorder?: ReplayStepRecorder;
-  /**
-   * Callback to re-tag the wrapper-owned session's `task.intent` with
-   * the `experience_replay:<id>` prefix. Required for
-   * `experience_replay` so the aggregator special-case triggers.
-   */
-  updateTaskIntent?: UpdateTaskIntentFn;
-  /**
-   * Per-step write-back hook used by the replay engine. Optional so
-   * existing handler tests stay source-compatible.
-   */
-  outcomeWriter?: ReplayOutcomeWriter;
+    | 'flushAndProjectMkeIdle'
+    | 'flushAndProjectMkeAfterAiFeedback'
+    | 'revokeMkeExperienceForTrace'
+    | 'recordMkeSelectedArtifactOutcome'
+    | 'browserObjects'
+  > & {
+    memoryTraces?: SessionManager['memoryTraces'];
+    findReusableMkeExperienceRecipes?: SessionManager['findReusableMkeExperienceRecipes'];
+    findLatestMkeKnowledgeModel?: SessionManager['findLatestMkeKnowledgeModel'];
+  };
   /**
    * Externally-keyed `TaskSessionContext` the dispatcher resolved for
    * this tool call. Wired exclusively for `tabrix_choose_context` so its
@@ -130,68 +223,38 @@ function jsonResult(payload: unknown, isError: boolean): CallToolResult {
   };
 }
 
-function badInputResult(error: ExperienceSuggestPlanInputError): CallToolResult {
-  return jsonResult(
-    {
-      code: error.code,
-      message: error.message,
-    },
-    true,
-  );
+function readObjectArg(args: unknown): Record<string, unknown> {
+  return args && typeof args === 'object' && !Array.isArray(args)
+    ? (args as Record<string, unknown>)
+    : {};
 }
-
-function experienceUnavailableResult(): CallToolResult {
-  // We deliberately return a successful tool call with `status: 'no_match'`
-  // and `persistenceMode: 'off'` rather than `isError: true`. The caller
-  // can branch on `persistenceMode` to decide whether to retry later or
-  // proceed without prior experience; treating Memory-disabled as a hard
-  // tool error would force every upstream agent to special-case it.
-  const result: ExperienceSuggestPlanResult = {
-    status: 'no_match',
-    plans: [],
-    persistenceMode: 'off',
-  };
-  return jsonResult(result, false);
-}
-
-const handleExperienceSuggestPlan: NativeToolHandler = (args, deps) => {
-  let parsed;
-  try {
-    parsed = parseExperienceSuggestPlanInput(args);
-  } catch (error) {
-    if (error instanceof ExperienceSuggestPlanInputError) {
-      return badInputResult(error);
-    }
-    throw error;
-  }
-
-  const experience = deps.sessionManager.experience;
-  const { mode } = deps.sessionManager.getPersistenceStatus();
-  if (!experience || mode === 'off') {
-    return experienceUnavailableResult();
-  }
-
-  const rows = experience.suggestActionPaths(parsed);
-  return jsonResult(buildSuggestPlanResult(rows, mode), false);
-};
 
 const handleTabrixChooseContext: NativeToolHandler = async (args, deps) => {
-  // Wire the live page context provider so the dispatcher receives real
-  // candidateActions / HVO counts instead of legacy hard-coded zeros.
-  // When persistence is off `pageSnapshots` is `null` and the provider
-  // returns `fallback_zero` with cause `persistence_off` — honest
-  // telemetry, same numerical dispatcher input the chooser used to ship.
-  const pageContext = createLivePageContextProvider(deps.sessionManager.pageSnapshots ?? null);
+  const pageContext = createLivePageContextProvider(
+    createCompositePageContextReader([
+      createTaskPageContextReader(deps.taskContext ?? null),
+      createObjectLibraryPageContextReader(deps.sessionManager.browserObjects, args),
+    ]),
+  );
   // Wrap the synchronous chooser with the direct-api-executor so a
   // high-confidence read-only `knowledge_supported_read` route may
   // execute the API inline (compact rows arrive on
-  // `result.directApiExecution`). For every other route + every
-  // capability-disabled invocation the wrapper returns the synchronous
-  // chooser result bit-identical, so the legacy happy path is preserved.
+  // `result.directApiExecution`). For every other route the wrapper returns
+  // the synchronous chooser result bit-identical, so the legacy happy path is
+  // preserved.
   const result = await runTabrixChooseContextWithDirectApi(args, {
-    experience: deps.sessionManager.experience,
     knowledgeApi: deps.sessionManager.knowledgeApi,
-    capabilityEnv: deps.capabilityEnv ?? {},
+    experienceRecipes: deps.sessionManager.findReusableMkeExperienceRecipes
+      ? {
+          findReusableByContext: (input) =>
+            deps.sessionManager.findReusableMkeExperienceRecipes?.(input) ?? [],
+        }
+      : null,
+    knowledgeModels: deps.sessionManager.findLatestMkeKnowledgeModel
+      ? {
+          findLatestByPage: (input) => deps.sessionManager.findLatestMkeKnowledgeModel?.(input),
+        }
+      : null,
     telemetry: deps.sessionManager.chooseContextTelemetry,
     pageContext,
     domRegionRowsEvidence: deps.taskContext?.peekVisibleRegionRowsEvidence() ?? null,
@@ -201,18 +264,16 @@ const handleTabrixChooseContext: NativeToolHandler = async (args, deps) => {
     // product under test reaches chrome_read_page.
     directApiEnabled: readAcceptanceApiFault(args) ? false : undefined,
   });
-  // Close the skip-read execution loop. When the wrapper provided a
+  // Close the read-routing loop. When the wrapper provided a
   // `TaskSessionContext` AND the chooser produced an actionable
   // layer-dispatch result, write the decision into the context BEFORE
   // we return. The next `chrome_read_page` call on the same key reads it
-  // via `peekChooseContextDecision` and the orchestrator decides skip vs
-  // forward vs fallback. Hard rules:
+  // via `peekChooseContextDecision` and the orchestrator decides whether
+  // API Knowledge can satisfy the read or the bridge should continue.
+  // Hard rules:
   //   * `noteUrlChange` runs FIRST so a chooser call against a
   //     different page than the one currently held in the context
   //     wipes the prior decision (per task-session-context tests).
-  //   * Only `experience_replay_skip_read` may attach a real
-  //     `replayCandidate`; every other route stores `null` so the
-  //     orchestrator's gates fire honestly (`replay_candidate_missing`).
   //   * `apiCapability` is attached only when the API Knowledge layer
   //     can resolve a real read-only API candidate for the
   //     `knowledge_supported_read`
@@ -251,37 +312,18 @@ function persistChooseContextDecision(
       ? argsObj.pageRole
       : (result.resolved?.pageRole ?? null);
 
-  // Always sync the URL/pageRole first. If they changed since the
-  // prior read on this context, `noteUrlChange` clears `lastReadLayer`
-  // / `targetRefsSeen` AND any prior chooser decision so the snapshot
-  // we are about to write is the only authority. Idempotent same-page
-  // calls are a no-op so a chooser that re-runs on the SAME page does
-  // not clobber its own decision.
-  taskContext.noteUrlChange(url, pageRole);
+  // A chooser may intentionally omit page identity when it only needs
+  // planning guidance. Missing optional hints are not a navigation to an
+  // empty page: clearing the task context here would discard a successful
+  // same-tab read and make the next fully-identified chooser call fail its
+  // current-page validation. Only an explicit URL can supersede the observed
+  // page identity; `noteUrlChange` still invalidates on an actual URL/role
+  // change.
+  if (url !== null) {
+    taskContext.noteUrlChange(url, pageRole);
+  }
 
   const sourceRoute = result.sourceRoute as LayerSourceRoute;
-
-  // Replay candidate is attached ONLY on the
-  // `experience_replay_skip_read` route AND when the chooser surfaced
-  // an `experience` / `experience_ranked` artifact. Replay eligibility
-  // is gated upstream (`rankExperienceCandidates.topReplayEligible`)
-  // by capability + step kinds + page role + threshold + portability;
-  // by the time the chooser picks `experience_replay`, those gates
-  // already passed for the top candidate, so the snapshot reports
-  // `policyOk: true` / `portableArgsOk: true`.
-  let replayCandidate: ChooseContextDecisionSnapshot['replayCandidate'] = null;
-  if (sourceRoute === 'experience_replay_skip_read') {
-    const experienceArtifact = result.artifacts?.find(
-      (artifact) => artifact.kind === 'experience' || artifact.kind === 'experience_ranked',
-    );
-    const actionPathId = experienceArtifact?.ref;
-    if (typeof actionPathId === 'string' && actionPathId.length > 0) {
-      replayCandidate = { actionPathId, portableArgsOk: true, policyOk: true };
-    }
-    // No artifact / empty ref → leave `replayCandidate = null`. The
-    // orchestrator turns that into `'fallback_required' /
-    // 'replay_candidate_missing'` per session correction #4.
-  }
 
   let apiCapability: ChooseContextDecisionSnapshot['apiCapability'] = null;
   if (sourceRoute === 'knowledge_supported_read') {
@@ -309,7 +351,6 @@ function persistChooseContextDecision(
       result.tokenEstimateFullRead > 0
         ? Math.floor(result.tokenEstimateFullRead)
         : 0,
-    replayCandidate,
     apiCapability,
     // Echo the closed-enum execution mode the chooser produced so the
     // orchestrator's `SkipReadPlan` carries the same signal downstream.
@@ -344,13 +385,14 @@ function persistChooseContextDecision(
             emptyMessage: result.directApiExecution.emptyMessage ?? null,
             // Pipe the closed-enum endpoint-source marker onto the
             // cached snapshot so the read-side shim can attribute the
-            // cached api_rows reply into the same `observed` /
-            // `seed_adapter` / `manual_seed` bucket as the chooser-side
+            // cached api_rows reply into the same endpoint-source
+            // bucket as the chooser-side
             // direct-API record without consulting the executor again.
             endpointSource: result.directApiExecution.endpointSource ?? null,
             telemetry: result.directApiExecution.apiTelemetry,
           }
         : null,
+    currentPageValidation: extractCurrentPageValidation(result),
   };
   const routerFields = result as TabrixChooseContextRouterTelemetry;
   if (routerFields.chosenSource) snapshot.chosenSource = routerFields.chosenSource;
@@ -363,13 +405,46 @@ function persistChooseContextDecision(
   taskContext.noteChooseContextDecision(snapshot);
 }
 
+function extractCurrentPageValidation(
+  result: TabrixChooseContextResult,
+): ChooseContextDecisionSnapshot['currentPageValidation'] {
+  const router = result as TabrixChooseContextRouterTelemetry & {
+    factSnapshotVerdict?: unknown;
+    readinessVerdict?: unknown;
+    dispatcherInputSource?: unknown;
+  };
+  const factSnapshotVerdict =
+    router.factSnapshotVerdict === 'fresh' ||
+    router.factSnapshotVerdict === 'stale' ||
+    router.factSnapshotVerdict === 'missing' ||
+    router.factSnapshotVerdict === 'unknown'
+      ? router.factSnapshotVerdict
+      : 'unknown';
+  const readinessVerdict =
+    router.readinessVerdict === 'ready' ||
+    router.readinessVerdict === 'document_loading' ||
+    router.readinessVerdict === 'empty' ||
+    router.readinessVerdict === 'error_or_blocked' ||
+    router.readinessVerdict === 'unknown'
+      ? router.readinessVerdict
+      : 'unknown';
+  return {
+    factSnapshotVerdict,
+    readinessVerdict,
+    source:
+      typeof router.dispatcherInputSource === 'string' ? router.dispatcherInputSource : 'unknown',
+  };
+}
+
 const handleTabrixChooseContextRecordOutcome: NativeToolHandler = (args, deps) => {
   const result = runTabrixChooseContextRecordOutcome(args, {
     telemetry: deps.sessionManager.chooseContextTelemetry,
+    recordSelectedArtifactOutcome: (input) =>
+      deps.sessionManager.recordMkeSelectedArtifactOutcome(input),
   });
-  // Only `invalid_input` is a structural error; `unknown_decision` is
-  // a legitimate response the caller can branch on.
-  return jsonResult(result, result.status === 'invalid_input');
+  // `unknown_decision` is a legitimate absence response. Invalid input and
+  // an atomic write failure are actionable MCP errors.
+  return jsonResult(result, result.status === 'invalid_input' || result.status === 'write_failed');
 };
 
 /**
@@ -380,46 +455,10 @@ const handleTabrixChooseContextRecordOutcome: NativeToolHandler = (args, deps) =
  * upward. The replay handler itself uses a structural cast back to
  * its real deps shape.
  */
-const handleExperienceReplayBridged: NativeToolHandler = async (args, deps) => {
-  // The replay handler reaches into `deps` via a structural cast and
-  // pulls out `experience` / `dispatchBridged` / `recorder` /
-  // `updateTaskIntent` / `capabilityEnv` / `persistenceMode` itself.
-  // We just need to supply `experience` (the read-only Experience
-  // façade) and the persistence mode here; the wrapper
-  // (`register-tools.ts`) supplies the rest.
-  const persistenceMode = deps.sessionManager.getPersistenceStatus().mode;
-  const reshaped = {
-    ...deps,
-    experience: deps.sessionManager.experience,
-    persistenceMode,
-  } as unknown as Parameters<typeof experienceReplayNativeHandler>[1];
-  return await experienceReplayNativeHandler(args, reshaped);
-};
-
-/**
- * Experience score-step adapter. Same plumbing as
- * `handleExperienceReplayBridged` — the score-step handler reads
- * `experience` (write-back capable) and `persistenceMode` from `deps`
- * via a structural cast. No bridge / recorder / intent re-tagger
- * needed: the tool only writes to SQLite, never to the extension-side
- * dispatch path.
- */
-const handleExperienceScoreStepBridged: NativeToolHandler = async (args, deps) => {
-  const persistenceMode = deps.sessionManager.getPersistenceStatus().mode;
-  const reshaped = {
-    ...deps,
-    experience: deps.sessionManager.experience,
-    persistenceMode,
-  } as unknown as Parameters<typeof experienceScoreStepNativeHandler>[1];
-  return await experienceScoreStepNativeHandler(args, reshaped);
-};
-
 const NATIVE_HANDLERS: ReadonlyMap<string, NativeToolHandler> = new Map([
-  [TOOL_NAMES.EXPERIENCE.SUGGEST_PLAN, handleExperienceSuggestPlan],
-  [TOOL_NAMES.EXPERIENCE.REPLAY, handleExperienceReplayBridged],
-  [TOOL_NAMES.EXPERIENCE.SCORE_STEP, handleExperienceScoreStepBridged],
   [TOOL_NAMES.CONTEXT.CHOOSE, handleTabrixChooseContext],
   [TOOL_NAMES.CONTEXT.RECORD_OUTCOME, handleTabrixChooseContextRecordOutcome],
+  [TOOL_NAMES.MEMORY.RECORD_AI_FEEDBACK, handleMemoryRecordAiFeedback],
 ]);
 
 export function getNativeToolHandler(toolName: string): NativeToolHandler | undefined {
@@ -439,6 +478,5 @@ export async function invokeNativeToolHandler(
   if (!handler) return undefined;
   return await handler(args, {
     sessionManager: defaultSessionManager,
-    capabilityEnv: getCurrentCapabilityEnv(),
   });
 }

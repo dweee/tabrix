@@ -28,10 +28,9 @@
  *      same scrubbed shape the existing `chrome_read_page` API shim
  *      already returns, so no privacy boundary moves.
  *
- * The knowledge-driven `lookupEndpointFamily` path is the preferred entry
- * point. The underlying `api-knowledge.ts` adapters are labelled as
- * `seed_adapter` so reports can distinguish compatibility fallback from
- * observed endpoint reuse.
+ * The knowledge-driven `lookupEndpointFamily` path is the only execution
+ * entry point. Legacy candidate fallback is no longer allowed to manufacture
+ * site-specific API reads.
  */
 
 import type {
@@ -42,7 +41,6 @@ import type {
   ApiKnowledgeReadResult,
   ApiKnowledgeTelemetry,
 } from '../api/api-knowledge';
-import { readApiKnowledgeRows } from '../api/api-knowledge';
 import {
   KNOWLEDGE_LOOKUP_CONFIDENCE_FLOOR,
   lookupEndpointFamily,
@@ -101,17 +99,7 @@ export type ExecutionMode = 'direct_api' | 'via_read_page';
  */
 export type DirectApiIntentClass = 'read_only' | 'action' | 'unknown';
 
-/**
- * Confidence threshold. Calibrated from the existing
- * candidates in `resolveApiKnowledgeCandidate`:
- *   - `github_issues_list`           = 0.86
- *   - `github_search_repositories`   = 0.82
- *   - `npmjs_search_packages`        = 0.80
- * All three exceed 0.7, future low-confidence (e.g. heuristic-only)
- * candidates remain below it and route through the legacy
- * `chrome_read_page` shim. The threshold is exported so tests can
- * pin its value rather than re-deriving it from the candidate table.
- */
+/** Confidence floor for observed Knowledge direct API execution. */
 export const DIRECT_API_HIGH_CONFIDENCE_THRESHOLD = 0.7;
 
 /**
@@ -188,9 +176,8 @@ export interface DirectApiExecutorInput {
   /**
    * When both `dataNeed` and `knowledgeRepo` are supplied, the executor first
    * tries a Knowledge-driven lookup (`lookupEndpointFamily` +
-   * `buildSafeRequest`) before falling back to the legacy `candidate` path.
-   * When either is missing (e.g. the caller did not load Memory yet), the
-   * executor preserves the legacy candidate behavior.
+   * `buildSafeRequest`). When either is missing (e.g. the caller did not load
+   * Memory yet), execution fails closed and falls back to browser reading.
    */
   dataNeed?: DataNeed | null;
   knowledgeRepo?: EndpointKnowledgeReader | null;
@@ -229,8 +216,9 @@ export interface DirectApiExecutionTelemetry {
   /**
    * Closed enum identifying which entry path the executor actually took.
    * `'knowledge_driven'` when the lookup-first path produced the result;
-   * `'legacy_candidate'` when the executor fell through to the hardcoded seed
-   * candidate; `null` for short-circuit branches that never reached either.
+   * `'legacy_candidate'` is retained only as a historical telemetry value;
+   * new execution should use Knowledge-driven rows or fall back to browser
+   * reading. `null` for short-circuit branches that never reached either.
    */
   readerMode: ReaderMode | null;
   /** Knowledge endpoint id of the looked-up row; null when not knowledge-driven. */
@@ -250,10 +238,8 @@ export interface DirectApiExecutionTelemetry {
    *                        (`family='observed'`); the safe-builder used
    *                        the persisted `urlPattern` + observed query
    *                        keys. This is the new mainline path.
-   *   - `'seed_adapter'` — the row came from (or was equivalent to) the
-   *                        hardcoded GitHub/npmjs adapter. Includes
-   *                        the legacy candidate path that has not yet
-   *                        gone through Knowledge lookup.
+   *   - `'seed_adapter'` — historical compatibility value for old rows.
+   *                        New execution paths must not default to this.
    *   - `'manual_seed'`  — reserved for an operator-curated seed
    *                        catalog; not produced by any current code
    *                        path but kept in the closed enum so the
@@ -267,7 +253,7 @@ export interface DirectApiExecutionTelemetry {
   lookupChosenReason: EndpointLookupChosenReason | null;
   /** Capped DOM/API correlation confidence from the selected Knowledge row. */
   correlationConfidence: CorrelationConfidenceLevel | null;
-  /** Lineage of a de-prioritised peer, usually the retired seed_adapter row. */
+  /** Lineage of a de-prioritised peer, usually a historical seed row. */
   retiredEndpointSource: DirectApiEndpointSource | null;
   /**
    * Invariant marker. The executor always tries `lookupEndpointFamily` first
@@ -279,8 +265,7 @@ export interface DirectApiExecutionTelemetry {
   adapterBypass: false;
   /**
    * Companion marker to `adapterBypass`. The executor treats Knowledge lookup
-   * as the required entry point, with the seed adapter only filling in when
-   * the lookup misses.
+   * as the required entry point.
    */
   knowledgeLookupRequired: true;
   /**
@@ -388,7 +373,6 @@ export function classifyDirectApiIntent(taskTypeHint: string | undefined): Direc
 export async function tryDirectApiExecute(
   input: DirectApiExecutorInput,
 ): Promise<DirectApiExecutionResult> {
-  const threshold = input.confidenceThreshold ?? DIRECT_API_HIGH_CONFIDENCE_THRESHOLD;
   const coldStartGuard: DirectApiColdStartGuard = input.coldStartGuard ?? 'enabled';
   const coldStartBudgetMs = input.coldStartBudgetMs ?? DIRECT_API_COLD_START_BUDGET_MS_DEFAULT;
   const clock = input.nowMs ?? Date.now;
@@ -413,11 +397,9 @@ export async function tryDirectApiExecute(
     });
   }
 
-  // Try the lookup-first knowledge-driven path before falling through to the
-  // legacy candidate path. The knowledge path returns `null` whenever it
-  // cannot produce a result (no urlHint / no Knowledge row / build refused /
-  // low confidence) so the legacy path remains the safety net for GitHub/npmjs
-  // seed fixtures.
+  // Only the lookup-first knowledge-driven path is allowed. It is backed by
+  // observed Object/Knowledge data; Tabrix no longer falls back to bundled
+  // platform seed adapters.
   if (input.dataNeed && input.knowledgeRepo) {
     const knowledgeResult = await tryKnowledgeDrivenPath(input, {
       coldStartGuard,
@@ -427,115 +409,13 @@ export async function tryDirectApiExecute(
     if (knowledgeResult) return knowledgeResult;
   }
 
-  if (!input.candidate) {
-    return buildShortCircuitResult({
-      executionMode: 'skipped_no_candidate',
-      decisionReason: 'endpoint_not_resolved',
-      endpointFamily: null,
-      candidateConfidence: null,
-      coldStartGuard,
-    });
-  }
-
-  if (input.candidate.confidence < threshold) {
-    return buildShortCircuitResult({
-      executionMode: 'skipped_low_confidence',
-      decisionReason: 'endpoint_low_confidence',
-      endpointFamily: input.candidate.endpointFamily,
-      candidateConfidence: input.candidate.confidence,
-      coldStartGuard,
-    });
-  }
-
-  const candidate = input.candidate;
-  const guarded = await runWithColdStartGuard(
-    () =>
-      readApiKnowledgeRows({
-        endpointFamily: candidate.endpointFamily,
-        method: candidate.method,
-        params: candidate.params,
-        fetchFn: input.fetchFn,
-        nowMs: input.nowMs,
-        limit: input.limit,
-      }),
-    { coldStartGuard, coldStartBudgetMs, clock },
-  );
-  const reader: ApiKnowledgeReadResult = guarded.result;
-
-  if (reader.status === 'ok') {
-    return {
-      executionMode: 'direct_api',
-      decisionReason: 'endpoint_knowledge_high_confidence',
-      browserNavigationSkipped: true,
-      readPageAvoided: true,
-      endpointFamily: reader.endpointFamily,
-      candidateConfidence: input.candidate.confidence,
-      apiTelemetry: reader.telemetry,
-      fallbackCause: null,
-      fallbackEntryLayer: null,
-      readerMode: 'legacy_candidate',
-      knowledgeEndpointId: null,
-      endpointPattern: null,
-      endpointSemanticType: null,
-      requestShapeUsed: null,
-      semanticValidation: null,
-      // The legacy candidate path consumes `resolveApiKnowledgeCandidate`,
-      // which is the hardcoded GitHub/npmjs seed adapter. Label every result
-      // from this path as `seed_adapter` so reports can split the mix of
-      // `observed` vs `seed_adapter` reads.
-      endpointSource: 'seed_adapter',
-      lookupChosenReason: null,
-      correlationConfidence: null,
-      retiredEndpointSource: null,
-      adapterBypass: false,
-      knowledgeLookupRequired: true,
-      layerContract: API_ROWS_LAYER_CONTRACT,
-      apiFirstAttemptMs: guarded.apiFirstAttemptMs,
-      apiRetryCount: guarded.apiRetryCount,
-      apiFinalReason: guarded.apiFinalReason,
-      coldStartGuard,
-      rows: {
-        rows: reader.rows,
-        rowCount: reader.rowCount,
-        compact: true,
-        rawBodyStored: false,
-        dataPurpose: reader.dataPurpose,
-        emptyResult: reader.emptyResult,
-        emptyReason: reader.emptyReason,
-        emptyMessage: reader.emptyMessage,
-      },
-    };
-  }
-
-  return {
-    executionMode: 'fallback_required',
-    decisionReason: `api_call_failed_${reader.reason}` as DirectApiDecisionReason,
-    browserNavigationSkipped: false,
-    readPageAvoided: false,
-    endpointFamily: reader.endpointFamily ?? input.candidate.endpointFamily,
-    candidateConfidence: input.candidate.confidence,
-    apiTelemetry: reader.telemetry,
-    fallbackCause: reader.reason,
-    fallbackEntryLayer: reader.fallbackEntryLayer,
-    readerMode: 'legacy_candidate',
-    knowledgeEndpointId: null,
-    endpointPattern: null,
-    endpointSemanticType: null,
-    requestShapeUsed: null,
-    semanticValidation: null,
-    endpointSource: 'seed_adapter',
-    lookupChosenReason: null,
-    correlationConfidence: null,
-    retiredEndpointSource: null,
-    adapterBypass: false,
-    knowledgeLookupRequired: true,
-    layerContract: API_ROWS_LAYER_CONTRACT,
-    apiFirstAttemptMs: guarded.apiFirstAttemptMs,
-    apiRetryCount: guarded.apiRetryCount,
-    apiFinalReason: guarded.apiFinalReason,
+  return buildShortCircuitResult({
+    executionMode: 'skipped_no_candidate',
+    decisionReason: 'endpoint_not_resolved',
+    endpointFamily: input.candidate?.endpointFamily ?? null,
+    candidateConfidence: input.candidate?.confidence ?? null,
     coldStartGuard,
-    rows: null,
-  };
+  });
 }
 
 /**
@@ -545,7 +425,7 @@ export async function tryDirectApiExecute(
  * fully-formed `DirectApiExecutionResult` whenever the lookup hits with high
  * confidence — even when the underlying fetch fails (in which case the result
  * is `executionMode='fallback_required'` with the knowledge-driven evidence
- * still attached).
+ * still attached). A miss does not fall back to bundled platform adapters.
  */
 async function tryKnowledgeDrivenPath(
   input: DirectApiExecutorInput,

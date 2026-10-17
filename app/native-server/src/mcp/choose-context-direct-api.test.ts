@@ -5,7 +5,7 @@
  *   - Non-`knowledge_supported_read` routes return the synchronous
  *     chooser result bit-identical (no `directApiExecution` field).
  *   - `directApiEnabled === false` is also bit-identical.
- *   - High-confidence GitHub search + read-only intent → executor
+ *   - High-confidence observed Knowledge + read-only intent → executor
  *     returns `executionMode='direct_api'` with compact rows so the
  *     upstream caller may skip `chrome_navigate` + `chrome_read_page`.
  *   - Reader failure collapses to `executionMode='fallback_required'`
@@ -21,13 +21,6 @@
 
 import { runTabrixChooseContext, runTabrixChooseContextWithDirectApi } from './choose-context';
 import type { ApiKnowledgeFetch } from '../api/api-knowledge';
-import type { ExperienceQueryService } from '../memory/experience';
-
-function emptyExperience(): ExperienceQueryService {
-  return {
-    suggestActionPaths: jest.fn().mockReturnValue([]),
-  } as unknown as ExperienceQueryService;
-}
 
 function jsonFetch(status: number, body: unknown): ApiKnowledgeFetch {
   return jest.fn().mockResolvedValue({
@@ -41,7 +34,7 @@ function rejectingFetch(reason: string): ApiKnowledgeFetch {
   return jest.fn().mockRejectedValue(Object.assign(new Error(reason), { name: 'AbortError' }));
 }
 
-const GITHUB_SEARCH_BODY = {
+const WORKSPACE_SEARCH_BODY = {
   total_count: 1,
   items: [
     {
@@ -49,31 +42,86 @@ const GITHUB_SEARCH_BODY = {
       full_name: 'tabrix/tabrix',
       description: 'Tabrix MCP browser tools',
       stargazers_count: 42,
-      html_url: 'https://github.com/tabrix/tabrix',
+      html_url: 'https://code.example/tabrix/tabrix',
     },
   ],
 };
 
-const GITHUB_SEARCH_INTENT = '搜索 GitHub 上 AI助手 相关热门项目，列出前10个';
-const GITHUB_EMPTY_ISSUES_BODY = {
+const WORKSPACE_SEARCH_INTENT = '搜索 Workspace 上 AI助手 相关热门项目，列出前10个';
+const WORKSPACE_EMPTY_ITEMS_BODY = {
   total_count: 0,
   items: [],
 };
 
+function observedKnowledgeApi(rows: any[]) {
+  return {
+    listBySite: jest.fn().mockReturnValue(rows),
+    listScoredBySite: jest.fn().mockReturnValue(rows),
+    countAll: jest.fn().mockReturnValue(rows.length),
+  } as any;
+}
+
+function observedSearchEndpoint(overrides: Record<string, unknown> = {}) {
+  return {
+    endpointId: 'observed-ep-1',
+    site: 'code.example',
+    family: 'observed',
+    method: 'GET',
+    urlPattern: 'code.example/search/items',
+    endpointSignature: 'GET code.example/search/items',
+    semanticTag: null,
+    statusClass: '2xx',
+    requestSummary: {
+      headerKeys: ['accept'],
+      queryKeys: ['q', 'limit'],
+      bodyKeys: [],
+      hasAuth: false,
+      hasCookie: false,
+    },
+    responseSummary: {
+      contentType: 'application/json',
+      sizeBytes: 128,
+      shape: { kind: 'object', topLevelKeys: ['items'] },
+    },
+    sourceSessionId: 'session-observed',
+    sourceStepId: 'step-observed',
+    sourceHistoryRef: null,
+    sampleCount: 3,
+    firstSeenAt: '2026-04-22T00:00:00.000Z',
+    lastSeenAt: '2026-04-22T00:01:00.000Z',
+    endpointSource: 'observed',
+    semanticType: 'search',
+    confidence: 0.92,
+    usableForTask: true,
+    fallbackReason: null,
+    correlationConfidence: 'low_confidence',
+    ...overrides,
+  };
+}
+
+function freshPageContext(pageRole: string | null = null) {
+  return {
+    getContext: () => ({
+      source: 'live_snapshot' as const,
+      candidateActionsCount: 4,
+      hvoCount: 2,
+      fullReadByteLength: 50_000,
+      pageRole,
+      factSnapshotVerdict: 'fresh' as const,
+      readinessVerdict: 'ready' as const,
+    }),
+  };
+}
+
 describe('runTabrixChooseContextWithDirectApi', () => {
   it('non-knowledge_supported_read route is bit-identical to the synchronous chooser', async () => {
-    const sync = runTabrixChooseContext(
-      { intent: 'do something' },
-      { experience: emptyExperience(), knowledgeApi: null, capabilityEnv: {} },
-    );
+    const sync = runTabrixChooseContext({ intent: 'do something' }, { knowledgeApi: null });
 
-    const fetchSpy = jsonFetch(200, GITHUB_SEARCH_BODY);
+    const fetchSpy = jsonFetch(200, WORKSPACE_SEARCH_BODY);
     const wrapped = await runTabrixChooseContextWithDirectApi(
       { intent: 'do something' },
       {
-        experience: emptyExperience(),
         knowledgeApi: null,
-        capabilityEnv: {},
         directApiFetchFn: fetchSpy,
       },
     );
@@ -83,14 +131,12 @@ describe('runTabrixChooseContextWithDirectApi', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it('directApiEnabled=false short-circuits even on knowledge_supported_read', async () => {
-    const fetchSpy = jsonFetch(200, GITHUB_SEARCH_BODY);
+  it('directApiEnabled=false short-circuits even on observed knowledge_supported_read', async () => {
+    const fetchSpy = jsonFetch(200, WORKSPACE_SEARCH_BODY);
     const wrapped = await runTabrixChooseContextWithDirectApi(
-      { intent: GITHUB_SEARCH_INTENT, url: 'https://github.com/search' },
+      { intent: WORKSPACE_SEARCH_INTENT, url: 'https://code.example/search' },
       {
-        experience: emptyExperience(),
-        knowledgeApi: null,
-        capabilityEnv: { TABRIX_POLICY_CAPABILITIES: 'api_knowledge' },
+        knowledgeApi: observedKnowledgeApi([observedSearchEndpoint()]),
         directApiFetchFn: fetchSpy,
         directApiEnabled: false,
       },
@@ -102,14 +148,13 @@ describe('runTabrixChooseContextWithDirectApi', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it('high-confidence read-only GitHub search → direct_api with compact rows', async () => {
-    const fetchSpy = jsonFetch(200, GITHUB_SEARCH_BODY);
+  it('high-confidence observed read-only endpoint → direct_api with compact rows', async () => {
+    const fetchSpy = jsonFetch(200, WORKSPACE_SEARCH_BODY);
     const wrapped = await runTabrixChooseContextWithDirectApi(
-      { intent: GITHUB_SEARCH_INTENT, url: 'https://github.com/search' },
+      { intent: WORKSPACE_SEARCH_INTENT, url: 'https://code.example/search' },
       {
-        experience: emptyExperience(),
-        knowledgeApi: null,
-        capabilityEnv: { TABRIX_POLICY_CAPABILITIES: 'api_knowledge' },
+        knowledgeApi: observedKnowledgeApi([observedSearchEndpoint()]),
+        pageContext: freshPageContext(),
         directApiFetchFn: fetchSpy,
       },
     );
@@ -121,7 +166,7 @@ describe('runTabrixChooseContextWithDirectApi', () => {
     expect(wrapped.directApiExecution?.decisionReason).toBe('endpoint_knowledge_high_confidence');
     expect(wrapped.directApiExecution?.browserNavigationSkipped).toBe(true);
     expect(wrapped.directApiExecution?.readPageAvoided).toBe(true);
-    expect(wrapped.directApiExecution?.endpointFamily).toBe('github_search_repositories');
+    expect(wrapped.directApiExecution?.endpointFamily).toBe('observed');
     expect(wrapped.directApiExecution?.rowCount).toBe(1);
     expect(wrapped.directApiExecution?.rows?.length).toBe(1);
     expect(wrapped.directApiExecution?.fallbackCause).toBeNull();
@@ -129,41 +174,66 @@ describe('runTabrixChooseContextWithDirectApi', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
-  it('derives API row limit from task wording instead of endpoint family defaults', async () => {
-    const fetchSpy = jsonFetch(200, { workflow_runs: [{ name: 'CI' }, { name: 'Nightly' }] });
+  it('high-confidence endpoint without fresh current page validation does not execute direct API', async () => {
+    const fetchSpy = jsonFetch(200, WORKSPACE_SEARCH_BODY);
+    const wrapped = await runTabrixChooseContextWithDirectApi(
+      { intent: WORKSPACE_SEARCH_INTENT, url: 'https://code.example/search' },
+      {
+        knowledgeApi: observedKnowledgeApi([observedSearchEndpoint()]),
+        pageContext: {
+          getContext: () => ({
+            source: 'object_library_snapshot',
+            candidateActionsCount: 4,
+            hvoCount: 2,
+            fullReadByteLength: 0,
+            pageRole: 'item_list',
+            factSnapshotVerdict: 'unknown',
+            readinessVerdict: 'unknown',
+          }),
+        },
+        directApiFetchFn: fetchSpy,
+      },
+    );
+
+    expect(wrapped.status).toBe('ok');
+    expect(wrapped.sourceRoute).toBe('knowledge_supported_read');
+    expect(wrapped.directApiExecution).toBeUndefined();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('derives API row limit from task wording for observed endpoints', async () => {
+    const fetchSpy = jsonFetch(200, { items: [{ name: 'CI' }, { name: 'Nightly' }] });
     const wrapped = await runTabrixChooseContextWithDirectApi(
       {
-        intent: '读取 GitHub Actions 最近一次工作流运行的名称、状态、分支、触发时间和失败原因摘要',
-        url: 'https://github.com/guodaxia103/tabrix/actions',
+        intent: '读取 CI 最近一次工作流运行的名称、状态、分支、触发时间和失败原因摘要',
+        url: 'https://code.example/guodaxia103/tabrix/actions',
         pageRole: 'actions_detail',
       },
       {
-        experience: emptyExperience(),
-        knowledgeApi: null,
-        capabilityEnv: { TABRIX_POLICY_CAPABILITIES: 'api_knowledge' },
+        knowledgeApi: observedKnowledgeApi([observedSearchEndpoint()]),
+        pageContext: freshPageContext('actions_detail'),
         directApiFetchFn: fetchSpy,
       },
     );
 
     expect(wrapped.directApiExecution?.executionMode).toBe('direct_api');
-    expect(wrapped.directApiExecution?.endpointFamily).toBe('github_workflow_runs_list');
+    expect(wrapped.directApiExecution?.endpointFamily).toBe('observed');
     expect(wrapped.directApiExecution?.rowCount).toBe(1);
     const url = new URL((fetchSpy as jest.Mock).mock.calls[0][0]);
-    expect(url.searchParams.get('per_page')).toBe('1');
+    expect(url.searchParams.get('limit')).toBe('1');
   });
 
-  it('GitHub repo-qualified issue search URL returns direct_api emptyResult instead of DOM fallback', async () => {
-    const fetchSpy = jsonFetch(200, GITHUB_EMPTY_ISSUES_BODY);
+  it('observed empty list returns direct_api emptyResult instead of DOM fallback', async () => {
+    const fetchSpy = jsonFetch(200, WORKSPACE_EMPTY_ITEMS_BODY);
     const wrapped = await runTabrixChooseContextWithDirectApi(
       {
-        intent: '读取 tabrix 仓库 issues 中匹配 __tabrix_pgb_02_no_match__ 的列表，预期返回空',
-        url: 'https://github.com/search?q=repo%3Aguodaxia103%2Ftabrix+__tabrix_pgb_02_no_match__&type=issues',
-        pageRole: 'issues_list',
+        intent: '读取示例工作区条目中匹配 __tabrix_pgb_02_no_match__ 的列表，预期返回空',
+        url: 'https://code.example/search?q=repo%3Aguodaxia103%2Ftabrix+__tabrix_pgb_02_no_match__&type=issues',
+        pageRole: 'item_list',
       },
       {
-        experience: emptyExperience(),
-        knowledgeApi: null,
-        capabilityEnv: { TABRIX_POLICY_CAPABILITIES: 'api_knowledge' },
+        knowledgeApi: observedKnowledgeApi([observedSearchEndpoint()]),
+        pageContext: freshPageContext('item_list'),
         directApiFetchFn: fetchSpy,
       },
     );
@@ -172,27 +242,23 @@ describe('runTabrixChooseContextWithDirectApi', () => {
     expect(wrapped.sourceRoute).toBe('knowledge_supported_read');
     expect(wrapped.chosenLayer).toBe('L0');
     expect(wrapped.directApiExecution?.executionMode).toBe('direct_api');
-    expect(wrapped.directApiExecution?.endpointFamily).toBe('github_issues_list');
+    expect(wrapped.directApiExecution?.endpointFamily).toBe('observed');
     expect(wrapped.directApiExecution?.rowCount).toBe(0);
     expect(wrapped.directApiExecution?.emptyResult).toBe(true);
     expect(wrapped.directApiExecution?.emptyReason).toBe('no_matching_records');
     expect(wrapped.directApiExecution?.browserNavigationSkipped).toBe(true);
     expect(wrapped.directApiExecution?.readPageAvoided).toBe(true);
 
-    const url = new URL((fetchSpy as jest.Mock).mock.calls[0][0]);
-    expect(url.searchParams.get('q')).toBe(
-      'repo:guodaxia103/tabrix is:issue state:open __tabrix_pgb_02_no_match__',
-    );
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
   it('reader failure collapses to fallback_required with L0+L1 entry layer', async () => {
     const fetchSpy = rejectingFetch('aborted');
     const wrapped = await runTabrixChooseContextWithDirectApi(
-      { intent: GITHUB_SEARCH_INTENT, url: 'https://github.com/search' },
+      { intent: WORKSPACE_SEARCH_INTENT, url: 'https://code.example/search' },
       {
-        experience: emptyExperience(),
-        knowledgeApi: null,
-        capabilityEnv: { TABRIX_POLICY_CAPABILITIES: 'api_knowledge' },
+        knowledgeApi: observedKnowledgeApi([observedSearchEndpoint()]),
+        pageContext: freshPageContext(),
         directApiFetchFn: fetchSpy,
       },
     );
@@ -206,17 +272,13 @@ describe('runTabrixChooseContextWithDirectApi', () => {
   });
 
   it('non-knowledge URL bypasses the executor (no candidate, no field)', async () => {
-    // A plain non-knowledge host (douyin / wikipedia / anything not
-    // GitHub or npmjs) does not resolve a candidate, so the chooser
-    // routes to `read_page_required` and the wrapper never enters
-    // the executor.
-    const fetchSpy = jsonFetch(200, GITHUB_SEARCH_BODY);
+    // A plain host with no observed Knowledge routes to `read_page_required`
+    // and the wrapper never enters the executor.
+    const fetchSpy = jsonFetch(200, WORKSPACE_SEARCH_BODY);
     const wrapped = await runTabrixChooseContextWithDirectApi(
       { intent: '查看页面摘要', url: 'https://www.example.com/some-article' },
       {
-        experience: emptyExperience(),
         knowledgeApi: null,
-        capabilityEnv: { TABRIX_POLICY_CAPABILITIES: 'api_knowledge' },
         directApiFetchFn: fetchSpy,
       },
     );
@@ -236,27 +298,26 @@ describe('runTabrixChooseContextWithDirectApi', () => {
     // We exercise that gate by injecting a high-density page context
     // that pushes the dispatcher off priority-2 and onto a
     // higher-layer knowledge route.
-    const fetchSpy = jsonFetch(200, GITHUB_SEARCH_BODY);
+    const fetchSpy = jsonFetch(200, WORKSPACE_SEARCH_BODY);
     const wrapped = await runTabrixChooseContextWithDirectApi(
-      // Open-style intent on a github URL that still resolves a
-      // candidate via the resolver's `wantsIssues` branch — but the
-      // intent itself is action.
+      // Open-style intent with observed Knowledge must still be treated as
+      // browser action, not as a direct API read.
       {
-        intent: '打开 issues 列表',
-        url: 'https://github.com/octocat/hello-world',
-        pageRole: 'issues_list',
+        intent: '打开条目列表',
+        url: 'https://code.example/octocat/hello-world',
+        pageRole: 'item_list',
       },
       {
-        experience: emptyExperience(),
-        knowledgeApi: null,
-        capabilityEnv: { TABRIX_POLICY_CAPABILITIES: 'api_knowledge' },
+        knowledgeApi: observedKnowledgeApi([observedSearchEndpoint()]),
         pageContext: {
           getContext: () => ({
             source: 'live_snapshot',
             candidateActionsCount: 50,
             hvoCount: 30,
             fullReadByteLength: 50_000,
-            pageRole: 'issues_list',
+            pageRole: 'item_list',
+            factSnapshotVerdict: 'fresh',
+            readinessVerdict: 'ready',
           }),
         },
         directApiFetchFn: fetchSpy,

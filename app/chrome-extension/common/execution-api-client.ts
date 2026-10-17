@@ -20,7 +20,11 @@ import {
   EXECUTION_TOP_ACTION_PATHS_DEFAULT_LIMIT,
   EXECUTION_TOP_ACTION_PATHS_LIMIT_MAX,
 } from '@tabrix/shared';
-import { MemoryApiError, resolveMemoryApiBaseUrl } from './memory-api-client';
+import {
+  MemoryApiError,
+  fetchWithNativeServerAuthRetry,
+  resolveMemoryApiBaseUrl,
+} from './memory-api-client';
 
 export type ExecutionApiErrorKind = 'network' | 'http' | 'shape';
 
@@ -92,12 +96,7 @@ export async function fetchExecutionReliabilitySignals(
 }
 
 async function readOk<TData>(url: string, signal?: AbortSignal): Promise<TData> {
-  let response: Response;
-  try {
-    response = await fetch(url, { signal });
-  } catch (cause) {
-    throw new MemoryApiError('network', `Network error contacting ${url}`, { cause });
-  }
+  const response = await fetchWithNativeServerAuthRetry(url, {}, signal);
   let parsed: unknown;
   try {
     parsed = await response.json();

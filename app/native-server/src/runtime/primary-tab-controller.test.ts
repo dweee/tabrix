@@ -122,6 +122,24 @@ describe('PrimaryTabController — observation contract', () => {
     expect(snap.benchmarkOwnedTabCount).toBe(2);
   });
 
+  it('removes closed tabs from the current owned-tab count', () => {
+    const ctrl = createPrimaryTabController();
+    ctrl.recordNavigation({ returnedTabId: 42 });
+    ctrl.recordNavigation({ returnedTabId: 99, allowsNewTab: true });
+
+    ctrl.recordClosedTabs([99]);
+    const afterOneClose = ctrl.getSnapshot();
+    expect(afterOneClose.primaryTabId).toBe(42);
+    expect(afterOneClose.observedTabIds).toEqual([42]);
+    expect(afterOneClose.benchmarkOwnedTabCount).toBe(1);
+
+    ctrl.recordClosedTabs([42]);
+    const afterPrimaryClose = ctrl.getSnapshot();
+    expect(afterPrimaryClose.primaryTabId).toBeNull();
+    expect(afterPrimaryClose.observedTabIds).toEqual([]);
+    expect(afterPrimaryClose.benchmarkOwnedTabCount).toBe(0);
+  });
+
   it('degrades reuse rate honestly when navigation produces no tabId', () => {
     const ctrl = createPrimaryTabController();
     ctrl.recordNavigation({ returnedTabId: 42 });

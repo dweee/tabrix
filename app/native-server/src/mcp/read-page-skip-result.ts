@@ -29,8 +29,6 @@ export function buildReadPageSkipResult(args: {
     fallbackUsed: args.skipPlan.fallbackUsed,
     fallbackEntryLayer: args.skipPlan.fallbackEntryLayer,
     requiresApiCall: args.skipPlan.requiresApiCall,
-    requiresExperienceReplay: args.skipPlan.requiresExperienceReplay,
-    actionPathId: args.recordedDecision.replayCandidate?.actionPathId ?? null,
     apiFamily: args.recordedDecision.apiCapability?.family ?? null,
     diagnostic: args.skipPlan.diagnostic,
     taskTotals: args.taskTotals,

@@ -12,7 +12,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 
 const TOKEN_DIR = path.join(os.homedir(), '.tabrix');
 const TOKEN_FILE = path.join(TOKEN_DIR, 'auth-token.json');
@@ -45,6 +45,21 @@ function getTtlDays(): number {
 function computeExpiresAt(createdAt: number, days: number): number | null {
   if (days === 0) return null;
   return createdAt + days * MS_PER_DAY;
+}
+
+function timingSafeStringEqual(actual: string, expected: string): boolean {
+  const actualBuffer = Buffer.from(actual);
+  const expectedBuffer = Buffer.from(expected);
+  if (actualBuffer.length !== expectedBuffer.length) {
+    const length = Math.max(actualBuffer.length, expectedBuffer.length);
+    const paddedActual = Buffer.alloc(length);
+    const paddedExpected = Buffer.alloc(length);
+    actualBuffer.copy(paddedActual);
+    expectedBuffer.copy(paddedExpected);
+    timingSafeEqual(paddedActual, paddedExpected);
+    return false;
+  }
+  return timingSafeEqual(actualBuffer, expectedBuffer);
 }
 
 class TokenManager {
@@ -144,7 +159,7 @@ class TokenManager {
   /** Verify a bearer token. Returns 'ok' | 'expired' | 'invalid'. */
   verify(bearerToken: string): 'ok' | 'expired' | 'invalid' {
     if (!this.data) return 'invalid';
-    if (bearerToken !== this.data.token) return 'invalid';
+    if (!timingSafeStringEqual(bearerToken, this.data.token)) return 'invalid';
     if (this.isExpired()) return 'expired';
     return 'ok';
   }

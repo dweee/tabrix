@@ -1,6 +1,7 @@
-import { TOOL_NAMES } from '@tabrix/shared';
-
 type OwnerTag = string;
+export type CDPDebuggee = chrome.debugger.Debuggee;
+export type CDPEventListener = (source: CDPDebuggee, method: string, params?: any) => void;
+export type CDPDetachListener = (source: CDPDebuggee, reason: string) => void;
 
 interface TabSessionState {
   refCount: number;
@@ -103,6 +104,22 @@ class CDPSessionManager {
     return await this.withSession<T>(tabId, `send:${method}`, async () => {
       return (await chrome.debugger.sendCommand({ tabId }, method, params)) as T;
     });
+  }
+
+  addEventListener(listener: CDPEventListener): void {
+    chrome.debugger.onEvent.addListener(listener);
+  }
+
+  removeEventListener(listener: CDPEventListener): void {
+    chrome.debugger.onEvent.removeListener(listener);
+  }
+
+  addDetachListener(listener: CDPDetachListener): void {
+    chrome.debugger.onDetach.addListener(listener);
+  }
+
+  removeDetachListener(listener: CDPDetachListener): void {
+    chrome.debugger.onDetach.removeListener(listener);
   }
 }
 

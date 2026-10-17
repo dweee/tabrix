@@ -11,10 +11,6 @@
     "message": "Native Server-Konfiguration",
     "description": "Hauptabschnittstitel für Native Server-Einstellungen"
   },
-  "semanticEngineLabel": {
-    "message": "Semantische Engine",
-    "description": "Hauptabschnittstitel für semantische Engine"
-  },
   "embeddingModelLabel": {
     "message": "Embedding-Modell",
     "description": "Hauptabschnittstitel für Modellauswahl"
@@ -148,26 +144,6 @@
   "downloadingStatus": {
     "message": "Wird heruntergeladen...",
     "description": "Download-Fortschrittsmeldung"
-  },
-  "semanticEngineReadyStatus": {
-    "message": "Semantische Engine bereit",
-    "description": "Semantische Engine bereit Status"
-  },
-  "semanticEngineInitializingStatus": {
-    "message": "Semantische Engine wird initialisiert...",
-    "description": "Semantische Engine Initialisierungsstatus"
-  },
-  "semanticEngineInitFailedStatus": {
-    "message": "Initialisierung der semantischen Engine fehlgeschlagen",
-    "description": "Semantische Engine Initialisierung fehlgeschlagen Status"
-  },
-  "semanticEngineNotInitStatus": {
-    "message": "Semantische Engine nicht initialisiert",
-    "description": "Semantische Engine nicht initialisiert Status"
-  },
-  "initSemanticEngineButton": {
-    "message": "Semantische Engine initialisieren",
-    "description": "Semantische Engine initialisieren Schaltflächentext"
   },
   "reinitializeButton": {
     "message": "Neu initialisieren",

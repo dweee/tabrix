@@ -10,28 +10,28 @@
  *   background/popup consumer.
  * - Base URL is derived from `chrome.storage.local.nativeServerPort`
  *   with the 12306 fallback used elsewhere in the extension (see
- *   `popup/App.vue → getServerBaseUrl`). Localhost reaches the server
- *   without a bearer token because the server's `onRequest` hook
- *   allows loopback IPs (see `app/native-server/src/server/index.ts`).
+ *   `popup/App.vue → getServerBaseUrl`). Protected routes may require a
+ *   bearer token when the native server is exposed beyond loopback, so
+ *   this client retries 401 responses with the current local `/auth/token`.
  * - Errors always surface as `MemoryApiError` so callers can branch on
  *   `.kind` ∈ `{network, http, shape}` instead of pattern-matching
  *   message strings.
  */
 
 import type {
-  MemoryExecutionStep,
   MemoryReadSuccess,
-  MemorySessionStepsResponseData,
-  MemorySessionsResponseData,
-  MemoryTaskResponseData,
+  MkeBrowserObjectsClearResponseData,
+  MkeBrowserObjectsResponseData,
+  MkeExperienceRecipesResponseData,
+  MkeKnowledgeModelsResponseData,
+  MkeMemoryTracesResponseData,
 } from '@tabrix/shared';
 import { STORAGE_KEYS } from './constants';
 
 /** Fallback port matches the native-server default. */
 export const DEFAULT_NATIVE_SERVER_PORT = 12306;
 
-/** Default page size for `/memory/sessions`; mirrors server-side default. */
-export const DEFAULT_SESSIONS_PAGE_SIZE = 20;
+export const DEFAULT_MKE_PAGE_SIZE = 20;
 
 /**
  * Strongly-typed failure modes produced by this client. Callers use
@@ -96,68 +96,79 @@ async function readConfiguredPort(): Promise<number> {
   return Number.isFinite(n) && n > 0 && n < 65536 ? Math.floor(n) : DEFAULT_NATIVE_SERVER_PORT;
 }
 
-export interface FetchRecentSessionsOptions {
+export interface FetchMkeListOptions {
   limit?: number;
   offset?: number;
   signal?: AbortSignal;
-  /** Override the base URL. Useful for integration tests. */
   baseUrl?: string;
 }
 
-/** `GET /memory/sessions?limit=&offset=` */
-export async function fetchRecentSessions(
-  options: FetchRecentSessionsOptions = {},
-): Promise<MemorySessionsResponseData> {
-  const limit = clampInt(options.limit ?? DEFAULT_SESSIONS_PAGE_SIZE, 1, 500);
-  const offset = clampInt(options.offset ?? 0, 0, Number.MAX_SAFE_INTEGER);
+/** `GET /memory/mke/traces?limit=&offset=` */
+export async function fetchMkeMemoryTraces(
+  options: FetchMkeListOptions = {},
+): Promise<MkeMemoryTracesResponseData> {
+  const { base, limit, offset } = await buildMkeListRequest(options);
+  const url = `${base}/memory/mke/traces?limit=${limit}&offset=${offset}`;
+  return readEnvelope<MkeMemoryTracesResponseData>(url, options.signal);
+}
+
+/** `GET /memory/mke/browser-objects?limit=&offset=` */
+export async function fetchMkeBrowserObjects(
+  options: FetchMkeListOptions = {},
+): Promise<MkeBrowserObjectsResponseData> {
+  const { base, limit, offset } = await buildMkeListRequest(options);
+  const url = `${base}/memory/mke/browser-objects?limit=${limit}&offset=${offset}`;
+  return readEnvelope<MkeBrowserObjectsResponseData>(url, options.signal);
+}
+
+/** `DELETE /memory/mke/browser-objects` */
+export async function clearMkeBrowserObjects(
+  options: { signal?: AbortSignal; baseUrl?: string } = {},
+): Promise<MkeBrowserObjectsClearResponseData> {
   const base = options.baseUrl ?? (await resolveMemoryApiBaseUrl());
-  const url = `${base}/memory/sessions?limit=${limit}&offset=${offset}`;
-  return readEnvelope<MemorySessionsResponseData>(url, options.signal);
+  return readEnvelope<MkeBrowserObjectsClearResponseData>(
+    `${base}/memory/mke/browser-objects`,
+    options.signal,
+    { method: 'DELETE' },
+  );
 }
 
-export interface FetchSessionStepsOptions {
-  signal?: AbortSignal;
-  baseUrl?: string;
+/** `GET /memory/mke/knowledge?limit=&offset=` */
+export async function fetchMkeKnowledgeModels(
+  options: FetchMkeListOptions = {},
+): Promise<MkeKnowledgeModelsResponseData> {
+  const { base, limit, offset } = await buildMkeListRequest(options);
+  const url = `${base}/memory/mke/knowledge?limit=${limit}&offset=${offset}`;
+  return readEnvelope<MkeKnowledgeModelsResponseData>(url, options.signal);
 }
 
-/** `GET /memory/sessions/:sessionId/steps` */
-export async function fetchSessionSteps(
-  sessionId: string,
-  options: FetchSessionStepsOptions = {},
-): Promise<MemorySessionStepsResponseData> {
-  if (!sessionId) {
-    throw new MemoryApiError('shape', 'sessionId is required');
-  }
-  const base = options.baseUrl ?? (await resolveMemoryApiBaseUrl());
-  const url = `${base}/memory/sessions/${encodeURIComponent(sessionId)}/steps`;
-  return readEnvelope<MemorySessionStepsResponseData>(url, options.signal);
+/** `GET /memory/mke/experience?limit=&offset=` */
+export async function fetchMkeExperienceRecipes(
+  options: FetchMkeListOptions = {},
+): Promise<MkeExperienceRecipesResponseData> {
+  const { base, limit, offset } = await buildMkeListRequest(options);
+  const url = `${base}/memory/mke/experience?limit=${limit}&offset=${offset}`;
+  return readEnvelope<MkeExperienceRecipesResponseData>(url, options.signal);
 }
 
-export interface FetchTaskOptions {
-  signal?: AbortSignal;
-  baseUrl?: string;
+async function buildMkeListRequest(options: FetchMkeListOptions): Promise<{
+  base: string;
+  limit: number;
+  offset: number;
+}> {
+  return {
+    base: options.baseUrl ?? (await resolveMemoryApiBaseUrl()),
+    limit: clampInt(options.limit ?? DEFAULT_MKE_PAGE_SIZE, 1, 500),
+    offset: clampInt(options.offset ?? 0, 0, Number.MAX_SAFE_INTEGER),
+  };
 }
 
-/** `GET /memory/tasks/:taskId` */
-export async function fetchMemoryTask(
-  taskId: string,
-  options: FetchTaskOptions = {},
-): Promise<MemoryTaskResponseData> {
-  if (!taskId) {
-    throw new MemoryApiError('shape', 'taskId is required');
-  }
-  const base = options.baseUrl ?? (await resolveMemoryApiBaseUrl());
-  const url = `${base}/memory/tasks/${encodeURIComponent(taskId)}`;
-  return readEnvelope<MemoryTaskResponseData>(url, options.signal);
-}
-
-async function readEnvelope<TData>(url: string, signal?: AbortSignal): Promise<TData> {
-  let response: Response;
-  try {
-    response = await fetch(url, { signal });
-  } catch (cause) {
-    throw new MemoryApiError('network', `Network error contacting ${url}`, { cause });
-  }
+async function readEnvelope<TData>(
+  url: string,
+  signal?: AbortSignal,
+  init: RequestInit = {},
+): Promise<TData> {
+  const response = await fetchWithNativeServerAuthRetry(url, init, signal);
 
   let parsed: unknown;
   try {
@@ -186,6 +197,80 @@ async function readEnvelope<TData>(url: string, signal?: AbortSignal): Promise<T
   return parsed.data;
 }
 
+export async function fetchWithNativeServerAuthRetry(
+  url: string,
+  init: RequestInit = {},
+  signal?: AbortSignal,
+): Promise<Response> {
+  const response = await fetchNativeServer(url, init, signal);
+  if (response.status !== 401 || hasAuthorizationHeader(init.headers)) {
+    return response;
+  }
+
+  const token = await readNativeServerBearerToken(url, signal);
+  if (!token) {
+    return response;
+  }
+
+  return fetchNativeServer(
+    url,
+    {
+      ...init,
+      headers: withBearerHeader(init.headers, token),
+    },
+    signal,
+  );
+}
+
+async function fetchNativeServer(
+  url: string,
+  init: RequestInit,
+  signal?: AbortSignal,
+): Promise<Response> {
+  try {
+    return await fetch(url, { ...init, signal });
+  } catch (cause) {
+    throw new MemoryApiError('network', `Network error contacting ${url}`, { cause });
+  }
+}
+
+async function readNativeServerBearerToken(
+  protectedUrl: string,
+  signal?: AbortSignal,
+): Promise<string | null> {
+  let tokenUrl: string;
+  try {
+    tokenUrl = new URL('/auth/token', protectedUrl).toString();
+  } catch {
+    return null;
+  }
+
+  try {
+    const response = await fetch(tokenUrl, { signal });
+    if (!response.ok) return null;
+    const parsed: unknown = await response.json();
+    if (!isMemorySuccessEnvelope<unknown>(parsed)) return null;
+    const token = (parsed.data as { token?: unknown } | null)?.token;
+    return typeof token === 'string' && token.length > 0 ? token : null;
+  } catch {
+    return null;
+  }
+}
+
+function hasAuthorizationHeader(headers: HeadersInit | undefined): boolean {
+  try {
+    return new Headers(headers).has('authorization');
+  } catch {
+    return false;
+  }
+}
+
+function withBearerHeader(headers: HeadersInit | undefined, token: string): Headers {
+  const next = new Headers(headers);
+  next.set('authorization', `Bearer ${token}`);
+  return next;
+}
+
 function isMemorySuccessEnvelope<TData>(value: unknown): value is MemoryReadSuccess<TData> {
   return (
     typeof value === 'object' &&
@@ -212,35 +297,6 @@ function isThenable(value: unknown): value is Promise<Record<string, unknown>> {
     value !== null &&
     typeof (value as { then?: unknown }).then === 'function'
   );
-}
-
-/**
- * Prefix that identifies a Memory "historyRef" inside the `artifactRefs`
- * array of a step. See `app/native-server/src/memory/page-snapshot-service.ts`
- * (`buildHistoryRef`) for the canonical producer.
- */
-export const MEMORY_HISTORY_REF_PREFIX = 'memory://';
-
-/**
- * Return the first `memory://…` entry from a step's `artifactRefs`.
- *
- * A step can carry multiple artifacts (e.g. `artifact://read_page/...`
- * alongside a `memory://snapshot/<uuid>`). The sidepanel only exposes
- * the *memory*-scheme ref because that's what re-resolves through the
- * MCP `getPageSnapshot` lookup — the `artifact://` kind is internal.
- *
- * Returns `null` when no memory ref is present; callers use that to
- * disable the "Copy historyRef" button rather than silently copying
- * an empty string.
- */
-export function extractHistoryRef(step: Pick<MemoryExecutionStep, 'artifactRefs'>): string | null {
-  if (!step?.artifactRefs || !Array.isArray(step.artifactRefs)) return null;
-  for (const ref of step.artifactRefs) {
-    if (typeof ref === 'string' && ref.startsWith(MEMORY_HISTORY_REF_PREFIX)) {
-      return ref;
-    }
-  }
-  return null;
 }
 
 /**

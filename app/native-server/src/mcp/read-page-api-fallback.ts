@@ -1,7 +1,11 @@
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import type { ApiKnowledgeFetch, ApiKnowledgeReadFallback } from '../api/api-knowledge';
 
-type ApiReadFallbackCause = 'api_timeout' | 'semantic_mismatch' | 'api_unavailable';
+type ApiReadFallbackCause =
+  | 'api_timeout'
+  | 'semantic_mismatch'
+  | 'api_unavailable'
+  | 'current_page_validation_required';
 type AcceptanceApiFault = 'network_timeout' | 'semantic_mismatch';
 
 export interface ApiReadFallbackEvidence {
@@ -87,6 +91,7 @@ export function estimateApiRowsTokenSavings(args: {
 export function normalizeApiFallbackCause(reason: string | null | undefined): ApiReadFallbackCause {
   if (reason === 'network_timeout') return 'api_timeout';
   if (reason === 'semantic_mismatch') return 'semantic_mismatch';
+  if (reason === 'current_page_validation_required') return 'current_page_validation_required';
   return 'api_unavailable';
 }
 

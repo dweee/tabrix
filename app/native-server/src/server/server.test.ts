@@ -1,11 +1,21 @@
 import { describe, expect, test, afterAll, beforeAll, jest } from '@jest/globals';
 import supertest from 'supertest';
 import Server from './index';
+import { Server as ServerClass } from './index';
 import { SERVER_CONFIG } from '../constant';
 import { sessionManager } from '../execution/session-manager';
 import { tokenManager } from './auth';
 import type { TokenData } from './auth';
 import { bridgeRuntimeState } from './bridge-state';
+import { bridgeCommandChannel } from './bridge-command-channel';
+import nativeMessagingHostInstance from '../native-messaging-host';
+import type { BridgeObservationMessage, BridgeObservationMessagePayload } from '@tabrix/shared';
+import { dispatchBridgeObservationToStream } from '../runtime/browser-event-stream';
+import { getLifecycleEvidenceCollectorSnapshot } from '../runtime/lifecycle-evidence-collector';
+import {
+  getLifecycleEvidenceArtifactStoreSnapshot,
+  recordLifecycleEvidenceArtifact,
+} from '../runtime/lifecycle-evidence-artifact-store';
 
 /** 非本机 IP，用于触发 onRequest 中的 Bearer 校验分支 */
 const REMOTE_CLIENT_IP = '192.168.99.1';
@@ -27,6 +37,87 @@ function parseStreamableJson(text: string): any {
 
   const payload = dataLines[dataLines.length - 1];
   return payload ? JSON.parse(payload) : {};
+}
+
+function makeLifecycleObservation(tabId: number, observedAtMs: number): BridgeObservationMessage {
+  const payload: BridgeObservationMessagePayload = {
+    kind: 'lifecycle_event',
+    data: {
+      tabId,
+      observedAtMs,
+      urlPattern: 'example.test/runtime',
+    },
+  };
+  return {
+    type: 'observation',
+    kind: 'lifecycle_event',
+    connectionId: 'server-test-conn',
+    extensionId: 'server-test-ext',
+    sentAt: observedAtMs,
+    payload,
+  };
+}
+
+function recordDummyLifecycleArtifact(): void {
+  recordLifecycleEvidenceArtifact({
+    artifactId: 'server-test-artifact',
+    version: 1,
+    evidenceLevel: 'integration',
+    scenarioId: 'server-test-scenario',
+    scenarioClass: 'search_result_delta_v1',
+    baseline: {
+      scenarioId: 'server-test-scenario',
+      scenarioClass: 'search_result_delta_v1',
+      evidenceLevel: 'integration',
+      startedAtMs: 1_700_000_000_000,
+    },
+    eventTimeline: {
+      available: false,
+      totalEvents: 0,
+      eventsByKind: {},
+      firstEventAtMs: null,
+      lastEventAtMs: null,
+      keyEvents: [],
+    },
+    signalSequence: {
+      available: false,
+      reason: 'bns_02_not_available',
+    },
+    scopeTransitions: {
+      available: false,
+      reason: 'bns_03_not_available',
+    },
+    actionLog: {
+      available: false,
+      totalActions: 0,
+      passed: 0,
+      failed: 0,
+      unknown: 0,
+      entries: [],
+    },
+    browserHygiene: {
+      available: false,
+      baselineTabs: null,
+      runOwnedTabsClosed: null,
+      baselineChanged: null,
+      notes: [],
+    },
+    sourceTruthChain: null,
+    claimBoundary: {
+      deterministicArtifactOnly: true,
+      realBrowserProven: false,
+      commercialGradeProven: false,
+      competitorSuperiorityProven: false,
+      fallbackSuccessSeparated: false,
+      sourceRouteProven: false,
+    },
+    finalVerdict: {
+      verdict: 'unknown',
+      confidence: 0,
+      reason: 'no_postcondition_results',
+    },
+    producedAtMs: 1_700_000_000_001,
+  });
 }
 
 describe('服务器测试', () => {
@@ -116,6 +207,11 @@ describe('服务器测试', () => {
       port: null,
       authEnabled: false,
       nativeHostAttached: false,
+      lifecycleEvidenceArtifacts: {
+        bufferedArtifacts: 0,
+        droppedArtifacts: 0,
+        lastArtifactId: null,
+      },
     });
     expect(response.body.data.bridge).toMatchObject({
       bridgeState: expect.any(String),
@@ -166,11 +262,7 @@ describe('服务器测试', () => {
       },
       lastSessionId: null,
     });
-    expect(response.body.data.capabilities).toMatchObject({
-      source: expect.any(String),
-      enabled: expect.any(Array),
-      unknown: expect.any(Array),
-    });
+    expect(response.body.data).not.toHaveProperty('capabilities');
     expect(response.body.data.v27Observation).toMatchObject({
       observationDiagnosticSource: expect.any(String),
       observationIngestedCount: expect.any(Number),
@@ -187,6 +279,7 @@ describe('服务器测试', () => {
   });
 
   test('POST /bridge/heartbeat 应记录扩展心跳并更新 bridge 快照', async () => {
+    sessionManager.reset();
     const syncBrowserSpy = jest
       .spyOn(bridgeRuntimeState, 'syncBrowserProcessNow')
       .mockImplementation(() => {
@@ -206,6 +299,34 @@ describe('服务器测试', () => {
         tabCount: 3,
         windowCount: 1,
         autoConnectEnabled: true,
+        browserWorld: {
+          status: 'fresh',
+          recentActivityLedger: {
+            latestPageClosed: {
+              kind: 'page_closed',
+              tabId: 201,
+              windowId: 100,
+              url: 'https://example.test/closed?token=secret',
+              title: 'Closed Dashboard',
+              openedBy: 'user_or_page',
+              occurredAtMs: sentAt - 1000,
+              evidence: 'browser_world_closed_tab_snapshot',
+            },
+          },
+          windows: [{ windowId: 100, focused: true, state: 'normal', tabCount: 1 }],
+          tabs: [
+            {
+              tabId: 200,
+              windowId: 100,
+              active: true,
+              status: 'complete',
+              openedBy: 'user_or_page',
+              canTabrixOperate: true,
+              url: 'https://example.test/dashboard?token=secret',
+              title: 'Dashboard',
+            },
+          ],
+        },
       })
       .expect(200)
       .expect('Content-Type', /json/);
@@ -231,8 +352,33 @@ describe('服务器测试', () => {
         autoConnectEnabled: true,
       },
     });
+    const objects = await supertest(Server.getInstance().server)
+      .get('/memory/mke/browser-objects')
+      .expect(200);
+    expect(objects.body.data.total).toBe(2);
+    expect(objects.body.data.browserObjects).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          tabId: '200',
+          title: 'Dashboard',
+          url: 'https://example.test/dashboard',
+          status: 'running',
+        }),
+        expect.objectContaining({
+          tabId: null,
+          title: 'Closed Dashboard',
+          url: 'https://example.test/closed',
+          status: 'closed',
+        }),
+      ]),
+    );
+    expect(JSON.stringify(objects.body.data.browserObjects)).not.toContain('token=secret');
+    expect(JSON.stringify(objects.body.data.browserObjects)).not.toContain('objectFingerprint');
+    expect(JSON.stringify(objects.body.data.browserObjects)).not.toContain('sourceRoute');
+    expect(sessionManager.countMkeMemoryTraces()).toBe(0);
     syncBrowserSpy.mockRestore();
     bridgeRuntimeState.reset();
+    sessionManager.reset();
   });
 
   test('GET /status 应暴露 execution 快照', async () => {
@@ -274,6 +420,57 @@ describe('服务器测试', () => {
       },
     });
     expect(typeof response.body.data.execution.lastSessionId).toBe('string');
+  });
+
+  describe('BNS-05 lifecycle evidence runtime bootstrap', () => {
+    test('Server.start 注册 collector，Server.stop 注销并清空 buffer', async () => {
+      const server = new ServerClass();
+      await server.start(0);
+      expect(getLifecycleEvidenceCollectorSnapshot().registered).toBe(true);
+
+      dispatchBridgeObservationToStream(makeLifecycleObservation(42, 1_700_000_000_000));
+      expect(getLifecycleEvidenceCollectorSnapshot().bufferedEvents).toBe(1);
+      recordDummyLifecycleArtifact();
+      expect(getLifecycleEvidenceArtifactStoreSnapshot().bufferedArtifacts).toBe(1);
+      expect(server.getStatusSnapshot().lifecycleEvidenceArtifacts).toMatchObject({
+        bufferedArtifacts: 1,
+        lastArtifactId: 'server-test-artifact',
+        lastFinalVerdict: 'unknown',
+        lastFinalVerdictReason: 'no_postcondition_results',
+        lastScenarioId: 'server-test-scenario',
+        lastScenarioClass: 'search_result_delta_v1',
+      });
+
+      await server.stop();
+      expect(getLifecycleEvidenceCollectorSnapshot()).toMatchObject({
+        registered: false,
+        bufferedEvents: 0,
+        droppedEvents: 0,
+        lastEventAtMs: null,
+      });
+      expect(getLifecycleEvidenceArtifactStoreSnapshot()).toMatchObject({
+        bufferedArtifacts: 0,
+        droppedArtifacts: 0,
+        lastArtifactId: null,
+      });
+    });
+
+    test('Server.restart 不重复注册且不保留旧 buffer', async () => {
+      const server = new ServerClass();
+      await server.start(0);
+      dispatchBridgeObservationToStream(makeLifecycleObservation(42, 1_700_000_000_000));
+      expect(getLifecycleEvidenceCollectorSnapshot().bufferedEvents).toBe(1);
+
+      await server.restart(0);
+
+      expect(getLifecycleEvidenceCollectorSnapshot()).toMatchObject({
+        registered: true,
+        bufferedEvents: 0,
+        droppedEvents: 0,
+        lastEventAtMs: null,
+      });
+      await server.stop();
+    });
   });
 
   describe('Token 管理接口（本机）', () => {
@@ -558,6 +755,208 @@ describe('服务器测试', () => {
     expect([200, 204]).toContain(del.status);
   });
 
+  test('POST /mcp stale session 仍可读取 BrowserWorld baseline', async () => {
+    jest.spyOn(bridgeRuntimeState, 'syncBrowserProcessIfStale').mockImplementation(() => {
+      bridgeRuntimeState.setBrowserProcessRunning(true);
+      return true;
+    });
+    jest.spyOn(bridgeCommandChannel, 'isConnected').mockReturnValue(false);
+    bridgeRuntimeState.setBrowserProcessRunning(true);
+    bridgeRuntimeState.setCommandChannelConnected(true, {
+      type: 'websocket',
+      connectionId: 'server-test-command-channel',
+    });
+    bridgeRuntimeState.recordHeartbeat({
+      sentAt: Date.now(),
+      nativeConnected: true,
+      extensionId: 'server-test-extension',
+      connectionId: 'server-test-command-channel',
+      tabCount: 2,
+      windowCount: 1,
+    });
+    bridgeRuntimeState.setNativeHostAttached(true);
+    const extensionSpy = jest
+      .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
+      .mockResolvedValueOnce({
+        status: 'success',
+        data: {
+          content: [{ type: 'text', text: '{"windowCount":1,"tabCount":2}' }],
+          isError: false,
+        },
+      } as never);
+
+    try {
+      const stale = await supertest(Server.getInstance().server)
+        .post('/mcp')
+        .set('Accept', 'application/json, text/event-stream')
+        .set('Content-Type', 'application/json')
+        .set('mcp-session-id', 'stale-session-for-browser-world-baseline-test')
+        .send({
+          jsonrpc: '2.0',
+          id: 98,
+          method: 'tools/call',
+          params: {
+            name: 'get_windows_and_tabs',
+            arguments: {},
+          },
+        })
+        .expect(200);
+
+      expect(stale.body).toMatchObject({
+        jsonrpc: '2.0',
+        id: 98,
+        result: {
+          isError: false,
+          content: [{ type: 'text' }],
+        },
+      });
+      const payload = JSON.parse(stale.body.result.content[0].text);
+      expect(payload).toMatchObject({
+        windowCount: 1,
+        tabCount: 2,
+        _tabrix: {
+          toolName: 'get_windows_and_tabs',
+          toolSuccess: true,
+          businessFeedbackRequired: false,
+        },
+      });
+      expect(payload._tabrix).not.toHaveProperty('businessFeedbackGuideVersion');
+      expect(payload._tabrix).not.toHaveProperty('businessStatus');
+      expect(payload._tabrix.traceId).toEqual(expect.any(String));
+      expect(extensionSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      jest.restoreAllMocks();
+      bridgeRuntimeState.reset();
+      sessionManager.reset();
+    }
+  });
+
+  test('POST /mcp stale session 可恢复执行只读观察类 tools/call', async () => {
+    jest.spyOn(bridgeRuntimeState, 'syncBrowserProcessIfStale').mockImplementation(() => {
+      bridgeRuntimeState.setBrowserProcessRunning(true);
+      return true;
+    });
+    jest.spyOn(bridgeCommandChannel, 'isConnected').mockReturnValue(false);
+    bridgeRuntimeState.setBrowserProcessRunning(true);
+    bridgeRuntimeState.recordHeartbeat({
+      sentAt: Date.now(),
+      nativeConnected: true,
+      extensionId: 'server-test-extension',
+      connectionId: 'server-test-command-channel',
+      tabCount: 1,
+      windowCount: 1,
+    });
+    bridgeRuntimeState.setNativeHostAttached(true);
+    const extensionSpy = jest
+      .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
+      .mockResolvedValueOnce({
+        status: 'success',
+        data: {
+          content: [{ type: 'text', text: '{"page":{"url":"https://example.test/"}}' }],
+          isError: false,
+        },
+      } as never)
+      .mockResolvedValueOnce({
+        status: 'success',
+        data: {
+          content: [{ type: 'text', text: '{"success":true,"name":"stale-session-shot"}' }],
+          isError: false,
+        },
+      } as never);
+
+    try {
+      const readPage = await supertest(Server.getInstance().server)
+        .post('/mcp')
+        .set('Accept', 'application/json, text/event-stream')
+        .set('Content-Type', 'application/json')
+        .set('mcp-session-id', 'stale-session-for-read-page-recovery-test')
+        .send({
+          jsonrpc: '2.0',
+          id: 99,
+          method: 'tools/call',
+          params: {
+            name: 'chrome_read_page',
+            arguments: { tabId: 1 },
+          },
+        })
+        .expect(200);
+
+      expect(readPage.body).toMatchObject({
+        jsonrpc: '2.0',
+        id: 99,
+        result: {
+          isError: false,
+          content: [{ type: 'text' }],
+        },
+      });
+
+      const screenshot = await supertest(Server.getInstance().server)
+        .post('/mcp')
+        .set('Accept', 'application/json, text/event-stream')
+        .set('Content-Type', 'application/json')
+        .set('mcp-session-id', 'stale-session-for-screenshot-recovery-test')
+        .send({
+          jsonrpc: '2.0',
+          id: 100,
+          method: 'tools/call',
+          params: {
+            name: 'chrome_screenshot',
+            arguments: { width: 800, height: 600, savePng: false },
+          },
+        })
+        .expect(200);
+
+      expect(screenshot.body).toMatchObject({
+        jsonrpc: '2.0',
+        id: 100,
+        result: {
+          content: [{ type: 'text' }],
+        },
+      });
+      expect(screenshot.body.error?.code).not.toBe(-32001);
+      const bridgedToolNames = extensionSpy.mock.calls
+        .map(([request]) => JSON.stringify(request))
+        .join('\n');
+      expect(bridgedToolNames).toContain('chrome_read_page');
+      expect(bridgedToolNames).toContain('chrome_screenshot');
+    } finally {
+      jest.restoreAllMocks();
+      bridgeRuntimeState.reset();
+      sessionManager.reset();
+    }
+  });
+
+  test('POST /mcp stale session 对非 tools/call 仍返回 JSON-RPC 错误信封', async () => {
+    const stale = await supertest(Server.getInstance().server)
+      .post('/mcp')
+      .set('Accept', 'application/json, text/event-stream')
+      .set('Content-Type', 'application/json')
+      .set('mcp-session-id', 'stale-session-for-json-rpc-envelope-test')
+      .send({
+        jsonrpc: '2.0',
+        id: 99,
+        method: 'tools/list',
+        params: {},
+      })
+      .expect(400);
+
+    expect(stale.body).toMatchObject({
+      jsonrpc: '2.0',
+      id: 99,
+      error: {
+        code: -32001,
+        message: expect.stringContaining('MCP session not found'),
+        data: {
+          retryable: true,
+          recoveryAction: 'reinitialize_without_session_id',
+          staleSessionIdReceived: true,
+        },
+      },
+    });
+    expect(stale.body.error.message).toContain('initialize');
+    expect(stale.body.error).not.toBe('MCP session not found');
+  });
+
   test('DELETE /mcp 对已不存在的 session 应返回 204', async () => {
     await supertest(Server.getInstance().server)
       .delete('/mcp')
@@ -626,6 +1025,90 @@ describe('服务器测试', () => {
       expect(res.statusCode).toBe(401);
       const body = JSON.parse(res.body as string);
       expect(body.message).toContain('Unauthorized');
+    });
+
+    test('本机 IP 只有在 local-only listen host 下才绕过 Bearer', async () => {
+      const app = Server.getInstance();
+      const previousHost = process.env.MCP_HTTP_HOST;
+      process.env.MCP_HTTP_HOST = '127.0.0.1';
+      try {
+        const initializeRequest = {
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'initialize',
+          params: {
+            protocolVersion: '2025-03-26',
+            capabilities: {},
+            clientInfo: { name: 'loopback-local-only-bypass', version: '1.0.0' },
+          },
+        };
+        const res = await app.inject({
+          method: 'POST',
+          url: '/mcp',
+          remoteAddress: '127.0.0.1',
+          headers: {
+            accept: 'application/json, text/event-stream',
+            'content-type': 'application/json',
+          },
+          payload: initializeRequest,
+        });
+        expect(res.statusCode).toBe(200);
+        expect(res.headers['mcp-session-id']).toBeTruthy();
+      } finally {
+        if (previousHost === undefined) {
+          delete process.env.MCP_HTTP_HOST;
+        } else {
+          process.env.MCP_HTTP_HOST = previousHost;
+        }
+      }
+    });
+
+    test('wildcard listen host 下本机 IP 访问受保护路由也必须携带 Bearer', async () => {
+      const app = Server.getInstance();
+      const previousHost = process.env.MCP_HTTP_HOST;
+      process.env.MCP_HTTP_HOST = '0.0.0.0';
+      try {
+        const initializeRequest = {
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'initialize',
+          params: {
+            protocolVersion: '2025-03-26',
+            capabilities: {},
+            clientInfo: { name: 'loopback-wildcard-auth-required', version: '1.0.0' },
+          },
+        };
+        const unauthenticated = await app.inject({
+          method: 'POST',
+          url: '/mcp',
+          remoteAddress: '127.0.0.1',
+          headers: {
+            accept: 'application/json, text/event-stream',
+            'content-type': 'application/json',
+          },
+          payload: initializeRequest,
+        });
+        expect(unauthenticated.statusCode).toBe(401);
+
+        const authenticated = await app.inject({
+          method: 'POST',
+          url: '/mcp',
+          remoteAddress: '127.0.0.1',
+          headers: {
+            authorization: `Bearer ${REMOTE_BEARER_TOKEN}`,
+            accept: 'application/json, text/event-stream',
+            'content-type': 'application/json',
+          },
+          payload: initializeRequest,
+        });
+        expect(authenticated.statusCode).toBe(200);
+      } finally {
+        if (previousHost === undefined) {
+          delete process.env.MCP_HTTP_HOST;
+        } else {
+          process.env.MCP_HTTP_HOST = previousHost;
+        }
+      }
     });
 
     test('远程 IP Bearer 错误时返回 401', async () => {

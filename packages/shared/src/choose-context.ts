@@ -3,15 +3,17 @@ import type {
   LayerSourceRoute,
   ReadPageRequestedLayer,
 } from './read-page-contract';
+import type { SiteFamily, SiteId } from './site';
 
 /**
  * Tabrix MKEP `tabrix_choose_context` public contract.
  *
  * Current public contract:
- *  - 3 strategies (no `api_only`, no `experience_replay`, no `read_page_markdown`).
+ *  - Closed strategy set (no unreviewed `api_only` / auto-execute branch).
  *  - No `tokenEstimate` (we have no calibration data; an invented number
  *    would mislead upstream planners).
- *  - GitHub-first; non-GitHub URLs fall through to `read_page_required`.
+ *  - Site-neutral `siteId` / `siteFamily` tokens. Unknown or unsupported
+ *    site policies fall through to safe read paths.
  *
  * This module is types + constants only — pure data, no IO. The runtime
  * lives in the native-server (`mcp/choose-context.ts`).
@@ -24,90 +26,6 @@ export const MAX_TABRIX_CHOOSE_CONTEXT_INTENT_CHARS = 1024;
 export const MAX_TABRIX_CHOOSE_CONTEXT_PAGE_ROLE_CHARS = 128;
 
 /**
- * Single threshold v1 uses to decide an Experience hit is good enough.
- * Strict `>=`. Plans below this rate are treated as "no match" so the
- * caller does not get a low-quality replay candidate dressed up as
- * `experience_reuse`.
- *
- * Kept conservative on purpose: a second knob (e.g. minimum sample
- * count) is exactly what v1 forbids — adding one is a v2 design call,
- * informed by run-history data.
- */
-export const EXPERIENCE_HIT_MIN_SUCCESS_RATE = 0.5;
-
-/**
- * Number of plans we ask `experience_suggest_plan` for. The best
- * surviving plan drives the strategy; the rest become artifacts.
- */
-export const EXPERIENCE_LOOKUP_LIMIT = 3;
-
-// ---------------------------------------------------------------------------
-// Ranked replay constants
-// ---------------------------------------------------------------------------
-
-/**
- * Number of replay candidates the
- * chooser surfaces in the `experience_ranked` artifact. Three is large
- * enough to give a real ladder (top-1 + two backups) and small enough
- * that the upstream LLM will actually attempt them all before giving
- * up. Treat as a closed knob: bumping requires a brief amendment +
- * re-checking the per-tool token budget.
- */
-export const EXPERIENCE_RANKED_TOP_N = 3;
-
-/**
- * Minimum `successRate` (success / (success+failure)) a row
- * must clear to be considered replay-eligible. This is STRICTER than
- * {@link EXPERIENCE_HIT_MIN_SUCCESS_RATE} (which is the v1 reuse
- * gate): replay actually dispatches the recorded steps against the
- * live page, so the bar to take that risk is higher than the bar to
- * surface a recorded plan as advice.
- */
-export const EXPERIENCE_REPLAY_MIN_SUCCESS_RATE = 0.8;
-
-/**
- * Minimum absolute success count. Pairs with
- * {@link EXPERIENCE_REPLAY_MIN_SUCCESS_RATE}: 1 success / 0 failures
- * is a perfect rate but a single sample, which is not enough evidence
- * to dispatch a recorded plan. Three matches MKEP §3.2's "min sample
- * count for ranked surfacing".
- */
-export const EXPERIENCE_REPLAY_MIN_SUCCESS_COUNT = 3;
-
-/**
- * Recency-decay half-life in days for chooser-side ranking.
- * Mirrors `EXPERIENCE_SCORE_STEP_RECENCY_HALF_LIFE_DAYS` so the
- * read-side ranking and the write-side `compositeScoreDecayed` cache
- * use the same time constant; if these ever drift, the chooser's
- * ordering will not match the persisted score.
- */
-export const EXPERIENCE_RECENCY_DECAY_DAYS = 30;
-
-/**
- * Closed enum for `TabrixChooseContextResult.replayEligibleBlockedBy`.
- *
- * Each value is a single, deterministic reason the chooser can give
- * for refusing to route a candidate to `experience_replay`. The
- * `'none'` value is reserved for the success branch (i.e. the chooser
- * actually emitted `experience_replay`); a downgraded result must
- * always carry a non-`'none'` reason so a post-mortem can say
- * "Codex's MCP saw N decisions, X% were blocked by reason Y".
- *
- * Order is: capability gate → step kind → portability → page role →
- * threshold → stale locator. Multiple reasons may apply; the chooser
- * reports the FIRST one in this order so the post-mortem signal is
- * stable across runs.
- */
-export type ReplayEligibilityBlockReason =
-  | 'capability_off'
-  | 'unsupported_step_kind'
-  | 'non_portable_args'
-  | 'non_github_pageRole'
-  | 'below_threshold'
-  | 'stale_locator'
-  | 'none';
-
-/**
  * Maximum number of endpoint signatures echoed in the `knowledge_light`
  * artifact summary. Keeps payload bounded even when a site has many
  * captured endpoints.
@@ -115,17 +33,21 @@ export type ReplayEligibilityBlockReason =
 export const KNOWLEDGE_LIGHT_SAMPLE_LIMIT = 5;
 
 /**
- * Site families recognised by v1. Anything else resolves to
- * `siteFamily: undefined` and falls through to `read_page_required`.
+ * Site family token resolved from `siteId` or URL-derived knowledge.
+ * Tokens are site-neutral identifiers and do not imply bundled platform
+ * behavior.
  */
-export type TabrixContextSiteFamily = 'github';
+export type TabrixContextSiteFamily = SiteFamily;
+
+/** Public `siteId` input token for the chooser. */
+export type TabrixContextSiteId = SiteId;
 
 /**
  * Closed v1 strategy set. Adding a new value here is itself a v2 design
  * decision — never silently widen this in a feature branch.
  *
  * `read_page_markdown` joins the set as the
- * "GitHub text-heavy reading" branch. It points the caller at
+ * text-heavy reading branch. It points the caller at
  * `chrome_read_page(render='markdown')`, which is a
  * READING surface — the JSON HVOs / candidateActions / `targetRef`
  * stay the execution truth. The chooser only picks this branch when
@@ -136,7 +58,6 @@ export type TabrixContextSiteFamily = 'github';
  * behavior change.
  */
 export type ContextStrategyName =
-  | 'experience_replay'
   | 'experience_reuse'
   | 'knowledge_light'
   | 'read_page_markdown'
@@ -147,25 +68,22 @@ export type ContextStrategyName =
  * for which the chooser will route the no-experience / no-knowledge
  * fallback to `read_page_markdown` instead of `read_page_required`.
  *
- * Why a hand-curated set: today only a handful of GitHub pageRoles are
- * reliably emitted by `read-page-understanding-github.ts`, and only a
- * subset of those are "long-form reading" pages where Markdown beats
- * the JSON snapshot for token cost. Forward-compatible tokens
- * (`issue_detail`, `pull_request_detail`, `discussion_detail`, `wiki`,
- * `release_notes`, `commit_detail`) are pre-listed so when the
- * understanding layer starts emitting them, the routing flips on
+ * Why a hand-curated set: only a subset of page roles are
+ * "long-form reading" pages where Markdown beats the JSON snapshot for
+ * token cost. Forward-compatible tokens are generic document/detail roles so
+ * when the understanding layer starts emitting them, the routing flips on
  * automatically without another shared-contract change.
  *
  * Anything outside this list keeps the v1 fallback (`read_page_required`).
  */
 export const MARKDOWN_FRIENDLY_PAGE_ROLES: readonly string[] = Object.freeze([
-  'repo_home',
-  'issue_detail',
-  'pull_request_detail',
-  'discussion_detail',
-  'wiki',
+  'content_detail',
+  'article',
+  'document',
+  'document_detail',
+  'knowledge_article',
+  'help_article',
   'release_notes',
-  'commit_detail',
 ]);
 
 /**
@@ -180,61 +98,63 @@ export interface TabrixChooseContextInput {
   /** Optional `pageRole` filter, mirroring the chooser contract. */
   pageRole?: string;
   /**
-   * Optional explicit site-family override. v1 only honours `'github'`;
-   * any other value is dropped on the floor and the URL-derived family
-   * (if any) is used instead.
+   * Optional explicit site-family override. Must be a shared safe token.
+   * Values are accepted by the public contract and then fail closed when no
+   * matching Knowledge policy is configured.
    */
-  siteId?: TabrixContextSiteFamily;
-}
-
-/**
- * Single ranked replay candidate inside the
- * `experience_ranked` artifact. `score` is the deterministic composite
- * (accuracy / speed / token / stability with recency decay; see
- * `composite-score.ts`); `replayEligible` is the AND of every
- * eligibility gate (capability, step kinds, portable args, pageRole,
- * thresholds). A non-eligible candidate stays in the ranked list with
- * `replayEligible: false` + a `blockedBy` reason so the post-mortem
- * stays grouped per actionPathId; the chooser still picks
- * `experience_reuse` if the top-ranked is non-eligible.
- */
-export interface TabrixChooseContextRankedCandidate {
-  ref: string;
-  score: number;
-  replayEligible: boolean;
-  blockedBy?: ReplayEligibilityBlockReason;
+  siteId?: TabrixContextSiteId;
 }
 
 /**
  * One reusable artifact reference returned alongside the chosen
- * strategy. `ref` is opaque to the caller — it is owned by whichever
- * native subsystem produced it (Experience action-path id; site name
- * for the Knowledge catalog; etc.).
- *
- * The chooser emits a single `'experience_ranked'` artifact
- * artifact of this kind whenever it surfaces a ranked candidate list
- * (whether or not it ultimately routes to `experience_replay`). The
- * top-1 is `ref`; the full list (top-N up to {@link EXPERIENCE_RANKED_TOP_N})
- * is in `ranked`. `summary` echoes a short description of the top-1.
+ * strategy. `ref` is opaque to the caller and owned by whichever native
+ * subsystem produced it.
  */
 export interface TabrixChooseContextArtifact {
-  kind: 'experience' | 'experience_ranked' | 'knowledge_api' | 'read_page';
+  kind: 'experience_recipe' | 'knowledge_api' | 'knowledge_page_model' | 'read_page';
   ref: string;
   /** Compact human-readable label, ≤ 200 chars. Not a UI string. */
   summary: string;
   /**
-   * Populated only on `kind === 'experience_ranked'`. List
-   * length is in `[1, EXPERIENCE_RANKED_TOP_N]`; ordering is the
-   * deterministic ranking from `rankExperienceCandidates`
-   * (composite score DESC, then `successCount` DESC, then
-   * `lastReplayAt` DESC NULLS LAST, then `actionPathId` ASC).
+   * Optional executable guidance for `kind: 'experience_recipe'`.
+   *
+   * This is a compact, privacy-safe recipe envelope: callers can use it
+   * to replay the successful pattern, but it must not contain raw page
+   * payloads, cookies, tokens, concrete tab ids, or session-only DOM refs.
    */
-  ranked?: TabrixChooseContextRankedCandidate[];
+  recipe?: {
+    schema: 'tabrix_experience_recipe_hint_v1';
+    siteFamily?: string | null;
+    pageRole?: string | null;
+    taskSignature?: string | null;
+    successCount?: number;
+    reliabilityScore?: number | null;
+    driftState?: string | null;
+    steps?: unknown[];
+    successCheck?: unknown;
+    fallback?: string;
+  };
+  /**
+   * Optional privacy-safe page capability hint distilled from Object Library
+   * records. This is read-only guidance for AI context selection; it is not an
+   * execution recipe and must not contain raw page payloads or session DOM refs.
+   */
+  knowledgeModel?: {
+    schema: 'tabrix_knowledge_page_model_hint_v1';
+    siteFamily?: string | null;
+    pageRole?: string | null;
+    pageModelKey?: string | null;
+    observationCount?: number;
+    confidenceScore?: number | null;
+    lastObservedAt?: string | null;
+    objectTypeCounts?: Record<string, number>;
+    reusableActionKinds?: string[];
+    dataSourceKinds?: string[];
+  };
 }
 
 /**
- * Echo of what the tool resolved from input — useful for debugging
- * bucket alignment with `experience_suggest_plan`.
+ * Echo of what the tool resolved from input.
  */
 export interface TabrixChooseContextResolved {
   intentSignature: string;
@@ -246,6 +166,8 @@ export interface TabrixChooseContextErrorBody {
   code: string;
   message: string;
 }
+
+export type TabrixChooseContextReuseBlockedBy = 'current_page_validation_required';
 
 /**
  * Public response. `status: 'invalid_input'` carries only `error`
@@ -266,6 +188,13 @@ export interface TabrixChooseContextResult {
   reasoning?: string;
   /** Always a list when `status === 'ok'`; possibly empty. */
   artifacts?: TabrixChooseContextArtifact[];
+  /**
+   * Closed-enum reason a reusable artifact was returned only as guidance,
+   * not as an immediately executable route. Today this protects Experience
+   * reuse: historical recipes can guide the AI, but must not bypass a fresh
+   * current-page validation gate.
+   */
+  reuseBlockedBy?: TabrixChooseContextReuseBlockedBy;
   resolved?: TabrixChooseContextResolved;
   error?: TabrixChooseContextErrorBody;
   /**
@@ -281,39 +210,6 @@ export interface TabrixChooseContextResult {
    */
   decisionId?: string;
   /**
-   * Number of replay candidates in the
-   * `experience_ranked` artifact (0 when none surfaced). Present on
-   * any ok result, regardless of strategy: a non-replay strategy
-   * still sets this to `0` so post-hoc analysis can cleanly group
-   * "we had ranked candidates but went elsewhere" vs "we never had
-   * any". A non-zero value implies one artifact of kind
-   * `'experience_ranked'`.
-   */
-  rankedCandidateCount?: number;
-  /**
-   * First reason the chooser refused to route the top-1
-   * candidate to `experience_replay`. `'none'` is set on the
-   * success branch (chooser actually emitted `experience_replay`);
-   * any other value is the FIRST blocker in the closed
-   * {@link ReplayEligibilityBlockReason} order so the post-mortem
-   * signal is stable. Absent on result branches that never even
-   * looked at Experience (e.g. `read_page_required` when no
-   * candidate row existed at all).
-   */
-  replayEligibleBlockedBy?: ReplayEligibilityBlockReason;
-  /**
-   * Replay-engine fallback depth the chooser THINKS the
-   * caller will hit. The chooser itself can only declare `0` (we
-   * surfaced a candidate) or `'cold'` (no candidates surfaced, so
-   * the caller will pay full read-page cost). The actual `1 | 2 | 3`
-   * values are written by the replay engine on outcome write-back
-   * and surface in telemetry; the chooser never claims to
-   * know the post-execution depth. Numeric encoding intentionally
-   * matches the per-pair fallback metric so analysis joins
-   * across surfaces without translation.
-   */
-  replayFallbackDepth?: 0 | 1 | 2 | 3 | 'cold';
-  /**
    * Chosen layer envelope the dispatcher selected for this
    * decision. Optional so older callers / tests that mock the result
    * stay valid; populated whenever `status === 'ok'` and the v25
@@ -327,11 +223,9 @@ export interface TabrixChooseContextResult {
    */
   layerDispatchReason?: LayerDispatchReason;
   /**
-   * Closed-enum routing instruction telling the caller
-   * whether `chrome_read_page` is required, the experience replay
-   * skip-read shortcut applies, knowledge supports the read, or the
-   * dispatcher fell back. See {@link
-   * ./read-page-contract.LayerSourceRoute}.
+   * Closed-enum routing instruction telling the caller whether
+   * `chrome_read_page` is required, Knowledge supports the read, or the
+   * dispatcher fell back. See {@link ./read-page-contract.LayerSourceRoute}.
    */
   sourceRoute?: LayerSourceRoute;
   /**
@@ -358,13 +252,6 @@ export interface TabrixChooseContextResult {
    * is unknown.
    */
   tokensSavedEstimate?: number;
-  /**
-   * When the dispatcher routes the caller through
-   * `experience_replay_skip_read`, the caller is expected to skip
-   * `chrome_read_page` entirely. This flag is `true` ONLY in that
-   * exact branch; the chooser never claims a generic "do not read".
-   */
-  readPageAvoided?: boolean;
   /**
    * Closed-enum advisory the chooser writes to tell the
    * upstream MCP loop how (and whether) to drive
@@ -445,7 +332,7 @@ export type TabrixObserveMode = 'foreground' | 'background' | 'disabled';
  * {@link TabrixObserveMode}. Tokens are deterministic so post-mortem
  * aggregations stay groupable.
  *
- *   - `'learning_requested'`     — env / capability opt-in
+ *   - `'learning_requested'`     — caller requested a foreground learning pass
  *     (`TABRIX_LEARNING_MODE` truthy) flagged this run as a learning
  *     pass; foreground observe is required to seed Knowledge.
  *   - `'knowledge_missing'`      — no Knowledge catalog entry exists
@@ -587,7 +474,9 @@ export interface TabrixDirectApiTelemetry {
  * back to `read_page` anyway; `completed` means the whole task
  * completed successfully on top of the suggested strategy; `retried`
  * means the caller went back and re-issued `tabrix_choose_context`
- * (signalling the first decision wasn't useful).
+ * (signalling the first decision wasn't useful). The first outcome recorded
+ * for a decision owns artifact-usage projection; `retried` projects failed,
+ * not-adopted usage, and later outcomes do not project that decision again.
  *
  * Closed on purpose so the outcome aggregation in
  * `release:choose-context-stats` can keep its grouping deterministic.
@@ -603,12 +492,12 @@ export interface TabrixChooseContextRecordOutcomeInput {
 /**
  * Public response for `tabrix_choose_context_record_outcome`.
  * `status: 'invalid_input'` carries only `error`. `status: 'unknown_decision'`
- * means the decision id was well-formed but no telemetry row matched;
- * the caller should treat that as "decision lost" rather than "permission
- * denied" or a transport error.
+ * means the decision id was well-formed but no telemetry row matched.
+ * `status: 'write_failed'` means the decision may still exist but the atomic
+ * outcome/library update failed; the caller may retry it.
  */
 export interface TabrixChooseContextRecordOutcomeResult {
-  status: 'ok' | 'invalid_input' | 'unknown_decision';
+  status: 'ok' | 'invalid_input' | 'unknown_decision' | 'write_failed';
   decisionId?: string;
   outcome?: TabrixChooseContextOutcome;
   error?: TabrixChooseContextErrorBody;

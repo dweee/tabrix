@@ -6,7 +6,7 @@
  *
  *  - `parseTabrixChooseContextInput` validates raw MCP args.
  *  - `chooseContextStrategy` is a pure function over already-resolved
- *    facts (`hasExperienceHit`, `hasUsableKnowledge`, `siteFamily`).
+ *    facts (`knowledgeCatalog`, `pageRole`, `siteFamily`).
  *  - `runTabrixChooseContext` is the IO orchestrator, kept tiny so it
  *    is easy to wire from `native-tool-handlers.ts` without crowding
  *    the dispatcher with chooser logic.
@@ -25,32 +25,27 @@
 
 import { randomUUID } from 'node:crypto';
 import {
-  EXPERIENCE_HIT_MIN_SUCCESS_RATE,
-  EXPERIENCE_LOOKUP_LIMIT,
   KNOWLEDGE_LIGHT_SAMPLE_LIMIT,
-  MARKDOWN_FRIENDLY_PAGE_ROLES,
   MAX_TABRIX_CHOOSE_CONTEXT_INTENT_CHARS,
   MAX_TABRIX_CHOOSE_CONTEXT_PAGE_ROLE_CHARS,
   type ContextStrategyName,
-  type ReplayEligibilityBlockReason,
   type TabrixChooseContextArtifact,
   type TabrixChooseContextInput,
   type TabrixChooseContextOutcome,
-  type TabrixChooseContextRankedCandidate,
   type TabrixChooseContextRecordOutcomeResult,
   type TabrixChooseContextResult,
+  type TabrixChooseContextReuseBlockedBy,
   type TabrixContextSiteFamily,
   type TabrixObserveMode,
   type TabrixObserveReason,
+  normalizeTabrixSiteId,
 } from '@tabrix/shared';
-import { isCapabilityEnabled } from '../policy/capabilities';
-import type { CapabilityEnv } from '../policy/capabilities';
-import { normalizeIntentSignature } from '../memory/experience/experience-aggregator';
+import { normalizeIntentSignature } from '../memory/experience/experience-signature';
 import type { KnowledgeApiRepository } from '../memory/knowledge/knowledge-api-repository';
-import type { ExperienceQueryService } from '../memory/experience';
-import type { ExperienceActionPathRow } from '../memory/experience/experience-repository';
-import type { ChooseContextTelemetryRepository } from '../memory/telemetry/choose-context-telemetry';
-import { rankExperienceCandidates } from './choose-context-replay-rules';
+import type {
+  ChooseContextTelemetryRepository,
+  SelectedChooseContextArtifactAudit,
+} from '../memory/telemetry/choose-context-telemetry';
 import {
   dispatchLayer,
   type LayerDispatchTaskType,
@@ -70,9 +65,12 @@ import {
   type TaskIntentClass,
 } from '../execution/data-source-router';
 import { tryDirectApiExecute, type DirectApiIntentClass } from '../execution/direct-api-executor';
+import type { ExperienceRecipe, KnowledgeModel } from '../memory/db';
 import type { DataNeed, EndpointKnowledgeReader } from '../api-knowledge/types';
 
 const chooseContextLogger = logger.child('choose-context');
+const RESTRICTED_CONTEXT_SIGNAL_PATTERN =
+  /\b(captcha|recaptcha|challenge|verification|security[-_]?check|human[-_]?check|verify(uuid|type|biz)?|user[_-]?verification[_-]?required|login[_-]?required|auth[_-]?required|access[_-]?denied|restricted|blocked)\b|安全验证|人机验证|滑块验证|验证码|登录验证/i;
 
 export interface TabrixChooseContextRouterTelemetry {
   chosenSource?: DataSourceKind;
@@ -83,6 +81,8 @@ export interface TabrixChooseContextRouterTelemetry {
   fallbackPlan?: DataSourceFallbackPlan;
   dispatcherInputSource?: string;
   costEstimate?: DataSourceCostEstimate;
+  factSnapshotVerdict?: 'fresh' | 'stale' | 'missing' | 'unknown';
+  readinessVerdict?: 'ready' | 'document_loading' | 'empty' | 'error_or_blocked' | 'unknown';
 }
 
 type TabrixChooseContextResultWithRouter = TabrixChooseContextResult &
@@ -106,6 +106,25 @@ function readString(args: Record<string, unknown>, key: string): string | undefi
   return value;
 }
 
+function readObject(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function estimateTokensFromJsonEnvelope(value: unknown): number {
+  try {
+    const bytes = JSON.stringify(value)?.length ?? 0;
+    return bytes > 0 ? Math.ceil(bytes / 4) : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function hasRestrictedContextSignal(value: unknown): boolean {
+  return typeof value === 'string' && RESTRICTED_CONTEXT_SIGNAL_PATTERN.test(value);
+}
+
 /**
  * Internal: return the parsed value plus the resolved
  * `intentSignature`. Kept as a private struct because the upstream
@@ -118,11 +137,9 @@ export interface ParsedChooseContextInput {
 }
 
 /**
- * Validate raw MCP arguments. Mirrors `parseExperienceSuggestPlanInput`
- * so a `(intent, pageRole)` pair lands in the same bucket here as it
- * does for `experience_suggest_plan`. v1 deliberately silently drops:
+ * Validate raw MCP arguments. v1 deliberately silently drops:
  *   - unparseable `url` (treated as omitted),
- *   - unrecognised `siteId` (treated as omitted),
+ *   - unsafe `siteId` tokens (treated as omitted),
  *   - empty-after-trim `pageRole` (treated as omitted).
  *
  * It does NOT silently drop bad `intent`: empty / non-string intent is
@@ -178,11 +195,7 @@ export function parseTabrixChooseContextInput(rawArgs: unknown): ParsedChooseCon
   let siteId: TabrixContextSiteFamily | undefined;
   const rawSiteId = readString(args, 'siteId');
   if (rawSiteId !== undefined) {
-    const trimmedSite = rawSiteId.trim().toLowerCase();
-    if (trimmedSite === 'github') {
-      siteId = 'github';
-    }
-    // Any other token is ignored on purpose (see doc §3.1).
+    siteId = normalizeTabrixSiteId(rawSiteId);
   }
 
   return {
@@ -230,22 +243,161 @@ function deriveRequestedRowLimit(intent: string): number | undefined {
   return Math.max(1, Math.min(10, value));
 }
 
+function buildExperienceCatalog(recipe: ExperienceRecipe): {
+  experienceId: string;
+  summary: string;
+  recipe: NonNullable<TabrixChooseContextArtifact['recipe']>;
+} {
+  const successCheck = readObject(recipe.successCheck);
+  const collectChecks = successCheck?.collectResultCards;
+  const firstCollectCheck = Array.isArray(collectChecks) ? readObject(collectChecks[0]) : null;
+  const filters = readObject(firstCollectCheck?.filterState);
+  const genericFilterParts = Array.isArray(filters?.filterGroups)
+    ? filters.filterGroups
+        .map((entry) => {
+          const group = readObject(entry);
+          const groupId = typeof group?.groupId === 'string' ? group.groupId : null;
+          const selected = typeof group?.selected === 'string' ? group.selected : null;
+          return groupId && selected ? `${groupId}:${selected}` : null;
+        })
+        .filter((value): value is string => Boolean(value))
+    : [];
+  const legacyFilterParts = [
+    typeof filters?.sort === 'string' ? filters.sort : null,
+    typeof filters?.contentType === 'string' ? filters.contentType : null,
+    typeof filters?.timeRange === 'string' ? filters.timeRange : null,
+  ].filter((value): value is string => Boolean(value));
+  const filterParts = genericFilterParts.length > 0 ? genericFilterParts : legacyFilterParts;
+  const minCount =
+    typeof firstCollectCheck?.observedResultCountAtLeast === 'number'
+      ? firstCollectCheck.observedResultCountAtLeast
+      : null;
+  const filterSummary = filterParts.length > 0 ? ` filters=${filterParts.join('/')}` : '';
+  const countSummary = minCount ? ` top>=${minCount}` : '';
+  return {
+    experienceId: recipe.experienceId,
+    summary:
+      `Verified ${recipe.taskSignature}${filterSummary}${countSummary}; ` +
+      `success=${recipe.successCount}, reliability=${recipe.reliabilityScore ?? 'unknown'}`,
+    recipe: {
+      schema: 'tabrix_experience_recipe_hint_v1',
+      siteFamily: recipe.siteFamily,
+      pageRole: recipe.pageRole,
+      taskSignature: recipe.taskSignature,
+      successCount: recipe.successCount,
+      reliabilityScore: recipe.reliabilityScore,
+      driftState: recipe.driftState,
+      steps: Array.isArray(recipe.steps) ? recipe.steps : [],
+      successCheck: recipe.successCheck,
+      fallback:
+        'If the live page or filter state does not match this recipe, call chrome_read_page before reusing it.',
+    },
+  };
+}
+
+function readCounterKeys(value: unknown, limit: number): string[] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+  return Object.keys(value as Record<string, unknown>)
+    .filter((key) => key.trim().length > 0)
+    .sort()
+    .slice(0, limit);
+}
+
+function buildChooseContextPageModelKey(input: {
+  siteFamily?: string | null;
+  pageRole?: string | null;
+}): string | null {
+  if (!input.siteFamily) return null;
+  return `page:${input.siteFamily}:${input.pageRole ?? 'unknown_page_role'}`;
+}
+
+function buildKnowledgeModelArtifact(model: KnowledgeModel): TabrixChooseContextArtifact {
+  const objectGraph = readObject(model.objectGraph);
+  const actionSurface = readObject(model.actionSurface);
+  const dataSourceModel = readObject(model.dataSourceModel);
+  const objectTypeCounts = readObject(objectGraph?.objectTypeCounts) as Record<
+    string,
+    number
+  > | null;
+  const reusableActionKinds = Array.isArray(actionSurface?.reusableActionKinds)
+    ? actionSurface.reusableActionKinds
+        .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+        .slice(0, 12)
+    : [];
+  const dataSourceKinds = readCounterKeys(dataSourceModel?.selectedDataSourceCounts, 8);
+  const objectTypeNames = objectTypeCounts ? readCounterKeys(objectTypeCounts, 8) : [];
+  const summaryParts = [
+    `Page model ${model.pageModelKey}`,
+    `objects=${objectGraph?.sourceObjectCount ?? 'unknown'}`,
+    reusableActionKinds.length > 0 ? `actions=${reusableActionKinds.join('/')}` : null,
+    objectTypeNames.length > 0 ? `types=${objectTypeNames.join('/')}` : null,
+  ].filter((part): part is string => Boolean(part));
+
+  return {
+    kind: 'knowledge_page_model',
+    ref: model.knowledgeId,
+    summary: summaryParts.join('; ').slice(0, 200),
+    knowledgeModel: {
+      schema: 'tabrix_knowledge_page_model_hint_v1',
+      siteFamily: model.siteFamily,
+      pageRole: model.pageRole,
+      pageModelKey: model.pageModelKey,
+      observationCount: model.observationCount,
+      confidenceScore: model.confidenceScore,
+      lastObservedAt: model.lastObservedAt,
+      objectTypeCounts: objectTypeCounts ?? undefined,
+      reusableActionKinds,
+      dataSourceKinds,
+    },
+  };
+}
+
+function readArtifactObject(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : null;
+}
+
+function buildSelectedArtifactAudit(
+  artifacts: TabrixChooseContextArtifact[],
+  strategy: ContextStrategyName,
+  fallback: { siteFamily: string | null; pageRole: string | null },
+): SelectedChooseContextArtifactAudit[] | null {
+  const selectedKinds =
+    strategy === 'experience_reuse'
+      ? new Set(['experience_recipe', 'knowledge_page_model'])
+      : strategy === 'knowledge_light'
+        ? new Set(['knowledge_page_model', 'knowledge_api'])
+        : new Set<string>();
+  const selected = artifacts
+    .filter((artifact) => selectedKinds.has(artifact.kind))
+    .map((artifact): SelectedChooseContextArtifactAudit | null => {
+      if (typeof artifact.ref !== 'string' || artifact.ref.length === 0) {
+        return null;
+      }
+      const recipe = readArtifactObject(artifact.recipe);
+      return {
+        kind: artifact.kind,
+        ref: artifact.ref,
+        recipeSchema: typeof recipe?.schema === 'string' ? recipe.schema : null,
+        siteFamily:
+          typeof recipe?.siteFamily === 'string' ? recipe.siteFamily : fallback.siteFamily,
+        pageRole: typeof recipe?.pageRole === 'string' ? recipe.pageRole : fallback.pageRole,
+        taskSignature: typeof recipe?.taskSignature === 'string' ? recipe.taskSignature : null,
+      };
+    })
+    .filter((item): item is SelectedChooseContextArtifactAudit => item !== null);
+  return selected.length > 0 ? selected : null;
+}
+
 /**
- * Derive a `siteFamily` from an explicit `siteId` (highest precedence)
- * or, failing that, from the URL host. Returns `undefined` for any
- * unrecognised host so the chooser can fall through to
- * `read_page_required`.
- *
- * v1 GitHub-first rules:
- *   - exact host `github.com` → `'github'`
- *   - any subdomain ending in `.github.com` (`api`, `gist`, `raw`,
- *     etc.) → `'github'`
- *   - everything else → `undefined`
+ * Derive a `siteFamily` from an explicit safe `siteId` (highest precedence)
+ * or, failing that, from the normalized URL host. No host receives a bundled
+ * platform alias; site knowledge must come from observed Object/Knowledge data.
  */
 export function resolveSiteFamily(
   input: TabrixChooseContextInput,
 ): TabrixContextSiteFamily | undefined {
-  if (input.siteId === 'github') return 'github';
+  const explicitSite = normalizeTabrixSiteId(input.siteId);
+  if (explicitSite) return explicitSite;
   if (!input.url) return undefined;
   let host: string;
   try {
@@ -253,72 +405,38 @@ export function resolveSiteFamily(
   } catch {
     return undefined;
   }
-  if (host === 'github.com' || host.endsWith('.github.com')) return 'github';
-  return undefined;
+  return normalizeTabrixSiteId(host);
 }
 
 /**
  * Pure facts the chooser routes over. Keeps `chooseContextStrategy`
- * trivially testable without standing up an `ExperienceQueryService`
- * or a SQLite handle.
+ * trivially testable without standing up a SQLite handle.
  */
 export interface ChooseContextFacts {
   intentSignature: string;
   pageRole?: string;
   siteFamily?: TabrixContextSiteFamily;
-  /**
-   * Best surviving Experience plan (i.e. one whose computed
-   * `successRate >= EXPERIENCE_HIT_MIN_SUCCESS_RATE`). `undefined` when
-   * either no plan was returned or all returned plans were below the
-   * threshold.
-   */
-  experienceHit?: {
-    actionPathId: string;
-    successRate: number;
-    successCount: number;
-    failureCount: number;
-    /**
-     * When true the chooser routes the experience hit through the
-     * `experience_replay` strategy
-     * instead of `experience_reuse`. Eligibility is the AND of:
-     *   - the `experience_replay` capability is enabled,
-     *   - the row's `pageRole` is in
-     *     `TABRIX_EXPERIENCE_REPLAY_GITHUB_PAGE_ROLES`,
-     *   - every step's `toolName` is in
-     *     `TABRIX_EXPERIENCE_REPLAY_SUPPORTED_STEP_KINDS`,
-     *   - the row's `successRate >= EXPERIENCE_HIT_MIN_SUCCESS_RATE`
-     *     (already true if `experienceHit` exists).
-     * Replay also uses stricter success-rate and success-count
-     * thresholds; the legacy `experience_reuse` gate
-     * (`EXPERIENCE_HIT_MIN_SUCCESS_RATE`) is unchanged.
-     */
-    replayEligible?: boolean;
+  experienceCatalog?: {
+    experienceId: string;
+    summary: string;
+    recipe?: NonNullable<TabrixChooseContextArtifact['recipe']>;
   };
+  blockedExperienceCatalog?: {
+    experienceId: string;
+    summary: string;
+    recipe?: NonNullable<TabrixChooseContextArtifact['recipe']>;
+  };
+  experienceReuseBlockedBy?: TabrixChooseContextReuseBlockedBy;
+  knowledgeModelArtifact?: TabrixChooseContextArtifact;
   /**
-   * Ranked replay candidates surfaced as a single `experience_ranked`
-   * artifact. Populated whenever the chooser has Experience rows in
-   * scope (regardless of which strategy it ultimately picks); empty
-   * when no rows came back. The ordering is the deterministic ranking
-   * from `rankExperienceCandidates`.
-   */
-  rankedReplayCandidates?: TabrixChooseContextRankedCandidate[];
-  /**
-   * First reason the top-1 ranked candidate was refused routing to
-   * `experience_replay`. `'none'` when the chooser actually picked
-   * `experience_replay`; absent when the chooser never had a candidate
-   * to consider.
-   */
-  rankedTopBlockedBy?: ReplayEligibilityBlockReason;
-  /**
-   * Knowledge catalog summary, populated only when the capability gate
-   * is on AND there is at least one captured endpoint for the resolved
-   * site family. Empty / missing array means "do not pick
-   * `knowledge_light`".
+   * Knowledge catalog summary for the resolved site family. Empty or
+   * missing data means "do not pick `knowledge_light`".
    */
   knowledgeCatalog?: {
     site: string;
     totalEndpoints: number;
     sampleSignatures: string[];
+    selectedEndpointRef?: string | null;
   };
 }
 
@@ -327,12 +445,31 @@ interface StrategyDecision {
   fallbackStrategy?: ContextStrategyName;
   reasoning: string;
   artifacts: TabrixChooseContextArtifact[];
-  /** First eligibility blocker for the top-1 candidate (if any). */
-  replayEligibleBlockedBy?: ReplayEligibilityBlockReason;
-  /** Chooser-side fallback depth (`0` when a candidate surfaced; `'cold'` otherwise). */
-  replayFallbackDepth: 0 | 'cold';
-  /** Number of candidates in the ranked artifact. */
-  rankedCandidateCount: number;
+  reuseBlockedBy?: TabrixChooseContextReuseBlockedBy;
+}
+
+function experienceRecipeArtifact(
+  catalog: NonNullable<ChooseContextFacts['experienceCatalog']>,
+): TabrixChooseContextArtifact {
+  return {
+    kind: 'experience_recipe',
+    ref: catalog.experienceId,
+    summary: catalog.summary,
+    ...(catalog.recipe ? { recipe: catalog.recipe } : {}),
+  };
+}
+
+function isCurrentPageValidatedForExperience(
+  input: {
+    factSnapshotVerdict?: 'fresh' | 'stale' | 'missing' | 'unknown';
+    readinessVerdict?: 'ready' | 'document_loading' | 'empty' | 'error_or_blocked' | 'unknown';
+  } | null,
+): boolean {
+  if (!input) return false;
+  return (
+    input.factSnapshotVerdict === 'fresh' &&
+    (input.readinessVerdict === 'ready' || input.readinessVerdict === 'empty')
+  );
 }
 
 /**
@@ -341,102 +478,29 @@ interface StrategyDecision {
  * without updating the doc + the strategy-set guard test.
  */
 export function chooseContextStrategy(facts: ChooseContextFacts): StrategyDecision {
-  // When the chooser has ranked replay candidates available we ALWAYS
-  // surface them as a single `experience_ranked` artifact, even on the
-  // `experience_reuse` downgrade branch. This keeps post-mortem
-  // analysis grouped by `rankedCandidateCount` regardless of which
-  // strategy we pick. `rankedCandidateCount === 0` when no candidates
-  // surfaced (no Experience rows OR the legacy `experienceHit` path was
-  // taken with no ranking input).
-  const rankedCandidates = facts.rankedReplayCandidates ?? [];
-  const rankedCandidateCount = rankedCandidates.length;
-  const replayFallbackDepth: 0 | 'cold' = rankedCandidateCount > 0 ? 0 : 'cold';
-
-  if (facts.experienceHit) {
-    const hit = facts.experienceHit;
-    // Route the hit to `experience_replay` only when the capability,
-    // step-kind allowlist, and GitHub pageRole gates all pass. The
-    // fallback chain is `experience_reuse → read_page_required` (NOT
-    // directly to `read_page_required`); replay's failure mode is a
-    // per-step abort, after which the reusing branch can still try the
-    // recorded plan as plain advice instead of dispatched steps.
-    if (hit.replayEligible) {
-      const top = rankedCandidates[0];
-      const topScoreLabel = top !== undefined ? ` topScore=${top.score.toFixed(3)}` : '';
-      const reasoning =
-        `experience replay: actionPath=${hit.actionPathId}, ` +
-        `successRate=${hit.successRate.toFixed(2)} ` +
-        `(>= ${EXPERIENCE_HIT_MIN_SUCCESS_RATE.toFixed(2)});` +
-        `${topScoreLabel} ranked=${rankedCandidateCount}; ` +
-        `experience_replay capability enabled; all step kinds + pageRole supported in v1`;
-      return {
-        strategy: 'experience_replay',
-        fallbackStrategy: 'experience_reuse',
-        reasoning,
-        artifacts:
-          rankedCandidateCount > 0
-            ? [
-                {
-                  kind: 'experience_ranked',
-                  ref: hit.actionPathId,
-                  summary:
-                    `Experience action path ${hit.actionPathId} ` +
-                    `(${hit.successCount} ok / ${hit.failureCount} fail) — replay-eligible; ` +
-                    `${rankedCandidateCount} ranked candidate(s)`,
-                  ranked: rankedCandidates,
-                },
-              ]
-            : [
-                {
-                  kind: 'experience',
-                  ref: hit.actionPathId,
-                  summary:
-                    `Experience action path ${hit.actionPathId} ` +
-                    `(${hit.successCount} ok / ${hit.failureCount} fail) — replay-eligible`,
-                },
-              ],
-        replayEligibleBlockedBy: 'none',
-        replayFallbackDepth,
-        rankedCandidateCount,
-      };
-    }
-
-    const reasoning =
-      `experience hit: actionPath=${hit.actionPathId}, ` +
-      `successRate=${hit.successRate.toFixed(2)} ` +
-      `(>= ${EXPERIENCE_HIT_MIN_SUCCESS_RATE.toFixed(2)})` +
-      (rankedCandidateCount > 0
-        ? `; ranked=${rankedCandidateCount} (top blocked by ${facts.rankedTopBlockedBy ?? 'unknown'})`
-        : '');
+  if (facts.experienceCatalog) {
     return {
       strategy: 'experience_reuse',
       fallbackStrategy: 'read_page_required',
-      reasoning,
-      artifacts:
-        rankedCandidateCount > 0
-          ? [
-              {
-                kind: 'experience_ranked',
-                ref: hit.actionPathId,
-                summary:
-                  `Experience action path ${hit.actionPathId} ` +
-                  `(${hit.successCount} ok / ${hit.failureCount} fail); ` +
-                  `${rankedCandidateCount} ranked candidate(s)`,
-                ranked: rankedCandidates,
-              },
-            ]
-          : [
-              {
-                kind: 'experience',
-                ref: hit.actionPathId,
-                summary:
-                  `Experience action path ${hit.actionPathId} ` +
-                  `(${hit.successCount} ok / ${hit.failureCount} fail)`,
-              },
-            ],
-      replayEligibleBlockedBy: facts.rankedTopBlockedBy,
-      replayFallbackDepth,
-      rankedCandidateCount,
+      reasoning:
+        'verified Experience exists for this site and page role. Reuse it first; fall back to chrome_read_page if the page state or filters do not match.',
+      artifacts: [
+        experienceRecipeArtifact(facts.experienceCatalog),
+        ...(facts.knowledgeModelArtifact ? [facts.knowledgeModelArtifact] : []),
+      ],
+    };
+  }
+
+  if (facts.blockedExperienceCatalog) {
+    return {
+      strategy: 'read_page_required',
+      reasoning:
+        'verified Experience exists, but the current page has not passed a fresh readiness check — call chrome_read_page before reusing the recipe.',
+      artifacts: [
+        experienceRecipeArtifact(facts.blockedExperienceCatalog),
+        ...(facts.knowledgeModelArtifact ? [facts.knowledgeModelArtifact] : []),
+      ],
+      reuseBlockedBy: facts.experienceReuseBlockedBy ?? 'current_page_validation_required',
     };
   }
 
@@ -450,69 +514,25 @@ export function chooseContextStrategy(facts: ChooseContextFacts): StrategyDecisi
       strategy: 'knowledge_light',
       fallbackStrategy: 'read_page_required',
       reasoning:
-        `no experience match; api_knowledge gate on; ` +
         `${cat.totalEndpoints} captured endpoint(s) on ${cat.site}. ` +
-        `Tabrix v1 does NOT call site APIs — use the catalog as shape evidence only.`,
+        `Use local Knowledge first; call chrome_read_page when the AI needs fresh page objects or action targets.`,
       artifacts: [
         {
           kind: 'knowledge_api',
-          ref: cat.site,
+          ref: cat.selectedEndpointRef ?? cat.site,
           summary,
         },
+        ...(facts.knowledgeModelArtifact ? [facts.knowledgeModelArtifact] : []),
       ],
-      replayFallbackDepth,
-      rankedCandidateCount,
-    };
-  }
-
-  // Text-heavy GitHub reading branch.
-  //
-  // When (a) no experience hit, (b) no usable api_knowledge match,
-  // (c) the resolved siteFamily is `'github'`, and (d) the pageRole
-  // is on the hand-curated `MARKDOWN_FRIENDLY_PAGE_ROLES` whitelist,
-  // we route to `read_page_markdown`. This is a *reading* surface — the
-  // JSON HVOs / candidateActions / `targetRef` stay the execution truth.
-  // The chooser only signals that the markdown projection is the cheaper
-  // way to read this page; the caller is still expected to fall back to
-  // `read_page_required` if it has to act on the result.
-  //
-  // We deliberately gate on `siteFamily === 'github'` rather than on
-  // pageRole alone because the whitelist tokens
-  // (`issue_detail`, `pull_request_detail`, `wiki`, …) are GitHub-specific
-  // labels emitted by `read-page-understanding-github.ts`. Routing
-  // markdown for a non-GitHub site that happens to share a pageRole
-  // string would mis-route a page whose understanding layer has not
-  // been audited yet.
-  if (
-    facts.siteFamily === 'github' &&
-    facts.pageRole &&
-    MARKDOWN_FRIENDLY_PAGE_ROLES.includes(facts.pageRole)
-  ) {
-    return {
-      strategy: 'read_page_markdown',
-      fallbackStrategy: 'read_page_required',
-      reasoning:
-        `no experience match and no usable api_knowledge; ` +
-        `pageRole='${facts.pageRole}' is on the markdown-friendly GitHub whitelist — ` +
-        `prefer read_page(render='markdown') as a reading surface, fall back to read_page (json) for execution.`,
-      artifacts: [
-        {
-          kind: 'read_page',
-          ref: `markdown:${facts.pageRole}`,
-          summary: `Use chrome_read_page(render='markdown') for this ${facts.pageRole} page.`,
-        },
-      ],
-      replayFallbackDepth,
-      rankedCandidateCount,
     };
   }
 
   return {
     strategy: 'read_page_required',
-    reasoning: 'no experience match and no usable api_knowledge — fall back to read_page (json)',
-    artifacts: [],
-    replayFallbackDepth,
-    rankedCandidateCount,
+    reasoning: facts.knowledgeModelArtifact
+      ? 'page Knowledge exists but no reusable Experience or API endpoint matched — call chrome_read_page with the page model as guidance'
+      : 'no usable local Knowledge — fall back to chrome_read_page',
+    artifacts: facts.knowledgeModelArtifact ? [facts.knowledgeModelArtifact] : [],
   };
 }
 
@@ -551,10 +571,10 @@ export function classifyIntentForLayerDispatch(intent: string): LayerDispatchUse
   ) {
     return 'details';
   }
-  // priority 2.3 — fill / search / submit / replay / form-like
+  // priority 2.3 — fill / search / submit / form-like
   if (
-    /(填写|提交|搜索|查询|表单|回放|重放|重播)/.test(intent) ||
-    /\b(fill|search|submit|replay|form|input)\b/.test(normalized)
+    /(填写|提交|搜索|查询|表单)/.test(intent) ||
+    /\b(fill|search|submit|form|input)\b/.test(normalized)
   ) {
     return 'form_or_submit';
   }
@@ -591,40 +611,35 @@ export function deriveTaskTypeForLayerDispatch(
   }
 }
 
-/**
- * Pick the legacy `experienceHit` shape from the top-1 ranked
- * candidate, applying the legacy `EXPERIENCE_HIT_MIN_SUCCESS_RATE` gate
- * so the existing `experience_reuse` branch keeps its threshold
- * behaviour. Replay eligibility is the stricter AND gate already
- * reflected in `topReplayEligible`.
- *
- * Returns `undefined` when no row is above the legacy threshold; the
- * chooser then falls through to `knowledge_light` / markdown / read.
- */
-function projectExperienceHit(
-  topRow: ExperienceActionPathRow | undefined,
-  topReplayEligible: boolean,
-): ChooseContextFacts['experienceHit'] {
-  if (!topRow) return undefined;
-  const total = topRow.successCount + topRow.failureCount;
-  const rate = total > 0 ? topRow.successCount / total : 0;
-  if (rate < EXPERIENCE_HIT_MIN_SUCCESS_RATE) return undefined;
-  return {
-    actionPathId: topRow.actionPathId,
-    successRate: rate,
-    successCount: topRow.successCount,
-    failureCount: topRow.failureCount,
-    replayEligible: topReplayEligible,
-  };
+function isObservedKnowledgeReadIntent(intent: string): boolean {
+  if (typeof intent !== 'string' || intent.trim().length === 0) return false;
+  const normalized = intent.toLowerCase();
+  return (
+    /(读取|读一下|查询|搜索|检索|列出|汇总|整理|前\s*\d+\s*(条|个)|列表|结果)/.test(intent) ||
+    /\b(read|query|search|find|list|fetch|collect|summari[sz]e|top\s*\d+|results?)\b/.test(
+      normalized,
+    )
+  );
 }
 
 export interface RunTabrixChooseContextDeps {
-  experience: Pick<ExperienceQueryService, 'suggestActionPaths'> | null;
   knowledgeApi:
     | (Pick<KnowledgeApiRepository, 'listBySite' | 'countAll'> &
         Partial<Pick<KnowledgeApiRepository, 'listScoredBySite'>>)
     | null;
-  capabilityEnv: CapabilityEnv;
+  experienceRecipes?: {
+    findReusableByContext(input: {
+      siteFamily: string;
+      pageRole?: string | null;
+      limit?: number;
+    }): ExperienceRecipe[];
+  } | null;
+  knowledgeModels?: {
+    findLatestByPage(input: {
+      siteFamily: string;
+      pageModelKey: string;
+    }): KnowledgeModel | undefined;
+  } | null;
   /**
    * Telemetry write-back. `null` means "telemetry disabled"
    * (persistence off, or the wiring opted out for a particular caller).
@@ -672,14 +687,13 @@ export interface RunTabrixChooseContextDeps {
 
 /**
  * IO orchestrator: validates the args, fetches the two facts (best
- * Experience plan + knowledge catalog snapshot), and routes through
+ * Knowledge catalog snapshot), and routes through
  * the pure chooser. Always returns a `TabrixChooseContextResult` — the
  * caller wraps it into the MCP `CallToolResult` envelope.
  *
- * Capability handling: when `api_knowledge` is NOT enabled we never
- * read the knowledge repository at all, so an operator who has not
- * opted in pays no cost AND cannot accidentally surface
- * `knowledge_light` even if rows exist from a prior run.
+ * Knowledge is a core browser-automation input. When local endpoint
+ * knowledge exists for the page/site, the chooser can route through it
+ * before spending a fresh page read.
  */
 export function runTabrixChooseContext(
   rawArgs: unknown,
@@ -700,56 +714,62 @@ export function runTabrixChooseContext(
 
   const { input, intentSignature } = parsed;
   const siteFamily = resolveSiteFamily(input);
+  const currentContextRestricted = hasRestrictedContextSignal(input.url);
 
-  // Chooser-side ranking. We always do the single
-  // `experience.suggestActionPaths` read (the Memory-not-read invariant
-  // applies to per-step Memory tables, NOT to this aggregator-only
-  // query). The ranked list, eligibility blocker and top-1 row all come
-  // from the pure ranking module so tests can pin the matrix without
-  // standing up the full IO orchestrator.
   const nowIso = (deps.now ?? (() => new Date().toISOString()))();
-  let experienceHit: ChooseContextFacts['experienceHit'];
-  let rankedReplayCandidates: TabrixChooseContextRankedCandidate[] | undefined;
-  let rankedTopBlockedBy: ReplayEligibilityBlockReason | undefined;
-  if (deps.experience) {
-    const rows = deps.experience.suggestActionPaths({
-      intent: input.intent,
-      intentSignature,
-      pageRole: input.pageRole,
-      limit: EXPERIENCE_LOOKUP_LIMIT,
+
+  const dispatcherInputs = deps.pageContext
+    ? deps.pageContext.getContext({
+        url: input.url ?? null,
+        pageRole: input.pageRole ?? null,
+      })
+    : null;
+
+  let experienceCatalog: ChooseContextFacts['experienceCatalog'];
+  let blockedExperienceCatalog: ChooseContextFacts['blockedExperienceCatalog'];
+  let experienceReuseBlockedBy: TabrixChooseContextReuseBlockedBy | undefined;
+  if (!currentContextRestricted && deps.experienceRecipes && siteFamily) {
+    const reusableRecipes = deps.experienceRecipes.findReusableByContext({
+      siteFamily,
+      pageRole: input.pageRole ?? null,
+      limit: 1,
     });
-    const ranking = rankExperienceCandidates({
-      rows,
-      capabilityEnabled: isCapabilityEnabled('experience_replay', deps.capabilityEnv),
-      nowIso,
-      pageRole: input.pageRole,
-    });
-    if (ranking.ranked.length > 0) {
-      rankedReplayCandidates = ranking.ranked;
-      rankedTopBlockedBy = ranking.topBlockedBy;
+    if (reusableRecipes.length > 0 && reusableRecipes[0]) {
+      const catalog = buildExperienceCatalog(reusableRecipes[0]);
+      if (isCurrentPageValidatedForExperience(dispatcherInputs)) {
+        experienceCatalog = catalog;
+      } else {
+        blockedExperienceCatalog = catalog;
+        experienceReuseBlockedBy = 'current_page_validation_required';
+      }
     }
-    experienceHit = projectExperienceHit(ranking.topRow, ranking.topReplayEligible);
   }
 
   let knowledgeCatalog: ChooseContextFacts['knowledgeCatalog'];
-  const apiCandidate = isCapabilityEnabled('api_knowledge', deps.capabilityEnv)
-    ? resolveApiKnowledgeCandidate({
+  let knowledgeModelArtifact: ChooseContextFacts['knowledgeModelArtifact'];
+  if (!currentContextRestricted && deps.knowledgeModels && siteFamily) {
+    const pageModelKey = buildChooseContextPageModelKey({
+      siteFamily,
+      pageRole: input.pageRole ?? null,
+    });
+    if (pageModelKey) {
+      const model = deps.knowledgeModels.findLatestByPage({
+        siteFamily,
+        pageModelKey,
+      });
+      if (model) knowledgeModelArtifact = buildKnowledgeModelArtifact(model);
+    }
+  }
+  const apiCandidate = currentContextRestricted
+    ? null
+    : resolveApiKnowledgeCandidate({
         intent: input.intent,
         url: input.url,
         pageRole: input.pageRole,
-      })
-    : null;
-  // Only consult Knowledge when (a) no experience hit, (b) a recognised
-  // site family is in scope, (c) the api_knowledge capability is on,
-  // and (d) the repo handle exists. Each of these gates is a real
-  // failure mode of the v1 surface, not a paranoia check.
-  if (!experienceHit && siteFamily === 'github' && deps.knowledgeApi) {
-    if (isCapabilityEnabled('api_knowledge', deps.capabilityEnv)) {
-      // Site-family → site mapping is exact: the GitHub capture seed
-      // uses `api.github.com`. Widening this requires touching the
-      // capture seed in lockstep — see
-      // `app/native-server/src/memory/knowledge/api-knowledge-capture.ts`.
-      const site = 'api.github.com';
+      });
+  if (!currentContextRestricted && deps.knowledgeApi) {
+    const site = apiCandidate?.endpointFamily ?? siteFamily;
+    if (site) {
       const rows =
         typeof deps.knowledgeApi.listScoredBySite === 'function'
           ? deps.knowledgeApi
@@ -757,20 +777,16 @@ export function runTabrixChooseContext(
               .filter((row) => row.usableForTask)
           : deps.knowledgeApi.listBySite(site, KNOWLEDGE_LIGHT_SAMPLE_LIMIT);
       if (rows.length > 0) {
-        // We intentionally use the capped `listBySite` result count as
-        // `totalEndpoints`. A precise total would require either a
-        // dedicated SELECT COUNT or another method on the repo; the
-        // cap-bounded number is enough to prove the catalog is non-empty
-        // without adding a new repository surface.
         knowledgeCatalog = {
           site,
           totalEndpoints: rows.length,
           sampleSignatures: rows.map((r) => r.endpointSignature),
+          selectedEndpointRef: rows[0]?.endpointId ?? null,
         };
       }
     }
   }
-  if (!experienceHit && !knowledgeCatalog && apiCandidate) {
+  if (!knowledgeCatalog && apiCandidate) {
     knowledgeCatalog = {
       site: apiCandidate.endpointFamily,
       totalEndpoints: 1,
@@ -782,10 +798,11 @@ export function runTabrixChooseContext(
     intentSignature,
     pageRole: input.pageRole,
     siteFamily,
-    experienceHit,
+    experienceCatalog,
+    blockedExperienceCatalog,
+    experienceReuseBlockedBy,
+    knowledgeModelArtifact,
     knowledgeCatalog,
-    rankedReplayCandidates,
-    rankedTopBlockedBy,
   });
 
   // Layer dispatcher — runs once per chooser decision after the
@@ -795,21 +812,16 @@ export function runTabrixChooseContext(
   //
   // Honest dispatcher inputs. When the caller wired a
   // `PageContextProvider`, the dispatcher receives real
-  // candidateActions / HVO counts + fullReadByteLength drawn from the
-  // most recent matching `memory_page_snapshots` row instead of
-  // hard-coded zeros. The provider call itself is read-only and never
-  // throws (it returns a `fallback_zero` shape on any error) so the
+  // candidateActions / HVO counts + fullReadByteLength from that provider
+  // instead of hard-coded zeros. The provider call itself is read-only and
+  // never throws (it returns a `fallback_zero` shape on any error) so the
   // chooser hot-path stays safe. When the provider is absent (test stubs
-  // / persistence off / legacy callers) we keep the historical
+  // / no live context) we keep the historical
   // zero-input behaviour bit-for-bit and leave `dispatcherInputSource` /
   // `fallbackCauseV26` `null` in telemetry.
   const intentHint = classifyIntentForLayerDispatch(input.intent);
-  const dispatcherInputs = deps.pageContext
-    ? deps.pageContext.getContext({
-        url: input.url ?? null,
-        pageRole: input.pageRole ?? null,
-      })
-    : null;
+  const observedKnowledgeReadIntent =
+    !!knowledgeCatalog && !apiCandidate && isObservedKnowledgeReadIntent(input.intent);
   const layerDispatch = dispatchLayer({
     pageRole: input.pageRole ?? null,
     userIntent: intentHint,
@@ -817,32 +829,39 @@ export function runTabrixChooseContext(
     candidateActionsCount: dispatcherInputs?.candidateActionsCount ?? 0,
     hvoCount: dispatcherInputs?.hvoCount ?? 0,
     knowledgeAvailable: !!knowledgeCatalog && knowledgeCatalog.totalEndpoints > 0,
-    searchListIntent: !!apiCandidate,
-    experienceReplayAvailable: decision.strategy === 'experience_replay',
+    searchListIntent: !!apiCandidate || observedKnowledgeReadIntent,
     safetyRequiresFullLayers: false,
     fullReadByteLength: dispatcherInputs?.fullReadByteLength ?? 0,
   });
-  const tokensSavedEstimate = Math.max(
-    0,
-    layerDispatch.fullReadTokenEstimate - layerDispatch.tokenEstimate,
-  );
+  const experienceTokenEstimate =
+    decision.strategy === 'experience_reuse'
+      ? estimateTokensFromJsonEnvelope(decision.artifacts)
+      : null;
+  const tokenEstimateChosen = experienceTokenEstimate ?? layerDispatch.tokenEstimate;
+  const tokenEstimateFullRead = layerDispatch.fullReadTokenEstimate;
+  const tokensSavedEstimate =
+    tokenEstimateFullRead > 0 ? Math.max(0, tokenEstimateFullRead - tokenEstimateChosen) : 0;
+  const effectiveSourceRoute =
+    decision.strategy === 'experience_reuse' ? 'experience_reuse' : layerDispatch.sourceRoute;
   const domRegionRowsEvidence = deps.domRegionRowsEvidence ?? null;
   const routerDecision = routeDataSource({
     strategy: decision.strategy,
-    sourceRoute: layerDispatch.sourceRoute,
+    sourceRoute: effectiveSourceRoute,
     chosenLayer: layerDispatch.chosenLayer,
     layerDispatchReason: layerDispatch.reason,
-    tokenEstimateChosen: layerDispatch.tokenEstimate,
-    tokenEstimateFullRead: layerDispatch.fullReadTokenEstimate,
+    tokenEstimateChosen,
+    tokenEstimateFullRead,
     tokensSavedEstimate,
     apiCandidateAvailable: !!apiCandidate,
     dispatcherInputSource: dispatcherInputs?.source ?? null,
     taskIntent: domRegionRowsEvidence ? mapIntentHintToRouterTaskIntent(intentHint) : undefined,
-    readinessVerdict: domRegionRowsEvidence ? 'ready' : undefined,
+    factSnapshotVerdict:
+      dispatcherInputs?.factSnapshotVerdict ?? (domRegionRowsEvidence ? 'fresh' : undefined),
+    readinessVerdict:
+      dispatcherInputs?.readinessVerdict ?? (domRegionRowsEvidence ? 'ready' : undefined),
     domRegionRowsEvidence,
   });
-  const knowledgeEndpointFamily =
-    siteFamily === 'github' && knowledgeCatalog ? 'github.api.github.com' : null;
+  const knowledgeEndpointFamily = knowledgeCatalog?.site ?? null;
 
   // Observe-mode advisory. Derived from the same Knowledge signals the
   // layer dispatcher already saw, so the chooser surface stays a single
@@ -851,7 +870,8 @@ export function runTabrixChooseContext(
   //      asked for a learning pass; we honour that even when Knowledge
   //      would have answered, because the point of the run is to grow
   //      the catalog.
-  //   2. High-confidence Knowledge candidate (`apiCandidate`) →
+  //   2. High-confidence Knowledge candidate (legacy compatibility) or an
+  //      observed Knowledge read intent →
   //      `disabled` / `not_needed`. The capture round-trip would be
   //      pure waste.
   //   3. Knowledge has rows but no usable candidate
@@ -869,7 +889,7 @@ export function runTabrixChooseContext(
   if (deps.learningModeRequested === true) {
     observeMode = 'foreground';
     observeReason = 'learning_requested';
-  } else if (apiCandidate) {
+  } else if (apiCandidate || observedKnowledgeReadIntent) {
     observeMode = 'disabled';
     observeReason = 'not_needed';
   } else if (knowledgeCatalog) {
@@ -895,6 +915,10 @@ export function runTabrixChooseContext(
   if (deps.telemetry) {
     const newId = deps.newDecisionId ?? randomUUID;
     const candidateId = newId();
+    const selectedArtifacts = buildSelectedArtifactAudit(decision.artifacts, decision.strategy, {
+      siteFamily: siteFamily ?? null,
+      pageRole: input.pageRole ?? null,
+    });
     try {
       deps.telemetry.recordDecision({
         decisionId: candidateId,
@@ -907,16 +931,12 @@ export function runTabrixChooseContext(
         // Layer-dispatch telemetry
         chosenLayer: layerDispatch.chosenLayer,
         layerDispatchReason: layerDispatch.reason,
-        sourceRoute: layerDispatch.sourceRoute,
+        sourceRoute: effectiveSourceRoute,
         fallbackCause: layerDispatch.fallbackCause ?? null,
-        tokenEstimateChosen: layerDispatch.tokenEstimate,
-        tokenEstimateFullRead: layerDispatch.fullReadTokenEstimate,
+        tokenEstimateChosen,
+        tokenEstimateFullRead,
         tokensSavedEstimate,
         knowledgeEndpointFamily,
-        // Ranked-replay audit fields
-        rankedCandidateCount: decision.rankedCandidateCount ?? null,
-        replayEligibleBlockedBy: decision.replayEligibleBlockedBy ?? null,
-        replayFallbackDepth: decision.replayFallbackDepth ?? null,
         // Honest dispatcher input source. `null` when no `pageContext`
         // provider was wired (preserves the legacy null-everywhere
         // telemetry shape for callers and tests). Otherwise records the
@@ -927,13 +947,11 @@ export function runTabrixChooseContext(
           dispatcherInputs && dispatcherInputs.source === 'fallback_zero'
             ? (dispatcherInputs.fallbackCause ?? null)
             : null,
+        ...(selectedArtifacts ? { selectedArtifacts } : {}),
       });
       decisionId = candidateId;
     } catch (error) {
-      // Same swallow-and-warn pattern as other Memory writes
-      // (`PageSnapshotService` etc.). The chooser surface is
-      // user-facing; telemetry breakage must not break the user-facing
-      // call.
+      // Telemetry breakage must not break the user-facing chooser call.
       const message = error instanceof Error ? error.message : String(error);
       chooseContextLogger.warn('telemetry recordDecision failed', { errorMessage: message });
     }
@@ -945,25 +963,22 @@ export function runTabrixChooseContext(
     fallbackStrategy: decision.fallbackStrategy,
     reasoning: decision.reasoning,
     artifacts: decision.artifacts,
+    reuseBlockedBy: decision.reuseBlockedBy,
     resolved: {
       intentSignature,
       pageRole: input.pageRole,
       siteFamily,
     },
     decisionId,
-    rankedCandidateCount: decision.rankedCandidateCount,
-    replayEligibleBlockedBy: decision.replayEligibleBlockedBy,
-    replayFallbackDepth: decision.replayFallbackDepth,
     // Layer-dispatch fields. Always present; safe defaults so older
     // callers still type-check.
     chosenLayer: layerDispatch.chosenLayer,
     layerDispatchReason: layerDispatch.reason,
-    sourceRoute: layerDispatch.sourceRoute,
+    sourceRoute: effectiveSourceRoute,
     fallbackCause: layerDispatch.fallbackCause ?? undefined,
-    tokenEstimateChosen: layerDispatch.tokenEstimate,
-    tokenEstimateFullRead: layerDispatch.fullReadTokenEstimate,
+    tokenEstimateChosen,
+    tokenEstimateFullRead,
     tokensSavedEstimate,
-    readPageAvoided: layerDispatch.sourceRoute === 'experience_replay_skip_read',
     // Observe-mode advisory (closed enum). Always present on
     // `status: 'ok'` so post-mortems can tally
     // `foregroundNetworkCaptureCount` deterministically.
@@ -977,6 +992,8 @@ export function runTabrixChooseContext(
     fallbackPlan: routerDecision.fallbackPlan,
     dispatcherInputSource: routerDecision.dispatcherInputSource,
     costEstimate: routerDecision.costEstimate,
+    factSnapshotVerdict: routerDecision.factSnapshotVerdict,
+    readinessVerdict: routerDecision.readinessVerdict,
   };
   return result;
 }
@@ -1063,6 +1080,12 @@ function parseRecordOutcomeInput(rawArgs: unknown): ParsedRecordOutcomeInput {
 
 export interface RunTabrixChooseContextRecordOutcomeDeps {
   telemetry: ChooseContextTelemetryRepository | null;
+  recordSelectedArtifactOutcome?: (input: {
+    successful: boolean;
+    adopted: boolean;
+    selectedArtifacts: SelectedChooseContextArtifactAudit[];
+    recordedAt: string;
+  }) => void;
   now?: () => string;
 }
 
@@ -1072,6 +1095,7 @@ export interface RunTabrixChooseContextRecordOutcomeDeps {
  *   - `'invalid_input'` for malformed args (input type or value)
  *   - `'unknown_decision'` for valid args whose decisionId we don't
  *     have a row for (telemetry off / decision pruned / id typo)
+ *   - `'write_failed'` when the atomic outcome/library update failed
  *   - `'ok'` after a successful append
  *
  * The handler in `native-tool-handlers.ts` maps `'invalid_input'`
@@ -1109,24 +1133,38 @@ export function runTabrixChooseContextRecordOutcome(
   }
 
   const now = deps.now ?? (() => new Date().toISOString());
+  const recordedAt = now();
   let result;
   try {
-    result = deps.telemetry.recordOutcome({
-      decisionId: parsed.decisionId,
-      outcome: parsed.outcome,
-      recordedAt: now(),
-    });
+    result = deps.telemetry.recordOutcome(
+      {
+        decisionId: parsed.decisionId,
+        outcome: parsed.outcome,
+        recordedAt,
+      },
+      deps.recordSelectedArtifactOutcome
+        ? (artifactUsage) =>
+            deps.recordSelectedArtifactOutcome?.({
+              ...artifactUsage,
+              recordedAt,
+            })
+        : undefined,
+    );
   } catch (error) {
-    // Same swallow-and-warn discipline as the chooser: telemetry
-    // breakage MUST NOT escalate to a tool error. We surface
-    // `unknown_decision` so the caller does not retry forever and the
-    // failure is visible in the warning log.
+    // Keep the failure structured and redact implementation details. It
+    // must not be confused with an actually missing decision because the
+    // atomic transaction can be retried safely.
     const message = error instanceof Error ? error.message : String(error);
     chooseContextLogger.warn('telemetry recordOutcome failed', { errorMessage: message });
     return {
-      status: 'unknown_decision',
+      status: 'write_failed',
       decisionId: parsed.decisionId,
       outcome: parsed.outcome,
+      error: {
+        code: 'outcome_write_failed',
+        message:
+          'The outcome and selected-artifact usage were not recorded; retry this write-back.',
+      },
     };
   }
 
@@ -1213,13 +1251,27 @@ export async function runTabrixChooseContextWithDirectApi(
     return result;
   }
 
-  const candidate = isCapabilityEnabled('api_knowledge', deps.capabilityEnv)
-    ? resolveApiKnowledgeCandidate({
-        intent: parsed.input.intent,
-        url: parsed.input.url,
-        pageRole: parsed.input.pageRole,
+  const currentPageContext = deps.pageContext
+    ? deps.pageContext.getContext({
+        url: parsed.input.url ?? null,
+        pageRole: parsed.input.pageRole ?? null,
       })
     : null;
+  if (
+    currentPageContext?.factSnapshotVerdict !== 'fresh' ||
+    !(
+      currentPageContext.readinessVerdict === 'ready' ||
+      currentPageContext.readinessVerdict === 'empty'
+    )
+  ) {
+    return result;
+  }
+
+  const candidate = resolveApiKnowledgeCandidate({
+    intent: parsed.input.intent,
+    url: parsed.input.url,
+    pageRole: parsed.input.pageRole,
+  });
 
   // Derive the read-only gate from the layer-dispatch outcome rather
   // than re-classifying the raw user intent. Rationale:
@@ -1242,9 +1294,7 @@ export async function runTabrixChooseContextWithDirectApi(
   // `listScoredBySite` (older test seams may inject only `listBySite`),
   // which keeps the candidate-only path bit-identical for those callers.
   const knowledgeRepo: EndpointKnowledgeReader | undefined =
-    isCapabilityEnabled('api_knowledge', deps.capabilityEnv) &&
-    deps.knowledgeApi &&
-    typeof deps.knowledgeApi.listScoredBySite === 'function'
+    deps.knowledgeApi && typeof deps.knowledgeApi.listScoredBySite === 'function'
       ? (deps.knowledgeApi as EndpointKnowledgeReader)
       : undefined;
   const dataNeed: DataNeed | undefined = knowledgeRepo

@@ -24,7 +24,78 @@ describe('non-web tab guards', () => {
     expect(result.isError).toBe(false);
     expect(payload.reason).toBe('unsupported_page_type');
     expect(payload.pageType).toBe('extension_page');
+    expect(payload.canTabrixOperate).toBe(false);
+    expect(payload.operabilityReason).toBe('non_web_tab');
+    expect(payload.pageContext).toMatchObject({
+      canTabrixOperate: false,
+      operabilityReason: 'non_web_tab',
+      unsupportedPageType: 'non_web_tab',
+    });
     expect(payload.recommendedAction).toBe('switch_to_http_tab');
+    expect(injectSpy).not.toHaveBeenCalled();
+  });
+
+  it('returns a cannot-operate response for chrome_read_page on Chrome Web Store pages', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 3113,
+      title: 'Tabrix - Chrome Web Store',
+      url: 'https://chromewebstore.google.com/detail/tabrix/example-extension-id',
+    });
+    const injectSpy = vi
+      .spyOn(readPageTool as any, 'injectContentScript')
+      .mockResolvedValue(undefined);
+
+    const result = await readPageTool.execute({ tabId: 3113 });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    expect(payload).toMatchObject({
+      success: false,
+      reason: 'unsupported_page_type',
+      pageType: 'unsupported_page',
+      scheme: 'https',
+      unsupportedPageType: 'browser_extension_store',
+      canTabrixOperate: false,
+      operabilityReason: 'browser_extension_store',
+      recommendedAction: 'switch_to_http_tab',
+    });
+    expect(payload.pageContext).toMatchObject({
+      canTabrixOperate: false,
+      operabilityReason: 'browser_extension_store',
+      unsupportedPageType: 'browser_extension_store',
+    });
+    expect(injectSpy).not.toHaveBeenCalled();
+  });
+
+  it('returns a cannot-operate response for chrome_read_page on PDF document URLs', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 3114,
+      title: 'report.pdf',
+      url: 'https://example.test/downloads/report.pdf?download=false',
+    });
+    const injectSpy = vi
+      .spyOn(readPageTool as any, 'injectContentScript')
+      .mockResolvedValue(undefined);
+
+    const result = await readPageTool.execute({ tabId: 3114 });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    expect(payload).toMatchObject({
+      success: false,
+      reason: 'unsupported_page_type',
+      pageType: 'unsupported_page',
+      scheme: 'https',
+      unsupportedPageType: 'pdf_document',
+      canTabrixOperate: false,
+      operabilityReason: 'pdf_document',
+      recommendedAction: 'switch_to_http_tab',
+    });
+    expect(payload.pageContext).toMatchObject({
+      canTabrixOperate: false,
+      operabilityReason: 'pdf_document',
+      unsupportedPageType: 'pdf_document',
+    });
     expect(injectSpy).not.toHaveBeenCalled();
   });
 
@@ -87,11 +158,254 @@ describe('non-web tab guards', () => {
     expect(injectSpy).not.toHaveBeenCalled();
   });
 
+  it.each([
+    { tabId: 3115, title: 'Extensions', url: 'chrome://extensions/', scheme: 'chrome' },
+    { tabId: 3116, title: 'Downloads', url: 'edge://downloads/', scheme: 'edge' },
+    { tabId: 3117, title: 'Blank', url: 'about:blank', scheme: 'about' },
+  ])(
+    'returns a cannot-operate response for chrome_read_page on $url',
+    async ({ tabId, title, url, scheme }) => {
+      vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+        id: tabId,
+        title,
+        url,
+      });
+      const injectSpy = vi
+        .spyOn(readPageTool as any, 'injectContentScript')
+        .mockResolvedValue(undefined);
+
+      const result = await readPageTool.execute({ tabId });
+      const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+      expect(result.isError).toBe(false);
+      expect(payload).toMatchObject({
+        success: false,
+        reason: 'unsupported_page_type',
+        pageType: 'browser_internal_page',
+        scheme,
+        unsupportedPageType: 'non_web_tab',
+        canTabrixOperate: false,
+        operabilityReason: 'non_web_tab',
+      });
+      expect(payload.pageContext).toMatchObject({
+        canTabrixOperate: false,
+        operabilityReason: 'non_web_tab',
+      });
+      expect(injectSpy).not.toHaveBeenCalled();
+    },
+  );
+
+  it('waits for explicit pending http tabs before applying the non-web guard', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 3108,
+      title: '',
+      url: '',
+      pendingUrl: 'https://code.example/search?q=ACP&type=repositories&s=stars&o=desc',
+    });
+    const waitSpy = vi.spyOn(readPageTool as any, 'waitForTabSettled').mockResolvedValue({
+      tab: {
+        id: 3108,
+        title: 'Search · ACP · WorkspaceHost',
+        url: 'https://code.example/search?q=ACP&type=repositories&s=stars&o=desc',
+        status: 'complete',
+      },
+      settled: true,
+      timedOut: false,
+      reason: 'complete',
+      waitedMs: 120,
+      readyState: 'complete',
+    });
+    const injectSpy = vi
+      .spyOn(readPageTool as any, 'injectContentScript')
+      .mockResolvedValue(undefined);
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: [
+        'Link "repo-one/acp"',
+        'Link "repo-two/mcp-agent"',
+        'Text "Repository results sorted by stars"',
+      ].join('\n'),
+      refMap: [
+        { ref: 'ref_1', role: 'link', name: 'repo-one/acp' },
+        { ref: 'ref_2', role: 'link', name: 'repo-two/mcp-agent' },
+        { ref: 'ref_3', role: 'text', name: 'Repository results sorted by stars' },
+      ],
+      viewport: { width: 1280, height: 720, dpr: 1 },
+      stats: { processed: 3, included: 3, durationMs: 1 },
+    });
+
+    const result = await readPageTool.execute({ tabId: 3108 });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    expect(waitSpy).toHaveBeenCalledWith(3108, { timeoutMs: 5000 });
+    expect(injectSpy).toHaveBeenCalled();
+    expect(payload.reason).not.toBe('unsupported_page_type');
+    expect(payload.page.url).toBe(
+      'https://code.example/search?q=ACP&type=repositories&s=stars&o=desc',
+    );
+  });
+
+  it('waits for explicit loading http tabs before injecting read_page helpers', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 3109,
+      title: 'Search · ACP · WorkspaceHost',
+      url: 'https://code.example/search?q=ACP&type=repositories&s=stars&o=desc',
+      status: 'loading',
+    });
+    const waitSpy = vi.spyOn(readPageTool as any, 'waitForTabSettled').mockResolvedValue({
+      tab: {
+        id: 3109,
+        title: 'Search · ACP · WorkspaceHost',
+        url: 'https://code.example/search?q=ACP&type=repositories&s=stars&o=desc',
+        status: 'complete',
+      },
+      settled: true,
+      timedOut: false,
+      reason: 'complete',
+      waitedMs: 120,
+      readyState: 'complete',
+    });
+    const injectSpy = vi
+      .spyOn(readPageTool as any, 'injectContentScript')
+      .mockResolvedValue(undefined);
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: [
+        'Link "repo-one/acp"',
+        'Link "repo-two/mcp-agent"',
+        'Text "Repository results sorted by stars"',
+      ].join('\n'),
+      refMap: [
+        { ref: 'ref_1', role: 'link', name: 'repo-one/acp' },
+        { ref: 'ref_2', role: 'link', name: 'repo-two/mcp-agent' },
+        { ref: 'ref_3', role: 'text', name: 'Repository results sorted by stars' },
+      ],
+      viewport: { width: 1280, height: 720, dpr: 1 },
+      stats: { processed: 3, included: 3, durationMs: 1 },
+    });
+
+    const result = await readPageTool.execute({ tabId: 3109 });
+
+    expect(result.isError).toBe(false);
+    expect(waitSpy).toHaveBeenCalledWith(3109, { timeoutMs: 5000 });
+    expect(injectSpy).toHaveBeenCalled();
+  });
+
+  it('reinjects the read_page helper when the first content message has no receiver', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 3110,
+      title: 'Search · ACP · WorkspaceHost',
+      url: 'https://code.example/search?q=ACP&type=repositories&s=stars&o=desc',
+      status: 'complete',
+    });
+    const injectSpy = vi
+      .spyOn(readPageTool as any, 'injectContentScript')
+      .mockResolvedValue(undefined);
+    vi.spyOn(readPageTool as any, 'collectInteractiveElementsFallback').mockResolvedValue(null);
+    const sendMessageSpy = vi
+      .spyOn(readPageTool as any, 'sendMessageToTab')
+      .mockRejectedValueOnce(
+        new Error('Could not establish connection. Receiving end does not exist.'),
+      )
+      .mockResolvedValueOnce({
+        success: true,
+        pageContent: [
+          'Link "repo-one/acp"',
+          'Link "repo-two/mcp-agent"',
+          'Text "Repository results sorted by stars"',
+        ].join('\n'),
+        refMap: [
+          { ref: 'ref_1', role: 'link', name: 'repo-one/acp' },
+          { ref: 'ref_2', role: 'link', name: 'repo-two/mcp-agent' },
+          { ref: 'ref_3', role: 'text', name: 'Repository results sorted by stars' },
+        ],
+        viewport: { width: 1280, height: 720, dpr: 1 },
+        stats: { processed: 3, included: 3, durationMs: 1 },
+      });
+
+    const result = await readPageTool.execute({ tabId: 3110 });
+
+    expect(result.isError).toBe(false);
+    expect(injectSpy).toHaveBeenCalledTimes(2);
+    expect(sendMessageSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('waits for explicit loading http tabs before filling form controls', async () => {
+    vi.spyOn(fillTool as any, 'tryGetTab').mockResolvedValue({
+      id: 3111,
+      title: 'All | Search powered by Algolia',
+      url: 'https://hn.algolia.com/?q=browser%20automation',
+      status: 'loading',
+    });
+    const waitSpy = vi.spyOn(fillTool as any, 'waitForTabSettled').mockResolvedValue({
+      tab: {
+        id: 3111,
+        title: 'All | Search powered by Algolia',
+        url: 'https://hn.algolia.com/?q=browser%20automation',
+        status: 'complete',
+      },
+      settled: true,
+      timedOut: false,
+      reason: 'complete',
+      waitedMs: 120,
+      readyState: 'complete',
+    });
+    const injectSpy = vi.spyOn(fillTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(fillTool as any, 'sendMessageToTab').mockResolvedValue({
+      message: 'Fill operation successful',
+      elementInfo: { tagName: 'INPUT' },
+    });
+
+    const result = await fillTool.execute({
+      tabId: 3111,
+      selector: 'input[type="search"]',
+      value: 'playwright automation',
+    });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    expect(waitSpy).toHaveBeenCalledWith(3111, { timeoutMs: 5000 });
+    expect(injectSpy).toHaveBeenCalled();
+    expect(payload.success).toBe(true);
+  });
+
+  it('reinjects the fill helper when the first content message has no receiver', async () => {
+    vi.spyOn(fillTool as any, 'tryGetTab').mockResolvedValue({
+      id: 3112,
+      title: 'All | Search powered by Algolia',
+      url: 'https://hn.algolia.com/?q=browser%20automation',
+      status: 'complete',
+    });
+    const injectSpy = vi.spyOn(fillTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    const sendMessageSpy = vi
+      .spyOn(fillTool as any, 'sendMessageToTab')
+      .mockRejectedValueOnce(
+        new Error('Could not establish connection. Receiving end does not exist.'),
+      )
+      .mockResolvedValueOnce({
+        message: 'Fill operation successful',
+        elementInfo: { tagName: 'INPUT' },
+      });
+
+    const result = await fillTool.execute({
+      tabId: 3112,
+      selector: 'input[type="search"]',
+      value: 'playwright automation',
+    });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    expect(injectSpy).toHaveBeenCalledTimes(2);
+    expect(sendMessageSpy).toHaveBeenCalledTimes(2);
+    expect(payload.success).toBe(true);
+  });
+
   it('returns a structured page_unreadable response when read_page injection hits an error page', async () => {
     vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
       id: 3106,
-      title: 'github.com',
-      url: 'https://github.com/search?q=ACP&type=repositories&s=stars&o=desc',
+      title: 'code.example',
+      url: 'https://code.example/search?q=ACP&type=repositories&s=stars&o=desc',
     });
     vi.spyOn(readPageTool as any, 'injectContentScript').mockRejectedValue(
       new Error(
@@ -116,8 +430,8 @@ describe('non-web tab guards', () => {
   it('returns a structured page_unreadable response when web content injection hits an error page', async () => {
     vi.mocked(chrome.tabs.get).mockResolvedValue({
       id: 3107,
-      title: 'github.com',
-      url: 'https://github.com/search?q=ACP&type=repositories&s=stars&o=desc',
+      title: 'code.example',
+      url: 'https://code.example/search?q=ACP&type=repositories&s=stars&o=desc',
     } as chrome.tabs.Tab);
     vi.spyOn(webFetcherTool as any, 'injectContentScript').mockRejectedValue(
       new Error(

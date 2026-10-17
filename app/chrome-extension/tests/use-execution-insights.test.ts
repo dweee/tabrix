@@ -70,7 +70,6 @@ function emptyReliability(): ExecutionReliabilitySignalSummary {
     fallbackSafeRate: 0,
     sourceRouteCounts: {
       read_page_required: 0,
-      experience_replay_skip_read: 0,
       knowledge_supported_read: 0,
       dispatcher_fallback_safe: 0,
       unknown: 0,
@@ -146,12 +145,12 @@ describe('useExecutionInsights', () => {
                 createdAt: '2026-04-23T00:00:00Z',
                 intentSignature: 'list_user_repositories',
                 pageRole: 'list',
-                siteFamily: 'github',
-                strategy: 'experience_replay',
+                siteFamily: 'workspace',
+                strategy: 'knowledge_light',
                 fallbackStrategy: null,
                 chosenLayer: 'L0',
-                layerDispatchReason: 'experience_replay_can_execute',
-                sourceRoute: 'experience_replay_skip_read',
+                layerDispatchReason: 'knowledge_light_read_only',
+                sourceRoute: 'knowledge_supported_read',
                 fallbackCause: null,
                 tokensSavedEstimate: 1234,
               },
@@ -164,11 +163,7 @@ describe('useExecutionInsights', () => {
             decisionCount: 1,
             tokensSavedEstimateSum: 1234,
             layerCounts: { L0: 1, 'L0+L1': 0, 'L0+L1+L2': 0, unknown: 0 },
-            lastReplay: {
-              decisionId: 'd-1',
-              createdAt: '2026-04-23T00:00:00Z',
-              outcome: 'reuse',
-            },
+            lastReplay: null,
             persistenceMode: 'disk',
           },
           paths: {
@@ -176,10 +171,10 @@ describe('useExecutionInsights', () => {
               {
                 intentSignature: 'list_user_repositories',
                 pageRole: 'list',
-                siteFamily: 'github',
+                siteFamily: 'workspace',
                 decisionCount: 1,
                 lastSeenAt: '2026-04-23T00:00:00Z',
-                topStrategy: 'experience_replay',
+                topStrategy: 'knowledge_light',
               },
             ],
             limit: 5,
@@ -191,8 +186,7 @@ describe('useExecutionInsights', () => {
             fallbackSafeRate: 0,
             sourceRouteCounts: {
               read_page_required: 0,
-              experience_replay_skip_read: 1,
-              knowledge_supported_read: 0,
+              knowledge_supported_read: 1,
               dispatcher_fallback_safe: 0,
               unknown: 0,
             },
@@ -211,7 +205,7 @@ describe('useExecutionInsights', () => {
     expect(api.recent.value?.decisions[0].chosenLayer).toBe('L0');
     expect(api.savings.value?.decisionCount).toBe(1);
     expect(api.topPaths.value?.paths[0].intentSignature).toBe('list_user_repositories');
-    expect(api.reliability.value?.sourceRouteCounts.experience_replay_skip_read).toBe(1);
+    expect(api.reliability.value?.sourceRouteCounts.knowledge_supported_read).toBe(1);
   });
 
   it('reflects a fallback-heavy snapshot with non-zero fallbackSafeRate', async () => {
@@ -224,12 +218,11 @@ describe('useExecutionInsights', () => {
             fallbackSafeRate: 0.25,
             sourceRouteCounts: {
               read_page_required: 1,
-              experience_replay_skip_read: 0,
               knowledge_supported_read: 2,
               dispatcher_fallback_safe: 1,
               unknown: 0,
             },
-            replayBlockedByCounts: { stale_anchor: 1, hot_path_changed: 2 },
+            replayBlockedByCounts: {},
             persistenceMode: 'disk',
           },
         }),
@@ -240,7 +233,7 @@ describe('useExecutionInsights', () => {
     await api.load();
 
     expect(api.reliability.value?.fallbackSafeRate).toBeCloseTo(0.25);
-    expect(api.reliability.value?.replayBlockedByCounts.hot_path_changed).toBe(2);
+    expect(api.reliability.value?.replayBlockedByCounts).toEqual({});
   });
 
   it('marks status=error when a route fails', async () => {

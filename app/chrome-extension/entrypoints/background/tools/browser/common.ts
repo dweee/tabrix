@@ -1,11 +1,71 @@
 import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from '@tabrix/shared';
-import { captureFrameOnAction, isAutoCaptureActive } from './gif-recorder';
+import { captureFrameOnAction, isAutoCaptureActive } from './gif-auto-capture';
+import {
+  claimBrowserWorldTabForAiRun,
+  markBrowserWorldTabAiCreated,
+  markBrowserWorldTabAiOperated,
+} from '../../browser-world-inventory';
+import { preflightCloseTabs, type CloseTabsPreflightEvidence } from './close-tabs-preflight';
+import { recordPendingActionBinding } from './read-page-object-delta';
+import { cdpSessionManager } from '@/utils/cdp-session-manager';
 
 // Default window dimensions
 const DEFAULT_WINDOW_WIDTH = 1280;
 const DEFAULT_WINDOW_HEIGHT = 720;
+const NAVIGATE_CREATE_TAB_TIMEOUT_MS = 5000;
+const SWITCH_TAB_FOREGROUND_CDP_OWNER = 'switch-tab-foreground-recovery';
+
+type CdpForegroundRecovery = {
+  attempted: boolean;
+  succeeded: boolean;
+  methodsAttempted: string[];
+  methodsSucceeded: string[];
+  errors: string[];
+};
+
+async function tryBringPageToFrontWithCdp(tabId: number): Promise<CdpForegroundRecovery> {
+  const methodsAttempted = [
+    'Page.bringToFront',
+    'Emulation.setFocusEmulationEnabled',
+    'Page.setWebLifecycleState',
+  ];
+  const methodsSucceeded: string[] = [];
+  const errors: string[] = [];
+  await cdpSessionManager
+    .withSession(tabId, SWITCH_TAB_FOREGROUND_CDP_OWNER, async () => {
+      const commands: Array<{ method: string; params?: Record<string, unknown> }> = [
+        { method: 'Page.bringToFront' },
+        { method: 'Emulation.setFocusEmulationEnabled', params: { enabled: true } },
+        { method: 'Page.setWebLifecycleState', params: { state: 'active' } },
+      ];
+      for (const command of commands) {
+        try {
+          await cdpSessionManager.sendCommand(tabId, command.method, command.params);
+          methodsSucceeded.push(command.method);
+        } catch (error) {
+          const message = (error instanceof Error ? error.message : String(error))
+            .replace(/\s+/g, ' ')
+            .slice(0, 140);
+          errors.push(`${command.method}: ${message}`);
+        }
+      }
+    })
+    .catch((error) => {
+      const message = (error instanceof Error ? error.message : String(error))
+        .replace(/\s+/g, ' ')
+        .slice(0, 140);
+      errors.push(`session: ${message}`);
+    });
+  return {
+    attempted: true,
+    succeeded: methodsSucceeded.length > 0,
+    methodsAttempted,
+    methodsSucceeded,
+    errors,
+  };
+}
 
 interface NavigateToolParams {
   url?: string;
@@ -16,6 +76,150 @@ interface NavigateToolParams {
   tabId?: number;
   windowId?: number;
   background?: boolean; // when true, do not activate tab or focus window
+  settleTimeoutMs?: number;
+}
+
+type NavigationActionKind =
+  | 'navigate'
+  | 'navigate_existing_tab'
+  | 'activate_existing_tab'
+  | 'navigate_new_tab'
+  | 'navigate_new_window_tab'
+  | 'navigate_fallback_window_tab'
+  | 'refresh'
+  | 'history';
+
+type NavigationUrlDelta = 'none' | 'hash_only' | 'same_origin' | 'cross_origin' | 'unavailable';
+
+type NavigationPostActionDelta = {
+  deltaKind: 'post_action_tool_delta';
+  actionId: string | null;
+  actionKind: NavigationActionKind;
+  tabId: number | null;
+  targetRef: null;
+  observedOutcome: string | null;
+  changed: boolean;
+  changedSignals: string[];
+  urlDelta: NavigationUrlDelta | null;
+  hashChanged: boolean | null;
+  beforeUnloadFired: null;
+  readbackStatus: string | null;
+  recommendation: string | null;
+  businessSuccessProven: false;
+  claimBoundary: string[];
+};
+
+function createNavigationActionId(actionKind: NavigationActionKind, tabId?: number | null): string {
+  return `navigate-${actionKind}-${tabId ?? 'unknown'}-${Date.now()}`;
+}
+
+function recordNavigationPendingAction(tabId: number | null | undefined, actionId: string): void {
+  if (typeof tabId !== 'number' || !Number.isFinite(tabId)) return;
+  recordPendingActionBinding(tabId, {
+    actionId,
+    targetObjectId: null,
+    targetRef: null,
+    actionIntent: 'navigation',
+  });
+}
+
+function claimBackgroundNavigationRun(
+  tabId: number | null | undefined,
+  actionId: string,
+  actionKind: NavigationActionKind,
+  background: boolean | undefined,
+): void {
+  if (background !== true) return;
+  claimBrowserWorldTabForAiRun(tabId, {
+    runId: actionId,
+    claimId: `${actionKind}_${tabId ?? 'unknown'}`,
+    operation: actionKind,
+    reason: 'background_navigation_claim',
+  });
+}
+
+function classifyNavigationUrlDelta(
+  previousUrl?: string | null,
+  finalUrl?: string | null,
+): NavigationUrlDelta {
+  if (!previousUrl || !finalUrl) return 'unavailable';
+  if (previousUrl === finalUrl) return 'none';
+  try {
+    const previous = new URL(previousUrl);
+    const final = new URL(finalUrl);
+    const previousWithoutHash = `${previous.origin}${previous.pathname}${previous.search}`;
+    const finalWithoutHash = `${final.origin}${final.pathname}${final.search}`;
+    if (previousWithoutHash === finalWithoutHash && previous.hash !== final.hash) {
+      return 'hash_only';
+    }
+    return previous.origin === final.origin ? 'same_origin' : 'cross_origin';
+  } catch {
+    return normalizeComparableUrl(previousUrl) === normalizeComparableUrl(finalUrl)
+      ? 'none'
+      : 'unavailable';
+  }
+}
+
+export function buildNavigationPostActionDelta(input: {
+  actionId?: string | null;
+  actionKind: NavigationActionKind;
+  tabId?: number | null;
+  previousUrl?: string | null;
+  finalUrl?: string | null;
+  newTabOpened?: boolean;
+  settled?: boolean | null;
+  readbackStatus?: string | null;
+}): NavigationPostActionDelta {
+  const urlDelta = classifyNavigationUrlDelta(input.previousUrl, input.finalUrl);
+  const changedSignals = [
+    input.newTabOpened ? 'new_tab_opened' : null,
+    input.actionKind === 'activate_existing_tab' ? 'tab_activated' : null,
+    input.actionKind === 'refresh' ? 'page_reloaded' : null,
+    input.actionKind === 'history' ? 'history_navigation' : null,
+    urlDelta !== 'none' && urlDelta !== 'unavailable' ? 'url_changed' : null,
+    urlDelta === 'hash_only' ? 'hash_changed' : null,
+    input.settled === false ? 'navigation_unsettled' : null,
+  ].filter((entry): entry is string => Boolean(entry));
+  const uniqueChangedSignals = [...new Set(changedSignals)];
+  const observedOutcome =
+    input.newTabOpened === true
+      ? 'new_tab_opened'
+      : input.actionKind === 'activate_existing_tab'
+        ? 'activated_existing_tab'
+        : input.actionKind === 'refresh'
+          ? 'page_reloaded'
+          : input.settled === false
+            ? 'navigation_unsettled'
+            : urlDelta !== 'none' && urlDelta !== 'unavailable'
+              ? 'url_changed'
+              : 'navigation_completed';
+
+  return {
+    deltaKind: 'post_action_tool_delta',
+    actionId: input.actionId ?? null,
+    actionKind: input.actionKind,
+    tabId: input.tabId ?? null,
+    targetRef: null,
+    observedOutcome,
+    changed: uniqueChangedSignals.length > 0,
+    changedSignals: uniqueChangedSignals,
+    urlDelta,
+    hashChanged: urlDelta === 'hash_only',
+    beforeUnloadFired: null,
+    readbackStatus:
+      input.readbackStatus ??
+      (input.settled === false ? 'navigation_unsettled' : 'fresh_read_required'),
+    recommendation:
+      input.settled === false
+        ? 'wait_or_run_chrome_read_page_force_refresh_when_document_is_reachable'
+        : 'run_chrome_read_page_force_refresh_same_tab',
+    businessSuccessProven: false,
+    claimBoundary: [
+      'This is browser-observed navigation evidence, not AI business evaluation.',
+      'No site-specific interpretation or coordinate knowledge is included.',
+      'Historical targets must be revalidated by a fresh page read before reuse.',
+    ],
+  };
 }
 
 function buildNavigationReadinessFields(input: {
@@ -31,10 +235,12 @@ function buildNavigationReadinessFields(input: {
   const staleAfterAttempt =
     previousUrl.length > 0 &&
     normalizeComparableUrl(previousUrl) === normalizeComparableUrl(finalUrl);
+  const hasReachedTargetDocument = hasDocumentUrl && !staleAfterAttempt;
+  const hasReadableReadyState =
+    input.readyState === 'interactive' || input.readyState === 'complete';
+  const hasDocumentUrlWithUnknownReadyState = hasReachedTargetDocument && input.readyState == null;
   const canAttemptStructuredRead =
-    hasDocumentUrl &&
-    !staleAfterAttempt &&
-    (input.readyState === 'interactive' || input.readyState === 'complete');
+    hasReachedTargetDocument && (hasReadableReadyState || hasDocumentUrlWithUnknownReadyState);
   const pageReadable =
     input.settled === true &&
     input.readyState === 'complete' &&
@@ -47,9 +253,76 @@ function buildNavigationReadinessFields(input: {
     nextStepHint: pageReadable
       ? 'safe_to_read_page'
       : canAttemptStructuredRead
-        ? 'navigation_interactive; structured_read_may_succeed'
+        ? hasReadableReadyState
+          ? 'navigation_interactive; structured_read_may_succeed'
+          : 'navigation_document_url_detected; structured_read_may_succeed'
         : 'navigation_not_readable; avoid chrome_read_page until navigation reaches a document',
   };
+}
+
+function getTabNavigationUrl(tab?: Pick<chrome.tabs.Tab, 'url' | 'pendingUrl'> | null): string {
+  return tab?.url || tab?.pendingUrl || '';
+}
+
+async function waitForCreatedDocumentTabAfterTimeout(input: {
+  windowId: number;
+  existingTabIds: ReadonlySet<number>;
+  targetUrl: string;
+  pickBestMatch: (target: string, tabsToPick: chrome.tabs.Tab[]) => chrome.tabs.Tab | undefined;
+}): Promise<chrome.tabs.Tab | undefined> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const tabs = await chrome.tabs.query({ windowId: input.windowId });
+    const createdDocumentTabs = tabs.filter((tab) => {
+      const tabUrl = getTabNavigationUrl(tab);
+      return (
+        typeof tab.id === 'number' &&
+        !input.existingTabIds.has(tab.id) &&
+        tabUrl &&
+        tabUrl !== 'about:blank'
+      );
+    });
+    const matched = input.pickBestMatch(input.targetUrl, createdDocumentTabs);
+    if (matched) return matched;
+    if (attempt === 0) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  }
+  return undefined;
+}
+
+function normalizeSettleTimeoutMs(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+  return Math.min(Math.max(Math.trunc(value), 1000), 60000);
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+    }
+  }
+}
+
+async function removeBlankTabIfPresent(tabId: number): Promise<boolean> {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    const url = tab.url || tab.pendingUrl || '';
+    if (url === '' || url === 'about:blank') {
+      await chrome.tabs.remove(tabId);
+      return true;
+    }
+  } catch {
+    return false;
+  }
+  return false;
 }
 
 function shouldAddWwwVariant(hostname: string): boolean {
@@ -80,6 +353,36 @@ function normalizeComparableUrl(url?: string): string {
     return `${parsed.origin}${normalizedPath}${parsed.search}`;
   } catch {
     return url.trim();
+  }
+}
+
+async function getPreferredWindowForUrl(
+  url: string,
+  candidateTabs: chrome.tabs.Tab[],
+): Promise<{ window: chrome.windows.Window | null; reason: string }> {
+  const candidateWindowId = candidateTabs.find(
+    (tab) => typeof tab.windowId === 'number' && !tab.discarded,
+  )?.windowId;
+
+  if (typeof candidateWindowId === 'number') {
+    try {
+      return {
+        window: await chrome.windows.get(candidateWindowId, { populate: false }),
+        reason: 'same_site_existing_window',
+      };
+    } catch (error) {
+      void error;
+      // Fall through to the normal last-focused window path.
+    }
+  }
+
+  try {
+    return {
+      window: await chrome.windows.getLastFocused({ populate: false }),
+      reason: 'last_focused_window',
+    };
+  } catch {
+    return { window: null, reason: 'no_window_available' };
   }
 }
 
@@ -150,7 +453,9 @@ class NavigateTool extends BaseBrowserToolExecutor {
       tabId,
       background,
       windowId,
+      settleTimeoutMs,
     } = args;
+    const settleOptions = { timeoutMs: normalizeSettleTimeoutMs(settleTimeoutMs) };
 
     console.log(
       `Attempting to ${refresh ? 'refresh current tab' : `open URL: ${url}`} with options:`,
@@ -170,6 +475,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
         const settleResult = await this.waitForTabSettled(targetTab.id, {
           previousUrl,
           requireUrlChange: false,
+          ...settleOptions,
         });
 
         console.log(`Refreshed tab ID: ${targetTab.id}`);
@@ -179,6 +485,16 @@ class NavigateTool extends BaseBrowserToolExecutor {
 
         // Trigger auto-capture on refresh
         await this.triggerAutoCapture(updatedTab.id!, updatedTab.url);
+        const actionId = createNavigationActionId('refresh', updatedTab.id);
+        recordNavigationPendingAction(updatedTab.id, actionId);
+        const postActionDelta = buildNavigationPostActionDelta({
+          actionId,
+          actionKind: 'refresh',
+          tabId: updatedTab.id,
+          previousUrl,
+          finalUrl: updatedTab.url,
+          settled: settleResult.settled,
+        });
 
         return {
           content: [
@@ -195,6 +511,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
                 settleReason: settleResult.reason,
                 waitedMs: settleResult.waitedMs,
                 readyState: settleResult.readyState,
+                postActionDelta,
                 ...buildNavigationReadinessFields({
                   settled: settleResult.settled,
                   readyState: settleResult.readyState,
@@ -239,11 +556,22 @@ class NavigateTool extends BaseBrowserToolExecutor {
         const settleResult = await this.waitForTabSettled(targetTab.id, {
           previousUrl,
           requireUrlChange: true,
+          ...settleOptions,
         });
         const updatedTab = settleResult.tab;
 
         // Trigger auto-capture on history navigation
         await this.triggerAutoCapture(updatedTab.id!, updatedTab.url);
+        const actionId = createNavigationActionId('history', updatedTab.id);
+        recordNavigationPendingAction(updatedTab.id, actionId);
+        const postActionDelta = buildNavigationPostActionDelta({
+          actionId,
+          actionKind: 'history',
+          tabId: updatedTab.id,
+          previousUrl,
+          finalUrl: updatedTab.url,
+          settled: settleResult.settled,
+        });
 
         return {
           content: [
@@ -260,6 +588,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
                 settleReason: settleResult.reason,
                 waitedMs: settleResult.waitedMs,
                 readyState: settleResult.readyState,
+                postActionDelta,
                 ...buildNavigationReadinessFields({
                   settled: settleResult.settled,
                   readyState: settleResult.readyState,
@@ -315,7 +644,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
         let best: { tab?: chrome.tabs.Tab; score: number } = { score: -1 };
 
         for (const tab of tabsToPick) {
-          const tabUrlStr = tab.url || '';
+          const tabUrlStr = getTabNavigationUrl(tab);
           let tabUrl: URL | undefined;
           try {
             tabUrl = new URL(tabUrlStr);
@@ -377,11 +706,30 @@ class NavigateTool extends BaseBrowserToolExecutor {
         const settleResult = await this.waitForTabSettled(existingTab.id, {
           previousUrl,
           requireUrlChange: shouldNavigateExplicitTab,
+          ...settleOptions,
         });
         const updatedTab = settleResult.tab;
+        markBrowserWorldTabAiOperated(
+          updatedTab.id,
+          shouldNavigateExplicitTab ? 'navigate_existing_tab' : 'activate_existing_tab',
+        );
 
         // Trigger auto-capture on existing tab activation
         await this.triggerAutoCapture(updatedTab.id!, updatedTab.url);
+        const actionKind: NavigationActionKind = shouldNavigateExplicitTab
+          ? 'navigate_existing_tab'
+          : 'activate_existing_tab';
+        const actionId = createNavigationActionId(actionKind, updatedTab.id);
+        recordNavigationPendingAction(updatedTab.id, actionId);
+        claimBackgroundNavigationRun(updatedTab.id, actionId, actionKind, background);
+        const postActionDelta = buildNavigationPostActionDelta({
+          actionId,
+          actionKind,
+          tabId: updatedTab.id,
+          previousUrl,
+          finalUrl: updatedTab.url,
+          settled: settleResult.settled,
+        });
 
         return {
           content: [
@@ -404,6 +752,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
                 settleReason: settleResult.reason,
                 waitedMs: settleResult.waitedMs,
                 readyState: settleResult.readyState,
+                postActionDelta,
                 ...buildNavigationReadinessFields({
                   settled: settleResult.settled,
                   readyState: settleResult.readyState,
@@ -438,8 +787,29 @@ class NavigateTool extends BaseBrowserToolExecutor {
           // Trigger auto-capture if the new window has a tab
           const firstTab = newWindow.tabs?.[0];
           if (firstTab?.id) {
-            const settleResult = await this.waitForTabSettled(firstTab.id);
+            markBrowserWorldTabAiCreated(firstTab.id);
+            const settleResult = await this.waitForTabSettled(firstTab.id, settleOptions);
+            markBrowserWorldTabAiOperated(settleResult.tab.id, 'navigate_new_window_tab');
             await this.triggerAutoCapture(firstTab.id, settleResult.tab.url);
+            const actionId = createNavigationActionId(
+              'navigate_new_window_tab',
+              settleResult.tab.id,
+            );
+            recordNavigationPendingAction(settleResult.tab.id, actionId);
+            claimBackgroundNavigationRun(
+              settleResult.tab.id,
+              actionId,
+              'navigate_new_window_tab',
+              background,
+            );
+            const postActionDelta = buildNavigationPostActionDelta({
+              actionId,
+              actionKind: 'navigate_new_window_tab',
+              tabId: settleResult.tab.id,
+              finalUrl: settleResult.tab.url,
+              newTabOpened: true,
+              settled: settleResult.settled,
+            });
 
             return {
               content: [
@@ -453,10 +823,19 @@ class NavigateTool extends BaseBrowserToolExecutor {
                     requestedUrl: url,
                     finalUrl: settleResult.tab.url,
                     status: settleResult.tab.status,
+                    activated: background !== true,
+                    focusPolicy: background === true ? 'background' : 'foreground',
                     settled: settleResult.settled,
                     settleReason: settleResult.reason,
                     waitedMs: settleResult.waitedMs,
                     readyState: settleResult.readyState,
+                    postActionDelta,
+                    ...buildNavigationReadinessFields({
+                      settled: settleResult.settled,
+                      readyState: settleResult.readyState,
+                      finalUrl: settleResult.tab.url,
+                      status: settleResult.tab.status,
+                    }),
                     tabs: newWindow.tabs
                       ? newWindow.tabs.map((tab) => ({
                           tabId: tab.id,
@@ -474,21 +853,134 @@ class NavigateTool extends BaseBrowserToolExecutor {
         console.log('Opening URL in the last active window.');
         // Try to open a new tab in the specified window, otherwise the most recently active window
         let targetWindow: chrome.windows.Window | null = null;
+        let targetWindowReason = 'explicit_window';
         if (typeof windowId === 'number') {
           targetWindow = await chrome.windows.get(windowId, { populate: false });
         }
         if (!targetWindow) {
-          targetWindow = await chrome.windows.getLastFocused({ populate: false });
+          const preferred = await getPreferredWindowForUrl(url, candidateTabs);
+          targetWindow = preferred.window;
+          targetWindowReason = preferred.reason;
         }
 
         if (targetWindow && targetWindow.id !== undefined) {
           console.log(`Found target Window ID: ${targetWindow.id}`);
 
-          const newTab = await chrome.tabs.create({
-            url: url,
-            windowId: targetWindow.id,
-            active: background === true ? false : true,
-          });
+          const tabsBeforeCreate = await chrome.tabs.query({ windowId: targetWindow.id });
+          const existingTabIds = new Set(
+            tabsBeforeCreate
+              .map((tab) => tab.id)
+              .filter((id): id is number => typeof id === 'number'),
+          );
+          let newTab: chrome.tabs.Tab;
+          try {
+            newTab = await withTimeout(
+              chrome.tabs.create({
+                url: url,
+                windowId: targetWindow.id,
+                active: background === true ? false : true,
+              }),
+              NAVIGATE_CREATE_TAB_TIMEOUT_MS,
+              `chrome.tabs.create timed out after ${NAVIGATE_CREATE_TAB_TIMEOUT_MS}ms`,
+            );
+            markBrowserWorldTabAiCreated(newTab.id);
+          } catch (error) {
+            const timeoutNavigationTab = await waitForCreatedDocumentTabAfterTimeout({
+              windowId: targetWindow.id,
+              existingTabIds,
+              targetUrl: url,
+              pickBestMatch,
+            });
+            if (timeoutNavigationTab?.id !== undefined) {
+              markBrowserWorldTabAiCreated(timeoutNavigationTab.id);
+              const finalNavigationUrl = getTabNavigationUrl(timeoutNavigationTab);
+              const readyState =
+                timeoutNavigationTab.status === 'complete' ? 'complete' : 'interactive';
+              const actionId = createNavigationActionId(
+                'navigate_new_tab',
+                timeoutNavigationTab.id,
+              );
+              recordNavigationPendingAction(timeoutNavigationTab.id, actionId);
+              claimBackgroundNavigationRun(
+                timeoutNavigationTab.id,
+                actionId,
+                'navigate_new_tab',
+                background,
+              );
+              const postActionDelta = buildNavigationPostActionDelta({
+                actionId,
+                actionKind: 'navigate_new_tab',
+                tabId: timeoutNavigationTab.id,
+                finalUrl: finalNavigationUrl,
+                newTabOpened: true,
+                settled: false,
+              });
+              return {
+                content: [
+                  {
+                    type: 'text',
+                    text: JSON.stringify({
+                      success: true,
+                      message: 'Opened URL in new tab after create timeout',
+                      tabId: timeoutNavigationTab.id,
+                      windowId: targetWindow.id,
+                      targetWindowReason,
+                      requestedUrl: url,
+                      finalUrl: finalNavigationUrl,
+                      status: timeoutNavigationTab.status,
+                      settled: false,
+                      settleReason: 'create_timeout_but_document_tab_found',
+                      waitedMs: NAVIGATE_CREATE_TAB_TIMEOUT_MS,
+                      readyState,
+                      postActionDelta,
+                      ...buildNavigationReadinessFields({
+                        settled: false,
+                        readyState,
+                        finalUrl: finalNavigationUrl,
+                        status: timeoutNavigationTab.status,
+                      }),
+                    }),
+                  },
+                ],
+                isError: false,
+              };
+            }
+            const tabsAfterTimeout = await chrome.tabs.query({ windowId: targetWindow.id });
+            const blankTabs = tabsAfterTimeout.filter((tab) => {
+              const tabUrl = tab.url || tab.pendingUrl || '';
+              return (
+                typeof tab.id === 'number' &&
+                !existingTabIds.has(tab.id) &&
+                (tabUrl === '' || tabUrl === 'about:blank')
+              );
+            });
+            const cleanupTabIds: number[] = [];
+            for (const tab of blankTabs) {
+              if (typeof tab.id === 'number' && (await removeBlankTabIfPresent(tab.id))) {
+                cleanupTabIds.push(tab.id);
+              }
+            }
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify({
+                    success: false,
+                    message: 'Failed to create navigation tab within bounded timeout',
+                    requestedUrl: url,
+                    windowId: targetWindow.id,
+                    error: error instanceof Error ? error.message : String(error),
+                    cleanupTabIds,
+                    pageReadable: false,
+                    canAttemptStructuredRead: false,
+                    nextStepHint:
+                      'navigation_failed_before_document; retry navigation or inspect browser status',
+                  }),
+                },
+              ],
+              isError: true,
+            };
+          }
           if (background !== true) {
             await chrome.windows.update(targetWindow.id, { focused: true });
           }
@@ -497,12 +989,31 @@ class NavigateTool extends BaseBrowserToolExecutor {
             `URL opened in new Tab ID: ${newTab.id} in existing Window ID: ${targetWindow.id}`,
           );
 
-          const settleResult = newTab.id ? await this.waitForTabSettled(newTab.id) : null;
+          const settleResult = newTab.id
+            ? await this.waitForTabSettled(newTab.id, settleOptions)
+            : null;
+          markBrowserWorldTabAiOperated(settleResult?.tab.id || newTab.id, 'navigate_new_tab');
 
           // Trigger auto-capture on new tab
           if (newTab.id) {
-            await this.triggerAutoCapture(newTab.id, settleResult?.tab.url || newTab.url);
+            await this.triggerAutoCapture(
+              newTab.id,
+              getTabNavigationUrl(settleResult?.tab || newTab),
+            );
           }
+          const finalNavigationUrl = getTabNavigationUrl(settleResult?.tab || newTab);
+          const finalTabId = settleResult?.tab.id || newTab.id || null;
+          const actionId = createNavigationActionId('navigate_new_tab', finalTabId);
+          recordNavigationPendingAction(finalTabId, actionId);
+          claimBackgroundNavigationRun(finalTabId, actionId, 'navigate_new_tab', background);
+          const postActionDelta = buildNavigationPostActionDelta({
+            actionId,
+            actionKind: 'navigate_new_tab',
+            tabId: finalTabId,
+            finalUrl: finalNavigationUrl,
+            newTabOpened: true,
+            settled: settleResult?.settled ?? false,
+          });
 
           return {
             content: [
@@ -511,19 +1022,23 @@ class NavigateTool extends BaseBrowserToolExecutor {
                 text: JSON.stringify({
                   success: true,
                   message: 'Opened URL in new tab in existing window',
-                  tabId: settleResult?.tab.id || newTab.id,
+                  tabId: finalTabId,
                   windowId: targetWindow.id,
+                  targetWindowReason,
                   requestedUrl: url,
-                  finalUrl: settleResult?.tab.url || newTab.url,
+                  finalUrl: finalNavigationUrl,
                   status: settleResult?.tab.status || newTab.status,
                   settled: settleResult?.settled ?? false,
                   settleReason: settleResult?.reason || null,
                   waitedMs: settleResult?.waitedMs || 0,
                   readyState: settleResult?.readyState || null,
+                  activated: background !== true,
+                  focusPolicy: background === true ? 'background' : 'foreground',
+                  postActionDelta,
                   ...buildNavigationReadinessFields({
                     settled: settleResult?.settled ?? false,
                     readyState: settleResult?.readyState || null,
-                    finalUrl: settleResult?.tab.url || newTab.url,
+                    finalUrl: finalNavigationUrl,
                     status: settleResult?.tab.status || newTab.status,
                   }),
                 }),
@@ -540,7 +1055,7 @@ class NavigateTool extends BaseBrowserToolExecutor {
             url: url,
             width: DEFAULT_WINDOW_WIDTH,
             height: DEFAULT_WINDOW_HEIGHT,
-            focused: true,
+            focused: background === true ? false : true,
           });
 
           if (fallbackWindow && fallbackWindow.id !== undefined) {
@@ -549,8 +1064,29 @@ class NavigateTool extends BaseBrowserToolExecutor {
             // Trigger auto-capture if fallback window has a tab
             const firstTab = fallbackWindow.tabs?.[0];
             if (firstTab?.id) {
-              const settleResult = await this.waitForTabSettled(firstTab.id);
+              markBrowserWorldTabAiCreated(firstTab.id);
+              const settleResult = await this.waitForTabSettled(firstTab.id, settleOptions);
+              markBrowserWorldTabAiOperated(settleResult.tab.id, 'navigate_fallback_window_tab');
               await this.triggerAutoCapture(firstTab.id, settleResult.tab.url);
+              const actionId = createNavigationActionId(
+                'navigate_fallback_window_tab',
+                settleResult.tab.id,
+              );
+              recordNavigationPendingAction(settleResult.tab.id, actionId);
+              claimBackgroundNavigationRun(
+                settleResult.tab.id,
+                actionId,
+                'navigate_fallback_window_tab',
+                background,
+              );
+              const postActionDelta = buildNavigationPostActionDelta({
+                actionId,
+                actionKind: 'navigate_fallback_window_tab',
+                tabId: settleResult.tab.id,
+                finalUrl: settleResult.tab.url,
+                newTabOpened: true,
+                settled: settleResult.settled,
+              });
 
               return {
                 content: [
@@ -564,10 +1100,19 @@ class NavigateTool extends BaseBrowserToolExecutor {
                       requestedUrl: url,
                       finalUrl: settleResult.tab.url,
                       status: settleResult.tab.status,
+                      activated: background !== true,
+                      focusPolicy: background === true ? 'background' : 'foreground',
                       settled: settleResult.settled,
                       settleReason: settleResult.reason,
                       waitedMs: settleResult.waitedMs,
                       readyState: settleResult.readyState,
+                      postActionDelta,
+                      ...buildNavigationReadinessFields({
+                        settled: settleResult.settled,
+                        readyState: settleResult.readyState,
+                        finalUrl: settleResult.tab.url,
+                        status: settleResult.tab.status,
+                      }),
                       tabs: fallbackWindow.tabs
                         ? fallbackWindow.tabs.map((tab) => ({
                             tabId: tab.id,
@@ -608,6 +1153,38 @@ interface CloseTabsToolParams {
   windowId?: number;
 }
 
+function buildCloseTabsLogSummary(args: CloseTabsToolParams): Record<string, unknown> {
+  return {
+    hasUrl: typeof args.url === 'string' && args.url.length > 0,
+    tabIdCount: Array.isArray(args.tabIds) ? args.tabIds.length : 0,
+    windowId: typeof args.windowId === 'number' ? args.windowId : null,
+  };
+}
+
+interface CloseTabsBrowserSnapshot {
+  tabCount: number;
+  windowCount: number;
+  focusedWindowId: number | null;
+  activeTabId: number | null;
+}
+
+interface CloseTabsBrowserHygieneEvidence {
+  kind: 'close_tabs_hygiene_v1';
+  before: CloseTabsBrowserSnapshot;
+  after: CloseTabsBrowserSnapshot;
+  closedTabIds: number[];
+  invalidTabIds: number[];
+  tabWindowBaselineUnchanged: boolean | null;
+  activeTabRestored: boolean | null;
+  activeTabRestoreReason: string;
+}
+
+interface CloseTabsPreflightBlockedResponseInput {
+  tabIds: number[];
+  preflight: CloseTabsPreflightEvidence;
+  invalidTabIds?: number[];
+}
+
 /**
  * Tool for closing browser tabs
  */
@@ -617,12 +1194,12 @@ class CloseTabsTool extends BaseBrowserToolExecutor {
   async execute(args: CloseTabsToolParams): Promise<ToolResult> {
     const { tabIds, url, windowId } = args;
     let urlPattern = url;
-    console.log(`Attempting to close tabs with options:`, args);
+    console.log(`Attempting to close tabs with options:`, buildCloseTabsLogSummary(args));
 
     try {
       // If URL is provided, close all tabs matching that URL
       if (urlPattern) {
-        console.log(`Searching for tabs with URL: ${url}`);
+        console.log('Searching for tabs with provided URL pattern');
         try {
           // Build a proper Chrome match pattern from a concrete URL.
           // If caller already provided a match pattern with '*', use as-is.
@@ -648,17 +1225,20 @@ class CloseTabsTool extends BaseBrowserToolExecutor {
               : `${urlPattern}/*`;
         }
 
-        const tabs = await chrome.tabs.query({ url: urlPattern });
+        const tabs = await chrome.tabs.query({
+          url: urlPattern,
+          ...(typeof windowId === 'number' ? { windowId } : {}),
+        });
 
         if (!tabs || tabs.length === 0) {
-          console.log(`No tabs found with URL pattern: ${urlPattern}`);
+          console.log('No tabs found with provided URL pattern');
           return {
             content: [
               {
                 type: 'text',
                 text: JSON.stringify({
                   success: false,
-                  message: `No tabs found with URL pattern: ${urlPattern}`,
+                  message: 'No tabs found with provided URL pattern',
                   closedCount: 0,
                 }),
               },
@@ -667,7 +1247,7 @@ class CloseTabsTool extends BaseBrowserToolExecutor {
           };
         }
 
-        console.log(`Found ${tabs.length} tabs with URL pattern: ${urlPattern}`);
+        console.log(`Found ${tabs.length} tabs with provided URL pattern`);
         const tabIdsToClose = tabs
           .map((tab) => tab.id)
           .filter((id): id is number => id !== undefined);
@@ -676,7 +1256,20 @@ class CloseTabsTool extends BaseBrowserToolExecutor {
           return createErrorResponse('Found tabs but could not get their IDs');
         }
 
+        const preflight = await preflightCloseTabs(tabIdsToClose);
+        if (preflight.verdict !== 'allowed') {
+          return buildCloseTabsPreflightBlockedResponse({
+            tabIds: tabIdsToClose,
+            preflight,
+          });
+        }
+
+        const hygieneBefore = await captureCloseTabsBrowserSnapshot();
+        for (const tabId of tabIdsToClose) {
+          markBrowserWorldTabAiOperated(tabId, 'close_tabs_requested');
+        }
         await chrome.tabs.remove(tabIdsToClose);
+        const hygieneAfter = await captureCloseTabsBrowserSnapshot();
 
         return {
           content: [
@@ -684,9 +1277,16 @@ class CloseTabsTool extends BaseBrowserToolExecutor {
               type: 'text',
               text: JSON.stringify({
                 success: true,
-                message: `Closed ${tabIdsToClose.length} tabs with URL: ${url}`,
+                message: `Closed ${tabIdsToClose.length} tabs matching provided URL pattern`,
                 closedCount: tabIdsToClose.length,
                 closedTabIds: tabIdsToClose,
+                closePreflightEvidence: preflight,
+                browserHygieneEvidence: buildCloseTabsBrowserHygieneEvidence({
+                  before: hygieneBefore,
+                  after: hygieneAfter,
+                  closedTabIds: tabIdsToClose,
+                  invalidTabIds: [],
+                }),
               }),
             },
           ],
@@ -731,7 +1331,22 @@ class CloseTabsTool extends BaseBrowserToolExecutor {
           };
         }
 
+        const preflight = await preflightCloseTabs(validTabIds);
+        const invalidTabIds = tabIds.filter((id) => !validTabIds.includes(id));
+        if (preflight.verdict !== 'allowed') {
+          return buildCloseTabsPreflightBlockedResponse({
+            tabIds: validTabIds,
+            preflight,
+            invalidTabIds,
+          });
+        }
+
+        const hygieneBefore = await captureCloseTabsBrowserSnapshot();
+        for (const tabId of validTabIds) {
+          markBrowserWorldTabAiOperated(tabId, 'close_tabs_requested');
+        }
         await chrome.tabs.remove(validTabIds);
+        const hygieneAfter = await captureCloseTabsBrowserSnapshot();
 
         return {
           content: [
@@ -742,7 +1357,14 @@ class CloseTabsTool extends BaseBrowserToolExecutor {
                 message: `Closed ${validTabIds.length} tabs`,
                 closedCount: validTabIds.length,
                 closedTabIds: validTabIds,
-                invalidTabIds: tabIds.filter((id) => !validTabIds.includes(id)),
+                invalidTabIds,
+                closePreflightEvidence: preflight,
+                browserHygieneEvidence: buildCloseTabsBrowserHygieneEvidence({
+                  before: hygieneBefore,
+                  after: hygieneAfter,
+                  closedTabIds: validTabIds,
+                  invalidTabIds,
+                }),
               }),
             },
           ],
@@ -760,6 +1382,94 @@ class CloseTabsTool extends BaseBrowserToolExecutor {
       );
     }
   }
+}
+
+function buildCloseTabsPreflightBlockedResponse(
+  input: CloseTabsPreflightBlockedResponseInput,
+): ToolResult {
+  return {
+    content: [
+      {
+        type: 'text',
+        text: JSON.stringify({
+          success: false,
+          blockedByPolicy: true,
+          message:
+            'Refusing to close tabs before BrowserWorld proves they are AI-owned and cleanup-eligible.',
+          closedCount: 0,
+          closedTabIds: [],
+          requestedTabIds: input.tabIds,
+          invalidTabIds: input.invalidTabIds ?? [],
+          closePreflightEvidence: input.preflight,
+        }),
+      },
+    ],
+    isError: true,
+  };
+}
+
+async function captureCloseTabsBrowserSnapshot(): Promise<CloseTabsBrowserSnapshot> {
+  const [tabs, windows] = await Promise.all([
+    chrome.tabs.query({}),
+    chrome.windows.getAll({ populate: false }),
+  ]);
+  const focusedWindow = windows.find((window) => window.focused === true);
+  const focusedWindowId = typeof focusedWindow?.id === 'number' ? focusedWindow.id : null;
+  const activeTab =
+    focusedWindowId === null
+      ? tabs.find((tab) => tab.active === true)
+      : tabs.find((tab) => tab.active === true && tab.windowId === focusedWindowId);
+
+  return {
+    tabCount: tabs.length,
+    windowCount: windows.length,
+    focusedWindowId,
+    activeTabId: typeof activeTab?.id === 'number' ? activeTab.id : null,
+  };
+}
+
+function buildCloseTabsBrowserHygieneEvidence(input: {
+  before: CloseTabsBrowserSnapshot;
+  after: CloseTabsBrowserSnapshot;
+  closedTabIds: number[];
+  invalidTabIds: number[];
+}): CloseTabsBrowserHygieneEvidence {
+  const closed = new Set(input.closedTabIds);
+  const expectedTabCountAfter = input.before.tabCount - input.closedTabIds.length;
+  const windowCountDelta = input.before.windowCount - input.after.windowCount;
+  const windowCountCompatible =
+    input.after.windowCount === input.before.windowCount ||
+    (windowCountDelta > 0 && windowCountDelta <= input.closedTabIds.length);
+  const tabWindowBaselineUnchanged =
+    expectedTabCountAfter >= 0
+      ? input.after.tabCount === expectedTabCountAfter && windowCountCompatible
+      : null;
+  const beforeActiveTabClosed =
+    input.before.activeTabId !== null && closed.has(input.before.activeTabId);
+  const activeTabRestored =
+    input.before.activeTabId === null || input.after.activeTabId === null
+      ? null
+      : beforeActiveTabClosed
+        ? !closed.has(input.after.activeTabId)
+        : input.after.activeTabId === input.before.activeTabId;
+
+  return {
+    kind: 'close_tabs_hygiene_v1',
+    before: input.before,
+    after: input.after,
+    closedTabIds: [...input.closedTabIds],
+    invalidTabIds: [...input.invalidTabIds],
+    tabWindowBaselineUnchanged,
+    activeTabRestored,
+    activeTabRestoreReason:
+      activeTabRestored === true
+        ? beforeActiveTabClosed
+          ? 'active_tab_restored_to_surviving_tab'
+          : 'active_tab_preserved'
+        : activeTabRestored === false
+          ? 'active_tab_not_restored'
+          : 'active_tab_restore_not_observed',
+  };
 }
 
 export const closeTabsTool = new CloseTabsTool();
@@ -801,6 +1511,31 @@ class SwitchTabTool extends BaseBrowserToolExecutor {
           ? null
           : await this.waitForTabSettled(tabId, { timeoutMs: 5000 });
       const updatedTab = settleResult?.tab || activationResult.tab;
+      let foregroundProof = await this.waitForTabForegroundProof(tabId, {
+        chromeWindowFocused: activationResult.windowFocused,
+        chromeTabActive: activationResult.activated,
+      });
+      let cdpForegroundRecovery: CdpForegroundRecovery | null = null;
+      const canUseCdpForegroundRecovery =
+        foregroundProof.verdict !== 'proven_foreground' &&
+        foregroundProof.documentVisibilityState !== 'visible' &&
+        activationResult.windowFocused &&
+        activationResult.activated &&
+        /^https?:/i.test(updatedTab.url || '');
+      if (canUseCdpForegroundRecovery) {
+        cdpForegroundRecovery = await tryBringPageToFrontWithCdp(tabId);
+        if (cdpForegroundRecovery.succeeded) {
+          foregroundProof = await this.waitForTabForegroundProof(tabId, {
+            chromeWindowFocused: activationResult.windowFocused,
+            chromeTabActive: activationResult.activated,
+          });
+        }
+      }
+      markBrowserWorldTabAiOperated(updatedTab.id, 'switch_tab', {
+        confidence: foregroundProof.verdict === 'proven_foreground' ? 0.95 : 0.45,
+        evidenceLabel:
+          foregroundProof.verdict === 'proven_foreground' ? undefined : foregroundProof.verdict,
+      });
 
       return {
         content: [
@@ -817,6 +1552,11 @@ class SwitchTabTool extends BaseBrowserToolExecutor {
               activationTimedOut: activationResult.timedOut,
               activationWaitedMs: activationResult.waitedMs,
               windowFocused: activationResult.windowFocused,
+              foregroundActivation: foregroundProof,
+              cdpForegroundRecovery,
+              foregroundActivationVerdict: foregroundProof.verdict,
+              documentVisibilityState: foregroundProof.documentVisibilityState,
+              documentHasFocus: foregroundProof.documentHasFocus,
               settled: settleResult ? settleResult.settled : updatedTab.status === 'complete',
               settleReason: settleResult?.reason || 'already_complete',
               settleWaitedMs: settleResult?.waitedMs || 0,

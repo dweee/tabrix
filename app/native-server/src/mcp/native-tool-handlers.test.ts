@@ -2,15 +2,9 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { TOOL_NAMES } from '@tabrix/shared';
 import { getNativeToolHandler } from './native-tool-handlers';
 import type { NativeToolHandler, NativeToolHandlerDeps } from './native-tool-handlers';
-import type { ExperienceQueryService } from '../memory/experience';
-import type { ExperienceActionPathRow } from '../memory/experience/experience-repository';
 import type { KnowledgeApiRepository } from '../memory/knowledge/knowledge-api-repository';
-import type { CapabilityEnv } from '../policy/capabilities';
-import type {
-  DispatchBridgedFn,
-  ReplayStepRecorder,
-  UpdateTaskIntentFn,
-} from './experience-replay';
+import { MkeAiFeedbackValidationError } from '../memory/mke-memory-trace-service';
+import { TaskSessionContext } from '../execution/task-session-context';
 
 function callTextPayload(result: CallToolResult): any {
   const text = String(result.content?.[0]?.text ?? '');
@@ -21,21 +15,46 @@ function makeDeps(
   overrides: Partial<{
     mode: 'disk' | 'memory' | 'off';
     enabled: boolean;
-    experience: ExperienceQueryService | null;
     knowledgeApi: KnowledgeApiRepository | null;
-    capabilityEnv: CapabilityEnv;
-    dispatchBridged: DispatchBridgedFn;
-    recorder: ReplayStepRecorder;
-    updateTaskIntent: UpdateTaskIntentFn;
+    memoryTraces: {
+      recordAiBusinessFeedback: jest.Mock;
+    } | null;
+    flushAndProjectMkeAfterAiFeedback: jest.Mock;
+    revokeMkeExperienceForTrace: jest.Mock;
+    findReusableMkeExperienceRecipes: jest.Mock;
+    findLatestMkeKnowledgeModel: jest.Mock;
+    browserObjects: {
+      listReusableForPage: jest.Mock;
+    } | null;
+    taskContext: TaskSessionContext | null;
   }> = {},
 ): NativeToolHandlerDeps {
+  const flushAndProjectMkeAfterAiFeedback =
+    overrides.flushAndProjectMkeAfterAiFeedback ??
+    jest.fn().mockResolvedValue({
+      knowledge: {
+        processedTraceCount: 0,
+        skippedTraceCount: 0,
+        upsertedKnowledgeCount: 0,
+        nextCursorCreatedAt: null,
+        knowledgeIds: [],
+      },
+      experience: {
+        processedTraceCount: 0,
+        skippedTraceCount: 0,
+        rejectedSensitiveSequenceCount: 0,
+        savedExperienceCount: 0,
+        nextCursorCreatedAt: null,
+        experienceIds: [],
+      },
+    });
   return {
     sessionManager: {
-      get experience() {
-        return overrides.experience ?? null;
-      },
       get knowledgeApi() {
         return overrides.knowledgeApi ?? null;
+      },
+      get memoryTraces() {
+        return overrides.memoryTraces ?? null;
       },
       getPersistenceStatus() {
         return {
@@ -43,102 +62,349 @@ function makeDeps(
           enabled: overrides.enabled ?? true,
         };
       },
+      flushAndProjectMkeAfterAiFeedback,
+      revokeMkeExperienceForTrace:
+        overrides.revokeMkeExperienceForTrace ??
+        jest.fn().mockReturnValue({
+          updatedCount: 0,
+          archivedCount: 0,
+          affectedExperienceIds: [],
+        }),
+      findReusableMkeExperienceRecipes: overrides.findReusableMkeExperienceRecipes,
+      findLatestMkeKnowledgeModel: overrides.findLatestMkeKnowledgeModel,
+      get browserObjects() {
+        return overrides.browserObjects ?? null;
+      },
     } as unknown as NativeToolHandlerDeps['sessionManager'],
-    capabilityEnv: overrides.capabilityEnv,
-    dispatchBridged: overrides.dispatchBridged,
-    recorder: overrides.recorder,
-    updateTaskIntent: overrides.updateTaskIntent,
+    taskContext: overrides.taskContext ?? null,
   };
 }
 
-function getHandler(): NativeToolHandler {
-  const handler = getNativeToolHandler(TOOL_NAMES.EXPERIENCE.SUGGEST_PLAN);
-  if (!handler) throw new Error('experience_suggest_plan handler missing');
-  return handler;
-}
+describe('native-tool-handlers · memory_record_ai_feedback', () => {
+  function getMemoryFeedbackHandler(): NativeToolHandler {
+    const handler = getNativeToolHandler(TOOL_NAMES.MEMORY.RECORD_AI_FEEDBACK);
+    if (!handler) throw new Error('memory_record_ai_feedback handler missing');
+    return handler;
+  }
 
-describe('native-tool-handlers · experience_suggest_plan', () => {
-  it('registers under TOOL_NAMES.EXPERIENCE.SUGGEST_PLAN', () => {
-    expect(getNativeToolHandler(TOOL_NAMES.EXPERIENCE.SUGGEST_PLAN)).toBeDefined();
+  it('records AI business feedback against an existing trace', async () => {
+    const handler = getMemoryFeedbackHandler();
+    const recordAiBusinessFeedback = jest.fn().mockReturnValue({
+      traceId: 'trace-1',
+      aiFeedbackScore: 0.94,
+    });
+    const flushAndProjectMkeAfterAiFeedback = jest.fn().mockResolvedValue({
+      knowledge: {
+        processedTraceCount: 2,
+        skippedTraceCount: 0,
+        upsertedKnowledgeCount: 1,
+        nextCursorCreatedAt: '2026-06-06T07:00:02.000Z',
+        knowledgeIds: ['knowledge-1'],
+      },
+      experience: {
+        processedTraceCount: 2,
+        skippedTraceCount: 0,
+        rejectedSensitiveSequenceCount: 0,
+        savedExperienceCount: 1,
+        nextCursorCreatedAt: '2026-06-06T07:00:04.000Z',
+        experienceIds: ['experience-1'],
+      },
+    });
+
+    const result = await handler(
+      {
+        traceId: 'trace-1',
+        feedbackToken: 'binding-hash-1',
+        businessStatus: 'achieved',
+        confidence: 0.94,
+        reasonCode: 'ai_verified_result',
+        summary: 'AI verified the expected page result.',
+        evaluatorModel: 'codex-test-evaluator',
+      },
+      makeDeps({ memoryTraces: { recordAiBusinessFeedback }, flushAndProjectMkeAfterAiFeedback }),
+    );
+
+    expect(result.isError).toBe(false);
+    expect(recordAiBusinessFeedback).toHaveBeenCalledWith(
+      expect.objectContaining({
+        traceId: 'trace-1',
+        traceBindingHash: 'binding-hash-1',
+        businessStatus: 'achieved',
+        confidence: 0.94,
+        reasonCode: 'ai_verified_result',
+        summary: 'AI verified the expected page result.',
+        evaluatorModel: 'codex-test-evaluator',
+        sourceToolName: TOOL_NAMES.MEMORY.RECORD_AI_FEEDBACK,
+      }),
+    );
+    expect(callTextPayload(result)).toMatchObject({
+      status: 'recorded',
+      traceId: 'trace-1',
+      businessStatus: 'achieved',
+      confidence: 0.94,
+      persistenceMode: 'disk',
+      projection: {
+        status: 'projected',
+        knowledgeUpserted: 1,
+        experienceSaved: 1,
+        experienceIds: ['experience-1'],
+      },
+    });
+    expect(flushAndProjectMkeAfterAiFeedback).toHaveBeenCalledTimes(1);
+    expect(flushAndProjectMkeAfterAiFeedback).toHaveBeenCalledWith('trace-1');
   });
 
-  it('returns a typed bad-input error when intent is missing', async () => {
-    const handler = getHandler();
-    const result = await handler({}, makeDeps());
+  it('records achieved AI feedback without trusted evaluator but does not trigger Experience projection', async () => {
+    const handler = getMemoryFeedbackHandler();
+    const recordAiBusinessFeedback = jest.fn().mockReturnValue({
+      traceId: 'trace-1',
+      aiFeedbackScore: 0.94,
+    });
+    const flushAndProjectMkeAfterAiFeedback = jest.fn();
+
+    const result = await handler(
+      {
+        traceId: 'trace-1',
+        feedbackToken: 'binding-hash-1',
+        businessStatus: 'achieved',
+        confidence: 0.94,
+        reasonCode: 'ai_verified_result',
+        summary: 'AI verified the expected page result.',
+      },
+      makeDeps({ memoryTraces: { recordAiBusinessFeedback }, flushAndProjectMkeAfterAiFeedback }),
+    );
+
+    expect(result.isError).toBe(false);
+    expect(recordAiBusinessFeedback).toHaveBeenCalledWith(
+      expect.objectContaining({
+        traceId: 'trace-1',
+        traceBindingHash: 'binding-hash-1',
+        businessStatus: 'achieved',
+        confidence: 0.94,
+        summary: 'AI verified the expected page result.',
+      }),
+    );
+    expect(callTextPayload(result)).toMatchObject({
+      status: 'recorded',
+      projection: {
+        status: 'skipped_experience_not_eligible',
+        knowledgeUpserted: null,
+        experienceSaved: null,
+        experienceIds: [],
+      },
+    });
+    expect(flushAndProjectMkeAfterAiFeedback).not.toHaveBeenCalled();
+  });
+
+  it('passes AI evaluation metadata and lets AI block Experience mining for brittle success', async () => {
+    const handler = getMemoryFeedbackHandler();
+    const recordAiBusinessFeedback = jest.fn().mockReturnValue({
+      traceId: 'trace-1',
+      aiFeedbackScore: 0.96,
+    });
+    const flushAndProjectMkeAfterAiFeedback = jest.fn();
+    const revokeMkeExperienceForTrace = jest.fn().mockReturnValue({
+      updatedCount: 1,
+      archivedCount: 0,
+      affectedExperienceIds: ['experience-1'],
+    });
+
+    const result = await handler(
+      {
+        traceId: 'trace-1',
+        feedbackToken: 'binding-hash-1',
+        taskId: 'task-1',
+        toolName: TOOL_NAMES.BROWSER.CLICK,
+        toolCallId: 'step-3',
+        sequenceIndex: 3,
+        evaluationScope: 'step',
+        businessStatus: 'achieved',
+        confidence: 0.96,
+        reasonCode: 'ai_verified_but_brittle_path',
+        summary: 'AI verified the page advanced, but the path depended on a brittle fallback.',
+        evaluationVersion: 'ai_feedback_v2',
+        rubricVersion: 'tabrix_step_quality_v2',
+        evaluatorModel: 'codex-test-evaluator',
+        userGoalSnapshot: 'Search, filter, and collect the first ten result cards.',
+        experienceCandidate: false,
+      },
+      makeDeps({
+        memoryTraces: { recordAiBusinessFeedback },
+        flushAndProjectMkeAfterAiFeedback,
+        revokeMkeExperienceForTrace,
+      }),
+    );
+
+    expect(result.isError).toBe(false);
+    expect(recordAiBusinessFeedback).toHaveBeenCalledWith(
+      expect.objectContaining({
+        traceId: 'trace-1',
+        traceBindingHash: 'binding-hash-1',
+        taskId: 'task-1',
+        toolName: TOOL_NAMES.BROWSER.CLICK,
+        toolCallId: 'step-3',
+        sequenceIndex: 3,
+        evaluationScope: 'step',
+        businessStatus: 'achieved',
+        confidence: 0.96,
+        reasonCode: 'ai_verified_but_brittle_path',
+        summary: 'AI verified the page advanced, but the path depended on a brittle fallback.',
+        evaluationVersion: 'ai_feedback_v2',
+        rubricVersion: 'tabrix_step_quality_v2',
+        evaluatorModel: 'codex-test-evaluator',
+        userGoalSnapshot: 'Search, filter, and collect the first ten result cards.',
+        experienceCandidate: false,
+      }),
+    );
+    expect(callTextPayload(result)).toMatchObject({
+      status: 'recorded',
+      traceId: 'trace-1',
+      businessStatus: 'achieved',
+      confidence: 0.96,
+      projection: {
+        status: 'skipped_experience_not_eligible',
+        knowledgeUpserted: null,
+        experienceSaved: null,
+        experienceIds: [],
+        experienceRevocation: {
+          updatedCount: 1,
+          archivedCount: 0,
+          affectedExperienceIds: ['experience-1'],
+        },
+      },
+    });
+    expect(flushAndProjectMkeAfterAiFeedback).not.toHaveBeenCalled();
+    expect(revokeMkeExperienceForTrace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        traceId: 'trace-1',
+        revalidateScenario: false,
+      }),
+    );
+  });
+
+  it('records partial AI feedback without invalidating unrelated same-scenario Experience', async () => {
+    const handler = getMemoryFeedbackHandler();
+    const recordAiBusinessFeedback = jest.fn().mockReturnValue({
+      traceId: 'trace-1',
+      aiFeedbackScore: 0.82,
+    });
+    const flushAndProjectMkeAfterAiFeedback = jest.fn();
+    const revokeMkeExperienceForTrace = jest.fn().mockReturnValue({
+      updatedCount: 1,
+      archivedCount: 0,
+      affectedExperienceIds: ['experience-needs-revalidation'],
+    });
+
+    const result = await handler(
+      {
+        traceId: 'trace-1',
+        feedbackToken: 'binding-hash-1',
+        businessStatus: 'partial',
+        confidence: 0.82,
+        reasonCode: 'ai_identified_next_target',
+        summary: 'AI found useful next-step targets, but the user goal is not complete yet.',
+      },
+      makeDeps({
+        memoryTraces: { recordAiBusinessFeedback },
+        flushAndProjectMkeAfterAiFeedback,
+        revokeMkeExperienceForTrace,
+      }),
+    );
+
+    expect(result.isError).toBe(false);
+    expect(recordAiBusinessFeedback).toHaveBeenCalledWith(
+      expect.objectContaining({
+        traceId: 'trace-1',
+        traceBindingHash: 'binding-hash-1',
+        businessStatus: 'partial',
+        confidence: 0.82,
+        reasonCode: 'ai_identified_next_target',
+      }),
+    );
+    expect(callTextPayload(result)).toMatchObject({
+      status: 'recorded',
+      traceId: 'trace-1',
+      businessStatus: 'partial',
+      confidence: 0.82,
+      projection: {
+        status: 'skipped_experience_not_eligible',
+        knowledgeUpserted: null,
+        experienceSaved: null,
+        experienceIds: [],
+        experienceRevocation: {
+          updatedCount: 1,
+          archivedCount: 0,
+          affectedExperienceIds: ['experience-needs-revalidation'],
+        },
+      },
+    });
+    expect(flushAndProjectMkeAfterAiFeedback).not.toHaveBeenCalled();
+    expect(revokeMkeExperienceForTrace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        traceId: 'trace-1',
+        revalidateScenario: false,
+      }),
+    );
+  });
+
+  it('rejects missing traceId or invalid businessStatus', async () => {
+    const handler = getMemoryFeedbackHandler();
+    const result = await handler(
+      { businessStatus: 'done' },
+      makeDeps({ memoryTraces: { recordAiBusinessFeedback: jest.fn() } }),
+    );
+
     expect(result.isError).toBe(true);
     expect(callTextPayload(result)).toMatchObject({
-      code: 'TABRIX_EXPERIENCE_SUGGEST_PLAN_BAD_INPUT',
+      status: 'invalid_input',
     });
   });
 
-  it('returns persistenceMode=off / status=no_match when persistence is off', async () => {
-    const handler = getHandler();
+  it('returns unknown_trace when the trace id is not in Memory', async () => {
+    const handler = getMemoryFeedbackHandler();
     const result = await handler(
-      { intent: 'open issues' },
-      makeDeps({ experience: null, mode: 'off', enabled: false }),
-    );
-    expect(result.isError).toBe(false);
-    expect(callTextPayload(result)).toEqual({
-      status: 'no_match',
-      plans: [],
-      persistenceMode: 'off',
-    });
-  });
-
-  it('forwards parsed input to ExperienceQueryService and projects rows', async () => {
-    const handler = getHandler();
-    const suggestActionPaths = jest.fn().mockReturnValue([
       {
-        actionPathId: 'ap-1',
-        pageRole: 'repo_home',
-        intentSignature: 'open issues',
-        stepSequence: [
-          { toolName: 'chrome_click_element', status: 'completed', historyRef: 'h://a' },
-        ],
-        successCount: 4,
-        failureCount: 1,
-        lastUsedAt: '2026-04-21T10:00:00.000Z',
-        createdAt: '2026-04-20T00:00:00.000Z',
-        updatedAt: '2026-04-21T10:00:00.000Z',
+        traceId: 'missing',
+        feedbackToken: 'binding-hash-1',
+        businessStatus: 'unknown',
       },
-    ]);
-    const fakeExperience = { suggestActionPaths } as unknown as ExperienceQueryService;
-
-    const result = await handler(
-      { intent: '  Open   Issues  ', pageRole: 'repo_home', limit: 3 },
-      makeDeps({ experience: fakeExperience, mode: 'disk' }),
+      makeDeps({
+        memoryTraces: { recordAiBusinessFeedback: jest.fn().mockReturnValue(undefined) },
+      }),
     );
 
     expect(result.isError).toBe(false);
-    const body = callTextPayload(result);
-    expect(body.status).toBe('ok');
-    expect(body.persistenceMode).toBe('disk');
-    expect(body.plans).toHaveLength(1);
-    expect(body.plans[0].successRate).toBeCloseTo(0.8, 5);
-
-    expect(suggestActionPaths).toHaveBeenCalledTimes(1);
-    const args = suggestActionPaths.mock.calls[0][0];
-    expect(args.intentSignature).toBe('open issues');
-    expect(args.pageRole).toBe('repo_home');
-    expect(args.limit).toBe(3);
+    expect(callTextPayload(result)).toMatchObject({
+      status: 'unknown_trace',
+      traceId: 'missing',
+    });
   });
 
-  it('returns no_match when query returns []', async () => {
-    const handler = getHandler();
-    const fakeExperience = {
-      suggestActionPaths: jest.fn().mockReturnValue([]),
-    } as unknown as ExperienceQueryService;
-
+  it('returns validation errors from Memory trace binding checks', async () => {
+    const handler = getMemoryFeedbackHandler();
     const result = await handler(
-      { intent: 'unseen intent' },
-      makeDeps({ experience: fakeExperience, mode: 'memory' }),
+      {
+        traceId: 'trace-1',
+        feedbackToken: 'wrong-binding',
+        businessStatus: 'achieved',
+        confidence: 0.94,
+      },
+      makeDeps({
+        memoryTraces: {
+          recordAiBusinessFeedback: jest.fn(() => {
+            throw new MkeAiFeedbackValidationError(
+              'trace_binding_mismatch',
+              'AI feedback binding does not match.',
+            );
+          }),
+        },
+      }),
     );
 
-    expect(result.isError).toBe(false);
-    expect(callTextPayload(result)).toEqual({
-      status: 'no_match',
-      plans: [],
-      persistenceMode: 'memory',
+    expect(result.isError).toBe(true);
+    expect(callTextPayload(result)).toMatchObject({
+      status: 'trace_binding_mismatch',
+      traceId: 'trace-1',
     });
   });
 });
@@ -175,57 +441,16 @@ describe('native-tool-handlers · tabrix_choose_context (B-018 v1)', () => {
     });
   });
 
-  it('routes to experience_reuse when the experience query returns a winning plan', async () => {
+  it('routes to knowledge_light when local Knowledge catalog is non-empty', async () => {
     const handler = getChooseHandler();
-    const fakeExperience = {
-      suggestActionPaths: jest.fn().mockReturnValue([
-        {
-          actionPathId: 'ap-experience',
-          pageRole: 'repo_home',
-          intentSignature: 'open issues',
-          stepSequence: [],
-          successCount: 8,
-          failureCount: 2,
-          createdAt: '2026-04-22T00:00:00.000Z',
-          updatedAt: '2026-04-22T00:00:00.000Z',
-        },
-      ]),
-    } as unknown as ExperienceQueryService;
-
-    const result = await handler(
-      { intent: 'open issues', pageRole: 'repo_home' },
-      makeDeps({ experience: fakeExperience }),
-    );
-    expect(result.isError).toBe(false);
-    const body = callTextPayload(result);
-    expect(body.strategy).toBe('experience_reuse');
-    expect(body.fallbackStrategy).toBe('read_page_required');
-    // V24-03 promoted the chooser artifact to the `experience_ranked`
-    // shape whenever any Experience row surfaces — even when the
-    // chooser ultimately picks `experience_reuse`. The legacy `kind:
-    // 'experience'` shape is now reserved for the (vanishing) corner
-    // case where ranking returned zero candidates but the legacy
-    // `experienceHit` projection kept one in scope; on this test
-    // fixture the row IS the top-1 ranked candidate.
-    expect(body.artifacts[0]).toMatchObject({
-      kind: 'experience_ranked',
-      ref: 'ap-experience',
-    });
-  });
-
-  it('routes to knowledge_light only when capability is enabled and catalog is non-empty', async () => {
-    const handler = getChooseHandler();
-    const fakeExperience = {
-      suggestActionPaths: jest.fn().mockReturnValue([]),
-    } as unknown as ExperienceQueryService;
     const listBySite = jest.fn().mockReturnValue([
       {
         endpointId: 'ep-1',
-        site: 'api.github.com',
-        family: 'github',
+        site: 'api.code.example',
+        family: 'workspace',
         method: 'GET',
         urlPattern: '/repos/:owner/:repo/issues',
-        endpointSignature: 'GET api.github.com/repos/:owner/:repo/issues',
+        endpointSignature: 'GET api.code.example/repos/:owner/:repo/issues',
         semanticTag: null,
         statusClass: '2xx',
         requestSummary: {
@@ -246,33 +471,413 @@ describe('native-tool-handlers · tabrix_choose_context (B-018 v1)', () => {
     ]);
     const knowledgeApi = { listBySite } as unknown as KnowledgeApiRepository;
 
-    const enabledResult = await handler(
-      { intent: 'inspect captured endpoint catalog', url: 'https://github.com/octocat/hello' },
+    const result = await handler(
+      { intent: 'inspect captured endpoint catalog', url: 'https://code.example/octocat/hello' },
       makeDeps({
-        experience: fakeExperience,
         knowledgeApi,
-        capabilityEnv: { TABRIX_POLICY_CAPABILITIES: 'api_knowledge' },
       }),
     );
-    const enabledBody = callTextPayload(enabledResult);
-    expect(enabledBody.strategy).toBe('knowledge_light');
+    const body = callTextPayload(result);
+    expect(body.strategy).toBe('knowledge_light');
     expect(listBySite).toHaveBeenCalledTimes(1);
-
-    listBySite.mockClear();
-    const disabledResult = await handler(
-      { intent: 'inspect captured endpoint catalog', url: 'https://github.com/octocat/hello' },
-      makeDeps({
-        experience: fakeExperience,
-        knowledgeApi,
-        // capabilityEnv left undefined → must be treated as default-deny.
-      }),
-    );
-    const disabledBody = callTextPayload(disabledResult);
-    expect(disabledBody.strategy).toBe('read_page_required');
-    expect(listBySite).not.toHaveBeenCalled();
   });
 
-  it('disables chooser-inline direct API when private acceptance fault injection is present', async () => {
+  it('routes to experience_reuse when a verified local Experience exists', async () => {
+    const handler = getChooseHandler();
+    const findReusableMkeExperienceRecipes = jest.fn().mockReturnValue([
+      {
+        experienceId: 'exp-content-top10',
+        taskSignature: 'tools:chrome_collect_result_cards',
+        successCount: 2,
+        failureCount: 0,
+        reliabilityScore: 1,
+        successCheck: {
+          collectResultCards: [
+            {
+              observedResultCountAtLeast: 10,
+              filterState: {
+                sort: '最多收藏',
+                contentType: '图文',
+                timeRange: '一周内',
+              },
+            },
+          ],
+        },
+      },
+    ]);
+
+    const result = await handler(
+      {
+        intent: '内容站搜索AI图片创作，筛选最多收藏、图文、一周内，并汇报前10条图文内容',
+        url: 'https://content.example/search_result/?keyword=AI图片创作&type=51',
+        pageRole: 'search_results',
+      },
+      makeDeps({
+        findReusableMkeExperienceRecipes,
+        taskContext: {
+          peekReadPageContextMeasurement: () => ({
+            url: 'https://content.example/search_result/?keyword=AI图片创作&type=51',
+            pageRole: 'search_results',
+            fullReadByteLength: 40_000,
+            candidateActionsCount: 10,
+            highValueObjectCount: 10,
+          }),
+          peekVisibleRegionRowsEvidence: () => null,
+          noteUrlChange: jest.fn(),
+          noteChooseContextDecision: jest.fn(),
+        } as unknown as TaskSessionContext,
+      }),
+    );
+
+    expect(result.isError).toBe(false);
+    const body = callTextPayload(result);
+    expect(body.strategy).toBe('experience_reuse');
+    expect(body.sourceRoute).toBe('experience_reuse');
+    expect(body.artifacts).toEqual([
+      expect.objectContaining({
+        kind: 'experience_recipe',
+        ref: 'exp-content-top10',
+      }),
+    ]);
+    expect(body.artifacts[0].summary).toContain('最多收藏/图文/一周内');
+    expect(findReusableMkeExperienceRecipes).toHaveBeenCalledWith({
+      siteFamily: 'content.example',
+      pageRole: 'search_results',
+      limit: 1,
+    });
+  });
+
+  it('preserves a fresh task read when an identity-free chooser call precedes reuse', async () => {
+    const handler = getChooseHandler();
+    const url = 'https://content.example/search_result/?keyword=AI';
+    const taskContext = new TaskSessionContext();
+    taskContext.noteUrlChange(url, 'search_results');
+    taskContext.noteReadPage({
+      layer: 'L0+L1+L2',
+      source: 'dom_json',
+      requestKey: 'fresh-current-page-read',
+      contextMeasurement: {
+        url,
+        pageRole: 'search_results',
+        fullReadByteLength: 40_000,
+        candidateActionsCount: 8,
+        highValueObjectCount: 6,
+      },
+    });
+    const findReusableMkeExperienceRecipes = jest.fn().mockReturnValue([
+      {
+        experienceId: 'exp-content-search',
+        taskSignature: 'tools:chrome_click_element',
+        successCount: 2,
+        failureCount: 0,
+        reliabilityScore: 1,
+        successCheck: {},
+      },
+    ]);
+
+    await handler(
+      { intent: 'plan the next browser action' },
+      makeDeps({ taskContext, findReusableMkeExperienceRecipes }),
+    );
+
+    const result = await handler(
+      {
+        intent: 'collect filtered result cards',
+        url,
+        pageRole: 'search_results',
+      },
+      makeDeps({ taskContext, findReusableMkeExperienceRecipes }),
+    );
+
+    expect(taskContext.peekReadPageContextMeasurement()).toMatchObject({ url });
+    expect(callTextPayload(result)).toMatchObject({
+      strategy: 'experience_reuse',
+      sourceRoute: 'experience_reuse',
+      dispatcherInputSource: 'live_snapshot',
+    });
+  });
+
+  it('blocks Experience reuse when no current page validation exists', async () => {
+    const handler = getChooseHandler();
+    const findReusableMkeExperienceRecipes = jest.fn().mockReturnValue([
+      {
+        experienceId: 'exp-content-top10',
+        taskSignature: 'tools:chrome_collect_result_cards',
+        successCount: 2,
+        failureCount: 0,
+        reliabilityScore: 1,
+        successCheck: {},
+      },
+    ]);
+
+    const result = await handler(
+      {
+        intent: 'collect top 10 result cards',
+        url: 'https://content.example/search_result/?keyword=AI',
+        pageRole: 'search_results',
+      },
+      makeDeps({
+        findReusableMkeExperienceRecipes,
+      }),
+    );
+
+    expect(result.isError).toBe(false);
+    const body = callTextPayload(result);
+    expect(body.strategy).toBe('read_page_required');
+    expect(body.sourceRoute).toBe('read_page_required');
+    expect(body.reuseBlockedBy).toBe('current_page_validation_required');
+    expect(body.artifacts).toEqual([
+      expect.objectContaining({
+        kind: 'experience_recipe',
+        ref: 'exp-content-top10',
+      }),
+    ]);
+  });
+
+  it('surfaces page-model Knowledge from the native SessionManager as context guidance', async () => {
+    const handler = getChooseHandler();
+    const findLatestMkeKnowledgeModel = jest.fn().mockReturnValue({
+      knowledgeId: 'km-content-search',
+      siteFamily: 'content.example',
+      pageUrlPattern: 'https://content.example/search*',
+      pageRole: 'search_results',
+      pageModelKey: 'page:content.example:search_results',
+      modelVersion: 1,
+      pageStateModel: {},
+      objectGraph: {
+        sourceObjectCount: 8,
+        objectTypeCounts: {
+          result_card: 6,
+          search_input: 1,
+        },
+      },
+      actionSurface: {
+        reusableActionKinds: ['click_result_card', 'submit_search'],
+      },
+      dataSourceModel: {
+        selectedDataSourceCounts: {
+          dom_json: 1,
+        },
+      },
+      navigationModel: null,
+      failureSignal: null,
+      sourceTraceIds: [],
+      sourceExperienceIds: [],
+      observationCount: 2,
+      successfulUseCount: 0,
+      failedUseCount: 0,
+      confidenceScore: 0.8,
+      driftScore: null,
+      archivedAt: null,
+      lastObservedAt: '2026-06-20T00:00:00.000Z',
+      lastValidatedAt: null,
+      createdAt: '2026-06-20T00:00:00.000Z',
+      updatedAt: '2026-06-20T00:00:00.000Z',
+    });
+
+    const result = await handler(
+      {
+        intent: '内容站搜索并整理前10条结果',
+        url: 'https://content.example/search?q=ai',
+        pageRole: 'search_results',
+      },
+      makeDeps({
+        findLatestMkeKnowledgeModel,
+      }),
+    );
+
+    expect(result.isError).toBe(false);
+    const body = callTextPayload(result);
+    expect(body.strategy).toBe('read_page_required');
+    expect(body.artifacts).toEqual([
+      expect.objectContaining({
+        kind: 'knowledge_page_model',
+        ref: 'km-content-search',
+      }),
+    ]);
+    expect(findLatestMkeKnowledgeModel).toHaveBeenCalledWith({
+      siteFamily: 'content.example',
+      pageModelKey: 'page:content.example:search_results',
+    });
+  });
+
+  it('uses task read_page baseline to record positive savings for Experience reuse', async () => {
+    const handler = getChooseHandler();
+    const findReusableMkeExperienceRecipes = jest.fn().mockReturnValue([
+      {
+        experienceId: 'exp-content-top10',
+        taskSignature: 'tools:chrome_collect_result_cards',
+        successCount: 2,
+        failureCount: 0,
+        reliabilityScore: 1,
+        successCheck: {
+          collectResultCards: [
+            {
+              observedResultCountAtLeast: 10,
+              filterState: {
+                sort: '最多收藏',
+                contentType: '图文',
+                timeRange: '一周内',
+              },
+            },
+          ],
+        },
+      },
+    ]);
+
+    const result = await handler(
+      {
+        intent: '内容站搜索AI图片创作，筛选最多收藏、图文、一周内，并汇报前10条图文内容',
+        url: 'https://content.example/search_result/?keyword=AI图片创作&type=51',
+        pageRole: 'search_results',
+      },
+      {
+        ...makeDeps({
+          findReusableMkeExperienceRecipes,
+        }),
+        taskContext: {
+          peekReadPageContextMeasurement: () => ({
+            url: 'https://content.example/search_result/?keyword=AI图片创作&type=51',
+            pageRole: 'search_results',
+            fullReadByteLength: 40_000,
+            candidateActionsCount: 10,
+            highValueObjectCount: 10,
+          }),
+          peekVisibleRegionRowsEvidence: () => null,
+          noteUrlChange: jest.fn(),
+          noteChooseContextDecision: jest.fn(),
+        } as unknown as TaskSessionContext,
+      },
+    );
+
+    expect(result.isError).toBe(false);
+    const body = callTextPayload(result);
+    expect(body.strategy).toBe('experience_reuse');
+    expect(body.tokenEstimateChosen).toBeGreaterThan(0);
+    expect(body.tokenEstimateFullRead).toBe(10_000);
+    expect(body.tokensSavedEstimate).toBeGreaterThan(9_000);
+    expect(body.dispatcherInputSource).toBe('live_snapshot');
+  });
+
+  it('uses Object Library page facts as chooser dispatcher input when no task read baseline exists', async () => {
+    const handler = getChooseHandler();
+    const listReusableForPage = jest.fn().mockReturnValue([
+      {
+        objectType: 'action_target',
+        actionTypes: ['submit_search'],
+        redactionState: 'redacted',
+        sourceFreshness: 'fresh',
+        canTabrixOperate: true,
+        targetability: {
+          targetRef: 'historical-ref-must-not-leak',
+          coordinates: { x: 120, y: 240 },
+        },
+      },
+      {
+        objectType: 'result_card',
+        actionTypes: ['open_detail'],
+        redactionState: 'redacted',
+        sourceFreshness: 'fresh',
+        canTabrixOperate: true,
+        facts: {
+          rawBody: 'secret raw body must not leak',
+          Authorization: 'Bearer secret',
+          Cookie: 'session=secret',
+        },
+      },
+      {
+        objectType: 'region',
+        actionTypes: [],
+        redactionState: 'redacted',
+        sourceFreshness: 'fresh',
+        canTabrixOperate: true,
+      },
+      {
+        objectType: 'action_target',
+        actionTypes: ['click'],
+        redactionState: 'redacted',
+        sourceFreshness: 'stale',
+        canTabrixOperate: true,
+      },
+      {
+        objectType: 'action_target',
+        actionTypes: ['click'],
+        redactionState: 'redacted',
+        sourceFreshness: 'fresh',
+        canTabrixOperate: false,
+      },
+    ]);
+
+    const result = await handler(
+      {
+        intent: '内容站搜索并整理前10条结果',
+        url: 'https://content.example/search?q=ai',
+        pageRole: 'search_results',
+      },
+      makeDeps({
+        browserObjects: { listReusableForPage },
+      }),
+    );
+
+    expect(result.isError).toBe(false);
+    const body = callTextPayload(result);
+    expect(body.strategy).toBe('read_page_required');
+    expect(body.dispatcherInputSource).toBe('object_library_snapshot');
+    const serialized = JSON.stringify(body);
+    expect(serialized).not.toContain('historical-ref-must-not-leak');
+    expect(serialized).not.toContain('secret raw body must not leak');
+    expect(serialized).not.toContain('Bearer secret');
+    expect(serialized).not.toContain('session=secret');
+    expect(listReusableForPage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        siteFamily: 'content.example',
+        pageModelKey: 'page:content.example:search_results',
+        limit: 24,
+      }),
+    );
+  });
+
+  it('prefers the current task read baseline over Object Library historical facts', async () => {
+    const handler = getChooseHandler();
+    const listReusableForPage = jest.fn().mockReturnValue(
+      Array.from({ length: 24 }, () => ({
+        objectType: 'action_target',
+        actionTypes: ['click'],
+      })),
+    );
+
+    const result = await handler(
+      {
+        intent: '内容站搜索并整理前10条结果',
+        url: 'https://content.example/search?q=ai',
+        pageRole: 'search_results',
+      },
+      {
+        ...makeDeps({
+          browserObjects: { listReusableForPage },
+        }),
+        taskContext: {
+          peekReadPageContextMeasurement: () => ({
+            url: 'https://content.example/search?q=ai',
+            pageRole: 'search_results',
+            fullReadByteLength: 40_000,
+            candidateActionsCount: 2,
+            highValueObjectCount: 1,
+          }),
+          peekVisibleRegionRowsEvidence: () => null,
+          noteUrlChange: jest.fn(),
+          noteChooseContextDecision: jest.fn(),
+        } as unknown as TaskSessionContext,
+      },
+    );
+
+    expect(result.isError).toBe(false);
+    const body = callTextPayload(result);
+    expect(body.dispatcherInputSource).toBe('live_snapshot');
+    expect(body.tokenEstimateFullRead).toBe(10_000);
+  });
+
+  it('does not enter direct API without observed Knowledge even when fault injection is present', async () => {
     const handler = getChooseHandler();
     const fetchSpy = jest
       .spyOn(globalThis, 'fetch')
@@ -281,161 +886,23 @@ describe('native-tool-handlers · tabrix_choose_context (B-018 v1)', () => {
     try {
       const result = await handler(
         {
-          intent: '搜索 GitHub 上 AI助手 相关热门项目，列出前10个',
-          url: 'https://github.com/search?q=AI%20assistant&type=repositories',
+          intent: '搜索 Workspace 上 AI助手 相关热门项目，列出前10个',
+          url: 'https://code.example/search?q=AI%20assistant&type=repositories',
           pageRole: 'search_results',
           __tabrixAcceptanceApiFault: 'network_timeout',
         },
         makeDeps({
-          experience: {
-            suggestActionPaths: jest.fn().mockReturnValue([]),
-          } as unknown as ExperienceQueryService,
           knowledgeApi: null,
-          capabilityEnv: { TABRIX_POLICY_CAPABILITIES: 'api_knowledge' },
         }),
       );
 
       expect(result.isError).toBe(false);
       const body = callTextPayload(result);
-      expect(body.sourceRoute).toBe('knowledge_supported_read');
+      expect(body.sourceRoute).toBe('read_page_required');
       expect(body.directApiExecution).toBeUndefined();
       expect(fetchSpy).not.toHaveBeenCalled();
     } finally {
       fetchSpy.mockRestore();
     }
-  });
-});
-
-// ---------------------------------------------------------------------------
-// V24-01: experience_replay handler dispatch wiring
-// ---------------------------------------------------------------------------
-
-describe('native-tool-handlers · experience_replay (V24-01)', () => {
-  const VALID_ID = 'action_path_' + 'a'.repeat(64);
-
-  function getReplayHandler(): NativeToolHandler {
-    const handler = getNativeToolHandler(TOOL_NAMES.EXPERIENCE.REPLAY);
-    if (!handler) throw new Error('experience_replay handler missing');
-    return handler;
-  }
-
-  function buildReplayableRow(): ExperienceActionPathRow {
-    return {
-      actionPathId: VALID_ID,
-      pageRole: 'issues_list',
-      intentSignature: 'open repo issues tab',
-      stepSequence: [
-        {
-          toolName: 'chrome_click_element',
-          status: 'ok',
-          historyRef: 'h1',
-          args: { selector: '.issues-tab' },
-        },
-      ],
-      successCount: 1,
-      failureCount: 0,
-      lastUsedAt: '2026-04-22T00:00:00.000Z',
-      createdAt: '2026-04-20T00:00:00.000Z',
-      updatedAt: '2026-04-22T00:00:00.000Z',
-    };
-  }
-
-  function makeRecorderSpy(): ReplayStepRecorder & {
-    readonly starts: number;
-    readonly completes: number;
-    readonly fails: number;
-  } {
-    const state = { starts: 0, completes: 0, fails: 0 };
-    return {
-      startStep: () => {
-        state.starts += 1;
-        return `step-${state.starts}`;
-      },
-      completeStep: () => {
-        state.completes += 1;
-      },
-      failStep: () => {
-        state.fails += 1;
-      },
-      get starts() {
-        return state.starts;
-      },
-      get completes() {
-        return state.completes;
-      },
-      get fails() {
-        return state.fails;
-      },
-    };
-  }
-
-  it('registers under TOOL_NAMES.EXPERIENCE.REPLAY', () => {
-    expect(getNativeToolHandler(TOOL_NAMES.EXPERIENCE.REPLAY)).toBeDefined();
-  });
-
-  it('returns denied/capability_off when capability env is empty (default-deny)', async () => {
-    const handler = getReplayHandler();
-    const result = await handler({ actionPathId: VALID_ID }, makeDeps());
-    expect(result.isError).toBe(true);
-    const body = callTextPayload(result);
-    expect(body.status).toBe('denied');
-    expect(body.error?.code).toBe('capability_off');
-  });
-
-  it('returns failed-precondition/unknown_action_path when persistence is off', async () => {
-    const handler = getReplayHandler();
-    const result = await handler(
-      { actionPathId: VALID_ID },
-      makeDeps({
-        mode: 'off',
-        enabled: false,
-        capabilityEnv: { TABRIX_POLICY_CAPABILITIES: 'experience_replay' },
-      }),
-    );
-    expect(result.isError).toBe(true);
-    const body = callTextPayload(result);
-    expect(body.status).toBe('failed-precondition');
-    expect(body.error?.code).toBe('unknown_action_path');
-  });
-
-  it('end-to-end: replays a single click step with capability + bridge wired up', async () => {
-    const handler = getReplayHandler();
-    const fakeExperience = {
-      findActionPathById: jest.fn().mockReturnValue(buildReplayableRow()),
-      suggestActionPaths: jest.fn(),
-    } as unknown as ExperienceQueryService;
-    const recorder = makeRecorderSpy();
-    const dispatchBridged: DispatchBridgedFn = jest.fn(async () => ({
-      content: [{ type: 'text' as const, text: '{"ok":true,"historyRef":"h_live_1"}' }],
-      isError: false,
-    }));
-    const updateTaskIntent = jest.fn();
-
-    const result = await handler(
-      { actionPathId: VALID_ID },
-      makeDeps({
-        experience: fakeExperience,
-        capabilityEnv: { TABRIX_POLICY_CAPABILITIES: 'experience_replay' },
-        recorder,
-        dispatchBridged,
-        updateTaskIntent,
-      }),
-    );
-
-    expect(result.isError).toBe(false);
-    const body = callTextPayload(result);
-    expect(body.status).toBe('ok');
-    expect(body.evidenceRefs).toHaveLength(1);
-    expect(body.evidenceRefs[0]).toMatchObject({
-      stepIndex: 0,
-      toolName: 'chrome_click_element',
-      status: 'ok',
-      historyRef: 'h_live_1',
-    });
-    expect(dispatchBridged).toHaveBeenCalledTimes(1);
-    expect(recorder.starts).toBe(1);
-    expect(recorder.completes).toBe(1);
-    expect(recorder.fails).toBe(0);
-    expect(updateTaskIntent).toHaveBeenCalledWith(`experience_replay:${VALID_ID}`);
   });
 });

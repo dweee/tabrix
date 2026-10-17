@@ -8,6 +8,7 @@ import type {
 export function buildReadPageModeResult(params: {
   sharedPayload: ReadPageCompactSnapshot;
   mode: 'compact' | 'normal' | 'full';
+  requestedLayer: string;
   primaryRegionConfidence: ReadPagePrimaryRegionConfidence;
   footerOnly: boolean;
   anchorTexts: string[];
@@ -27,6 +28,9 @@ export function buildReadPageModeResult(params: {
   tips: string;
 }): ReadPageCompactSnapshot | ReadPageNormalSnapshot | ReadPageFullSnapshot {
   if (params.mode === 'compact') {
+    if (params.requestedLayer !== 'L0+L1+L2') {
+      return buildReadPageControlPayload(params.sharedPayload);
+    }
     return params.sharedPayload;
   }
 
@@ -68,4 +72,14 @@ export function buildReadPageModeResult(params: {
       reason: params.reason,
     },
   };
+}
+
+function buildReadPageControlPayload(
+  sharedPayload: ReadPageCompactSnapshot,
+): ReadPageCompactSnapshot {
+  const controlPayload = {
+    ...(sharedPayload as unknown as Record<string, unknown>),
+  };
+  delete controlPayload.aiContextEnvelope;
+  return controlPayload as unknown as ReadPageCompactSnapshot;
 }

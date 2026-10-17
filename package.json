@@ -37,22 +37,27 @@
     "deps:outdated": "pnpm -r outdated",
     "audit": "node ./scripts/audit-prod.mjs",
     "docs:check": "node ./scripts/check-docs.mjs",
+    "governance:public": "node ./scripts/check-public-governance.mjs",
     "governance:console": "node ./scripts/check-console-governance.mjs",
+    "governance:empty-catch": "node ./scripts/check-empty-catch.mjs --self-test && node ./scripts/check-empty-catch.mjs",
     "governance:extension-logs": "node ./scripts/check-extension-production-logs.mjs",
     "i18n:check": "node ./scripts/check-i18n.mjs",
     "ubuntu:self-check": "powershell -ExecutionPolicy Bypass -File ./scripts/run-ubuntu-docker-self-check.ps1",
     "ubuntu:xvfb-self-check": "powershell -ExecutionPolicy Bypass -File ./scripts/run-ubuntu-xvfb-self-check.ps1",
     "extension:reload": "node ./scripts/reload-extension.mjs",
-    "t4:github-baseline": "node ./scripts/t4-github-baseline.mjs",
+    "smoke:browser-world:redacted": "node ./scripts/mcp-redacted-browser-world-smoke.mjs",
     "t4:post-submit": "node ./scripts/t4-post-submit-tracker.mjs",
     "release:check": "node ./scripts/check-release-readiness.mjs",
     "release:check:ci": "node ./scripts/check-release-readiness.mjs --allow-missing-notes",
     "release:choose-context-stats": "node ./scripts/release-choose-context-stats.mjs",
+    "release:north-star-metrics": "node ./scripts/check-north-star-metrics.mjs",
     "benchmark:v23": "node ./scripts/benchmark-v23.mjs",
     "benchmark:v24": "node ./scripts/benchmark-v24.mjs",
     "benchmark:v25": "node ./scripts/benchmark-v25.mjs",
+    "benchmark:browser-object": "node ./scripts/browser-object-scenario-compare.mjs",
     "size:check": "node ./scripts/check-bundle-size.mjs",
-    "ci:check": "pnpm run i18n:check && pnpm run docs:check && pnpm run typecheck && pnpm run test:core && pnpm run audit",
+    "verify": "pnpm run typecheck && pnpm run lint && pnpm run test:core",
+    "ci:check": "pnpm run i18n:check && pnpm run docs:check && pnpm run governance:console && pnpm run governance:empty-catch && pnpm run typecheck && pnpm run lint && pnpm run test:core && pnpm run audit",
     "prepare": "husky"
   },
   "devDependencies": {
@@ -60,28 +65,17 @@
     "@commitlint/config-conventional": "^19.8.1",
     "@eslint/js": "^9.25.1",
     "@rolldown/binding-win32-x64-msvc": "1.0.0-rc.12",
-    "@typescript-eslint/eslint-plugin": "^8.58.1",
-    "@typescript-eslint/parser": "^8.58.1",
+    "@typescript-eslint/eslint-plugin": "^8.61.0",
+    "@typescript-eslint/parser": "^8.61.0",
     "eslint": "^9.39.4",
     "eslint-config-prettier": "^10.1.5",
-    "eslint-plugin-vue": "^10.0.0",
+    "eslint-plugin-vue": "^10.9.2",
     "globals": "^16.1.0",
     "husky": "^9.1.7",
     "lint-staged": "^15.5.1",
-    "prettier": "^3.8.2",
+    "prettier": "^3.8.4",
     "typescript": "^5.8.3",
-    "typescript-eslint": "^8.58.1",
-    "vue-eslint-parser": "^10.1.3"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "better-sqlite3"
-    ],
-    "overrides": {
-      "onnxruntime-web": "1.24.3",
-      "hono": "4.12.14",
-      "@hono/node-server": "1.19.14",
-      "fast-uri": "3.1.2"
-    }
+    "typescript-eslint": "^8.61.0",
+    "vue-eslint-parser": "^10.4.1"
   }
 }

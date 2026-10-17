@@ -1,4 +1,5 @@
 import { initNativeHostListener } from './native-host';
+import { initBrowserWorldInventory } from './browser-world-inventory';
 
 /**
  * Background script entry point
@@ -10,6 +11,8 @@ import { initNativeHostListener } from './native-host';
  * from `background/memory/` or `background/knowledge/`.
  */
 export default defineBackground(() => {
+  initBrowserWorldInventory();
+
   chrome.runtime.onInstalled.addListener((details) => {
     if (details.reason === 'install') {
       chrome.tabs.create({

@@ -65,8 +65,8 @@ export type LayerDispatchTaskType = 'reading_only' | 'action' | 'unknown';
 
 export interface LayerDispatchInput {
   /**
-   * Optional structural label of the page (e.g. `'repo_home'`,
-   * `'workflow_run_detail'`). Trimmed before use; an empty / missing
+   * Optional structural label of the page (e.g. `'search_results'`,
+   * `'content_detail'`). Trimmed before use; an empty / missing
    * value triggers the fail-safe row when no other rule matches.
    */
   pageRole?: string | null;
@@ -95,15 +95,9 @@ export interface LayerDispatchInput {
    */
   searchListIntent?: boolean;
   /**
-   * Whether the chooser has a replay-eligible Experience candidate
-   * for this `(intent, pageRole)` bucket (i.e.
-   * `experience_replay` would actually run). Drives priority-5.
-   */
-  experienceReplayAvailable?: boolean;
-  /**
    * Set by upstream callers when stability invariants would lose
-   * required fields at a shallower layer (e.g. portable replay args,
-   * stable targetRef registry, click verifier inputs). When `true`,
+   * required fields at a shallower layer (e.g. stable targetRef registry,
+   * click verifier inputs). When `true`,
    * the dispatcher MUST stay at `L0+L1+L2` regardless of any other
    * row. This is the priority-1 safety override.
    */
@@ -143,12 +137,7 @@ export interface LayerDispatchResult {
    * eligible"). Never includes the row that won.
    */
   alternatives: LayerDispatchAlternative[];
-  /**
-   * `true` ONLY when the dispatcher selected the
-   * `experience_replay_skip_read` source route (Strategy Table row 8
-   * → kickoff binding). The caller is expected to skip
-   * `chrome_read_page` entirely on this branch.
-   */
+  /** Reserved for future non-DOM read paths. Currently false. */
   readPageAvoided: boolean;
   /** Populated only on the fail-safe branch; `''` otherwise. */
   fallbackCause: string;
@@ -195,14 +184,13 @@ interface NormalizedInput {
   hvoCount: number;
   knowledgeAvailable: boolean;
   searchListIntent: boolean;
-  experienceReplayAvailable: boolean;
   safetyRequiresFullLayers: boolean;
   safetyReason: string;
   fullReadByteLength: number;
 }
 
 const SAFE_REASON_FALLBACK: LayerDispatchReason = 'dispatcher_fallback_safe';
-const SAFE_LAYER_FALLBACK: ReadPageRequestedLayer = 'L0+L1+L2';
+const SAFE_LAYER_FALLBACK: ReadPageRequestedLayer = 'L0+L1';
 const SAFE_ROUTE_FALLBACK: LayerSourceRoute = 'dispatcher_fallback_safe';
 
 /**
@@ -287,20 +275,6 @@ const RULES: readonly DispatchRule[] = Object.freeze([
   },
 
   // ---------- priority 5 — MKEP support ----------
-  // Replay kickoff binding:
-  //   `experience_replay` available + safe → chosenLayer='L0',
-  //   sourceRoute='experience_replay_skip_read'. The caller decides
-  //   whether to skip `chrome_read_page` based on `sourceRoute`.
-  // NOTE: this rule is intentionally placed AFTER user-intent and
-  // task-type so an explicit "details" override is honoured even
-  // when replay is technically available — the stability contract takes
-  // precedence over token savings.
-  {
-    layer: 'L0',
-    reason: 'experience_replay_executable',
-    sourceRoute: 'experience_replay_skip_read',
-    matches: (i) => i.experienceReplayAvailable,
-  },
   {
     layer: 'L0',
     reason: 'knowledge_supports_summary',
@@ -362,7 +336,6 @@ function normalizeInput(input: LayerDispatchInput): NormalizedInput | { error: s
     hvoCount: normalizeCount(input.hvoCount),
     knowledgeAvailable: normalizeBool(input.knowledgeAvailable),
     searchListIntent: normalizeBool(input.searchListIntent),
-    experienceReplayAvailable: normalizeBool(input.experienceReplayAvailable),
     safetyRequiresFullLayers: normalizeBool(input.safetyRequiresFullLayers),
     safetyReason: normalizeString(input.safetyReason),
     fullReadByteLength: normalizeCount(input.fullReadByteLength),
@@ -399,7 +372,7 @@ ensureClosedEnumsAreInSync();
 
 /**
  * Pure dispatcher entrypoint. NEVER throws on bad input — returns the
- * fail-safe `{ L0+L1+L2, dispatcher_fallback_safe, dispatcher_fallback_safe }`
+ * fail-safe `{ L0+L1, dispatcher_fallback_safe, dispatcher_fallback_safe }`
  * triple so the chooser callsite always has a usable result.
  *
  * Programmer errors (e.g. a future change accidentally inserts a
@@ -452,18 +425,19 @@ export function dispatchLayer(input: LayerDispatchInput): LayerDispatchResult {
     tokenEstimate,
     fullReadTokenEstimate,
     alternatives,
-    readPageAvoided: chosen.sourceRoute === 'experience_replay_skip_read',
+    readPageAvoided: false,
     fallbackCause: '',
   };
 }
 
 function buildFailSafe(fullReadByteLength: number, cause: string): LayerDispatchResult {
   const fullReadTokenEstimate = estimateTokensFromBytes(fullReadByteLength);
+  const chosenBytes = Math.floor(fullReadByteLength * layerByteFraction(SAFE_LAYER_FALLBACK));
   return {
     chosenLayer: SAFE_LAYER_FALLBACK,
     reason: SAFE_REASON_FALLBACK,
     sourceRoute: SAFE_ROUTE_FALLBACK,
-    tokenEstimate: fullReadTokenEstimate,
+    tokenEstimate: estimateTokensFromBytes(chosenBytes),
     fullReadTokenEstimate,
     alternatives: [],
     readPageAvoided: false,

@@ -100,10 +100,6 @@ describe('bridge recovery orchestration', () => {
       .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
       .mockResolvedValueOnce({
         status: 'success',
-        items: [],
-      } as never)
-      .mockResolvedValueOnce({
-        status: 'success',
         data: {
           content: [{ type: 'text', text: 'ok' }],
           isError: false,
@@ -116,7 +112,7 @@ describe('bridge recovery orchestration', () => {
     expect(spawn).toHaveBeenCalled();
     expect((spawn as jest.Mock).mock.calls[0][0]).toMatch(/chrome|chromium/i);
     expect((spawn as jest.Mock).mock.calls[0][0]).not.toBe('cmd');
-    expect(nativeRequestSpy).toHaveBeenCalledTimes(2);
+    expect(nativeRequestSpy).toHaveBeenCalledTimes(1);
     expect(bridgeRuntimeState.getSnapshot().bridgeState).toBe('READY');
   });
 
@@ -165,19 +161,13 @@ describe('bridge recovery orchestration', () => {
       }),
     );
 
-    jest
-      .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-      .mockResolvedValueOnce({
-        status: 'success',
-        items: [],
-      } as never)
-      .mockResolvedValueOnce({
-        status: 'success',
-        data: {
-          content: [{ type: 'text', text: 'ok' }],
-          isError: false,
-        },
-      } as never);
+    jest.spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait').mockResolvedValueOnce({
+      status: 'success',
+      data: {
+        content: [{ type: 'text', text: 'ok' }],
+        isError: false,
+      },
+    } as never);
 
     const result = await handleToolCall('chrome_read_page', { tabId: 2 });
 
@@ -223,10 +213,6 @@ describe('bridge recovery orchestration', () => {
 
       jest
         .spyOn(nativeMessagingHostInstance, 'sendRequestToExtensionAndWait')
-        .mockResolvedValueOnce({
-          status: 'success',
-          items: [],
-        } as never)
         .mockResolvedValueOnce({
           status: 'success',
           data: {

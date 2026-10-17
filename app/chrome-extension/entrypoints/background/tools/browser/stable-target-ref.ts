@@ -41,9 +41,8 @@ export interface StableTargetRefInputs {
    * 0-based ordinal among objects sharing the same identity tuple
    * `(pageRole, objectSubType, role, normalizedLabel, hrefBucket)`.
    *
-   * Most objects in real GitHub pages get ordinal=0 because their `href`
-   * already disambiguates. Ordinal only matters for visually-duplicate
-   * siblings.
+   * Most link-like objects get ordinal=0 because their `href` already
+   * disambiguates. Ordinal only matters for visually-duplicate siblings.
    */
   ordinal: number;
 }
@@ -80,11 +79,10 @@ export function normalizePageRole(input: unknown): string {
  *
  * Rules (intentionally tiny — this is not a full URL canonicalizer):
  *   1. Strip protocol+host so reloads via slightly different mirrors
- *      (e.g. `https://github.com` vs an in-app extension proxy) match.
+ *      or an in-app extension proxy match.
  *   2. Drop the query string and fragment — these encode UI state, not
  *      object identity.
- *   3. Collapse `+` and `%20` runs to a single space marker (rare on
- *      GitHub but prevents obvious drift).
+ *   3. Collapse `+` and `%20` runs to a single space marker.
  *   4. Lowercase.
  *
  * Returns `''` for inputs that are not URL-shaped, so the hash key
@@ -123,7 +121,7 @@ export function normalizeHrefBucket(input: unknown): string {
  * algorithm by bryc (https://github.com/bryc). Chosen because:
  *   - synchronous + zero dependencies
  *   - 53-bit output gives ~10^16 buckets, ample for per-snapshot uniqueness
- *   - matches existing `userscript.ts` content-hashing style in this repo
+ *   - stable across extension reloads without persisting raw DOM/source content
  */
 export function cyrb53(input: string, seed = 0): number {
   let h1 = 0xdeadbeef ^ seed;

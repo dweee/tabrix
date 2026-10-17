@@ -8,9 +8,6 @@
   "nativeServerConfigLabel": {
     "message": "ネイティブサーバー設定"
   },
-  "semanticEngineLabel": {
-    "message": "セマンティックエンジン"
-  },
   "embeddingModelLabel": {
     "message": "埋め込みモデル"
   },
@@ -112,21 +109,6 @@
   },
   "downloadingStatus": {
     "message": "ダウンロード中..."
-  },
-  "semanticEngineReadyStatus": {
-    "message": "セマンティックエンジン準備完了"
-  },
-  "semanticEngineInitializingStatus": {
-    "message": "セマンティックエンジン初期化中..."
-  },
-  "semanticEngineInitFailedStatus": {
-    "message": "セマンティックエンジンの初期化に失敗しました"
-  },
-  "semanticEngineNotInitStatus": {
-    "message": "セマンティックエンジン未初期化"
-  },
-  "initSemanticEngineButton": {
-    "message": "セマンティックエンジンを初期化"
   },
   "reinitializeButton": {
     "message": "再初期化"

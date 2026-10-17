@@ -1,10 +1,10 @@
 /**
  * Page Context Provider.
  *
- * Replaces hard-coded dispatcher counters with real counters drawn from the
- * most recent `memory_page_snapshots` row that matches the chooser call. The
- * chooser still runs as a pure function over already-resolved facts; this
- * provider is the only IO-touching adapter that surfaces those facts.
+ * Supplies dispatcher counters to the chooser. The old
+ * `memory_page_snapshots` adapter is retired; callers currently pass `null`
+ * so the chooser records an explicit fallback-zero input until Object Library
+ * live facts become the backing source.
  *
  * Lookup order:
  *   1. `live_snapshot` — newest snapshot whose `url` exactly matches
@@ -30,8 +30,7 @@
  * so telemetry stays trustworthy.
  *
  * Hard rules:
- *   - This module is read-only. It NEVER writes to
- *     `memory_page_snapshots`. It NEVER mutates the chooser input.
+ *   - This module is read-only. It NEVER mutates the chooser input.
  *   - All errors below SQLite layer become `fallback_zero` with
  *     cause `provider_error` — the chooser hot path must not throw
  *     on a corrupt DB row.
@@ -40,9 +39,11 @@
  *     persistence is `off`).
  */
 
-import type { PageSnapshot } from '../memory/db/page-snapshot-repository';
-
-export type DispatcherInputSource = 'live_snapshot' | 'memory_snapshot' | 'fallback_zero';
+export type DispatcherInputSource =
+  | 'live_snapshot'
+  | 'memory_snapshot'
+  | 'object_library_snapshot'
+  | 'fallback_zero';
 
 export type DispatcherInputFallbackCause =
   | 'persistence_off'
@@ -64,6 +65,14 @@ export interface PageContextLookupResult {
   hvoCount: number;
   fullReadByteLength: number;
   pageRole: string | null;
+  /**
+   * Closed-enum verdict for whether this context came from the current page.
+   * Only an exact same-task URL snapshot is fresh. Object-library and role-only
+   * snapshots are planning hints and must not authorize read skipping.
+   */
+  factSnapshotVerdict: 'fresh' | 'stale' | 'missing' | 'unknown';
+  /** Conservative readiness verdict for the snapshot above. */
+  readinessVerdict: 'ready' | 'document_loading' | 'empty' | 'error_or_blocked' | 'unknown';
   /** Set only when `source === 'fallback_zero'`. */
   fallbackCause?: DispatcherInputFallbackCause;
 }
@@ -72,16 +81,28 @@ export interface PageContextProvider {
   getContext(input: PageContextLookupInput): PageContextLookupResult;
 }
 
+export interface PageSnapshotLike {
+  contextSource?: Exclude<DispatcherInputSource, 'fallback_zero'>;
+  /** True only for a successful read bound to the current task and page identity. */
+  currentPageValidated?: boolean;
+  fullReadByteLength?: number | null;
+  protocolL0Blob?: string | null;
+  protocolL1Blob?: string | null;
+  protocolL2Blob?: string | null;
+  candidateActionCount?: number | null;
+  highValueObjectCount?: number | null;
+  pageRole?: string | null;
+}
+
 /**
  * Narrow read surface the live provider needs from
- * `PageSnapshotRepository`. Intentionally does NOT include
- * `findLatestGlobal`: an unrelated newest snapshot is not honest dispatcher
- * input. The repository still exposes the global accessor for other callers
- * (e.g. operator tooling), but the provider must not consume it.
+ * a future Object Library-backed snapshot reader. Intentionally does NOT
+ * include a global "newest anywhere" accessor: unrelated pages are not honest
+ * dispatcher input.
  */
 export interface PageSnapshotReader {
-  findLatestForUrl(url: string): PageSnapshot | undefined;
-  findLatestForPageRole(pageRole: string): PageSnapshot | undefined;
+  findLatestForUrl(url: string): PageSnapshotLike | undefined;
+  findLatestForPageRole(pageRole: string): PageSnapshotLike | undefined;
 }
 
 export interface LivePageContextProviderOptions {
@@ -102,6 +123,8 @@ const FALLBACK_ZERO = (
   hvoCount: 0,
   fullReadByteLength: 0,
   pageRole,
+  factSnapshotVerdict: 'unknown',
+  readinessVerdict: 'unknown',
   fallbackCause: cause,
 });
 
@@ -114,7 +137,14 @@ const FALLBACK_ZERO = (
  * the dispatcher treats 0 as "no estimate" and falls back to its
  * own heuristic.
  */
-function estimateFullReadByteLength(snap: PageSnapshot): number {
+function estimateFullReadByteLength(snap: PageSnapshotLike): number {
+  if (
+    typeof snap.fullReadByteLength === 'number' &&
+    Number.isFinite(snap.fullReadByteLength) &&
+    snap.fullReadByteLength > 0
+  ) {
+    return Math.floor(snap.fullReadByteLength);
+  }
   let total = 0;
   for (const blob of [snap.protocolL0Blob, snap.protocolL1Blob, snap.protocolL2Blob]) {
     if (typeof blob === 'string') total += blob.length;
@@ -123,17 +153,26 @@ function estimateFullReadByteLength(snap: PageSnapshot): number {
 }
 
 function projectSnapshot(
-  snap: PageSnapshot,
-  source: 'live_snapshot' | 'memory_snapshot',
+  snap: PageSnapshotLike,
+  source: Exclude<DispatcherInputSource, 'fallback_zero'>,
 ): PageContextLookupResult {
+  const fullReadByteLength = estimateFullReadByteLength(snap);
+  const isFreshCurrentPageSnapshot =
+    source === 'live_snapshot' && (snap.currentPageValidated === true || fullReadByteLength > 0);
   return {
     source,
-    candidateActionsCount: Number.isFinite(snap.candidateActionCount)
-      ? snap.candidateActionCount
-      : 0,
-    hvoCount: Number.isFinite(snap.highValueObjectCount) ? snap.highValueObjectCount : 0,
-    fullReadByteLength: estimateFullReadByteLength(snap),
+    candidateActionsCount:
+      typeof snap.candidateActionCount === 'number' && Number.isFinite(snap.candidateActionCount)
+        ? snap.candidateActionCount
+        : 0,
+    hvoCount:
+      typeof snap.highValueObjectCount === 'number' && Number.isFinite(snap.highValueObjectCount)
+        ? snap.highValueObjectCount
+        : 0,
+    fullReadByteLength,
     pageRole: typeof snap.pageRole === 'string' && snap.pageRole.length > 0 ? snap.pageRole : null,
+    factSnapshotVerdict: isFreshCurrentPageSnapshot ? 'fresh' : 'unknown',
+    readinessVerdict: isFreshCurrentPageSnapshot ? 'ready' : 'unknown',
   };
 }
 
@@ -165,11 +204,11 @@ export class LivePageContextProvider implements PageContextProvider {
       const url = normalizeUrl(input.url ?? null);
       if (url) {
         const live = this.reader.findLatestForUrl(url);
-        if (live) return projectSnapshot(live, 'live_snapshot');
+        if (live) return projectSnapshot(live, live.contextSource ?? 'live_snapshot');
       }
       if (requestedPageRole) {
         const byRole = this.reader.findLatestForPageRole(requestedPageRole);
-        if (byRole) return projectSnapshot(byRole, 'memory_snapshot');
+        if (byRole) return projectSnapshot(byRole, byRole.contextSource ?? 'memory_snapshot');
       }
       // NO global "newest snapshot anywhere" fallback: an unrelated page's
       // complexity is not honest dispatcher input. Surface a precise cause so

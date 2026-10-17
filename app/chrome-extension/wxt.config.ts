@@ -54,6 +54,7 @@ export default defineConfig({
       'webNavigation',
       'debugger',
       'history',
+      'idle',
       'bookmarks',
       'offscreen',
       'storage',
@@ -63,10 +64,6 @@ export default defineConfig({
       'sidePanel',
     ],
     host_permissions: ['<all_urls>'],
-    options_ui: {
-      page: 'options.html',
-      open_in_tab: true,
-    },
     action: {
       default_popup: 'popup.html',
       default_title: 'Tabrix',
@@ -99,6 +96,10 @@ export default defineConfig({
         }),
   },
   vite: (env) => ({
+    server: {
+      port: 3000,
+      strictPort: true,
+    },
     esbuild:
       env.mode === 'production'
         ? {

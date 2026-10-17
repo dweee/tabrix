@@ -1,0 +1,272 @@
+import type {
+  ReadPageCandidateAction,
+  ReadPageHighValueObject,
+  ReadPageInteractiveElement,
+  ReadPageTaskMode,
+} from '@tabrix/shared';
+import type { VisibleRegionRowsResult } from './visible-region-rows';
+import { LOW_BUSINESS_SIGNAL_PATTERN } from './read-page-perception-neutral';
+
+const COMPARE_HINT_PATTERN = /\b(compare|diff|review changes)\b/i;
+const EXTRACT_HINT_PATTERN = /\b(export|download|copy|artifact|csv|json)\b/i;
+const MONITOR_HINT_PATTERN = /\b(summary|jobs?|logs?|annotations?|workflow run|runs?)\b/i;
+const SEARCH_HINT_PATTERN =
+  /\b(search(?: issues?)?|filter(?: issues?)?|find|labels?|milestone|assignee|query|new issue|issue entries)\b|搜索|筛选|查询/i;
+const FORM_WORKFLOW_HINT_PATTERN =
+  /\b(upload|submit|publish|save|create|generate|attach|choose file|select file)\b|上传|提交|发布|保存|生成|选择文件|添加(?:图片|文件)|配图/i;
+const SEARCH_CONTROL_HINT_PATTERN = /\b(search|filter|query)\b|搜索|筛选|查询/i;
+const COMMIT_SHA_PATTERN = /\b[0-9a-f]{7,40}\b/i;
+
+type RankedTaskMode = Exclude<ReadPageTaskMode, 'read'>;
+
+export interface TaskModeInferenceParams {
+  currentUrl: string;
+  currentTitle: string;
+  pageRole: string;
+  primaryRegion: string | null;
+  interactiveElements: ReadPageInteractiveElement[];
+  candidateActions: ReadPageCandidateAction[];
+  visibleRegionRows?: VisibleRegionRowsResult;
+}
+
+interface TaskModeSignalContext {
+  url: string;
+  title: string;
+  pageRole: string;
+  primaryRegion: string;
+  hasVisibleRegionRows: boolean;
+  signalText: string[];
+  highValueText: string[];
+}
+
+interface RouteTaskModeHint {
+  pathPattern: RegExp;
+  taskMode: RankedTaskMode;
+  score: number;
+}
+
+const PAGE_ROLE_TASK_MODE_HINTS: Partial<Record<string, ReadPageTaskMode>> = {
+  content_detail: 'read',
+  publish_form: 'read',
+  search_results: 'search',
+  login_required: 'read',
+};
+
+const PRIMARY_REGION_TASK_MODE_HINTS: Partial<Record<string, ReadPageTaskMode>> = {
+  content_detail: 'read',
+  form: 'read',
+  search_results: 'search',
+  login_gate: 'read',
+  login_form: 'read',
+};
+
+const TASK_MODE_SIGNAL_PATTERNS: Record<RankedTaskMode, RegExp[]> = {
+  search: [SEARCH_HINT_PATTERN],
+  monitor: [MONITOR_HINT_PATTERN],
+  compare: [COMPARE_HINT_PATTERN],
+  extract: [EXTRACT_HINT_PATTERN],
+};
+
+const ROUTE_TASK_MODE_HINTS: readonly RouteTaskModeHint[] = [
+  {
+    pathPattern: /\/(?:search|results?)(?:\/?|$)/i,
+    taskMode: 'search',
+    score: 2,
+  },
+  {
+    pathPattern: /\/(?:jobs?|logs?)(?:\/?|$)/i,
+    taskMode: 'monitor',
+    score: 2,
+  },
+];
+
+function normalizeTaskLabel(label: string): string {
+  return String(label || '')
+    .trim()
+    .toLowerCase();
+}
+
+function getPathname(url: string): string {
+  try {
+    return new URL(url).pathname.toLowerCase();
+  } catch {
+    return String(url || '').toLowerCase();
+  }
+}
+
+function isTaskModeNoiseLabel(label: string): boolean {
+  const normalized = String(label || '').trim();
+  if (!normalized) return true;
+  if (COMMIT_SHA_PATTERN.test(normalized)) return true;
+  if (/^\d+[smhd]$/i.test(normalized)) return true;
+  if (/^commit\b/i.test(normalized)) return true;
+  if (/^fix\(|^feat\(|^docs\(|^chore\(/i.test(normalized)) return true;
+  if (/^search or jump to/i.test(normalized)) return true;
+  if (/^open copilot/i.test(normalized)) return true;
+  if (/^skip to content$/i.test(normalized)) return true;
+  if (LOW_BUSINESS_SIGNAL_PATTERN.test(normalized)) return true;
+  return false;
+}
+
+function getCandidateActionLabel(
+  action: ReadPageCandidateAction,
+  interactiveByRef: Map<string, ReadPageInteractiveElement>,
+): string {
+  const target = interactiveByRef.get(action.targetRef);
+  const ariaLabel = action.locatorChain.find((item) => item.type === 'aria')?.value;
+  return String(target?.name || ariaLabel || action.targetRef || action.id).trim();
+}
+
+function buildInteractiveMap(elements: ReadPageInteractiveElement[]) {
+  const map = new Map<string, ReadPageInteractiveElement>();
+  for (const element of elements) {
+    if (!element?.ref) continue;
+    map.set(element.ref, element);
+  }
+  return map;
+}
+
+function countPatternMatches(patterns: RegExp[], values: string[]): number {
+  let matchCount = 0;
+  for (const value of values) {
+    if (!value) continue;
+    if (patterns.some((pattern) => pattern.test(value))) {
+      matchCount += 1;
+    }
+  }
+  return matchCount;
+}
+
+function buildTaskModeSignalContext(
+  params: TaskModeInferenceParams,
+  highValueObjects: ReadPageHighValueObject[],
+): TaskModeSignalContext {
+  const interactiveByRef = buildInteractiveMap(params.interactiveElements);
+  const candidateLabels = params.candidateActions
+    .map((item) => getCandidateActionLabel(item, interactiveByRef))
+    .filter((item) => !isTaskModeNoiseLabel(item));
+  const actionHints = params.candidateActions
+    .map((item) => String(item?.matchReason || item?.actionType || '').trim())
+    .filter(Boolean);
+  const interactiveLabels = params.interactiveElements
+    .map((item) => String(item?.name || '').trim())
+    .filter((item) => !isTaskModeNoiseLabel(item));
+  return {
+    url: String(params.currentUrl || '').toLowerCase(),
+    title: String(params.currentTitle || '').toLowerCase(),
+    pageRole: String(params.pageRole || ''),
+    primaryRegion: String(params.primaryRegion || ''),
+    hasVisibleRegionRows: Boolean(params.visibleRegionRows?.visibleRegionRowsUsed),
+    signalText: [...interactiveLabels, ...candidateLabels, ...actionHints].map((item) =>
+      item.toLowerCase(),
+    ),
+    highValueText: highValueObjects
+      .slice(0, 4)
+      .map((item) => normalizeTaskLabel(item?.label || ''))
+      .filter((item) => !isTaskModeNoiseLabel(item)),
+  };
+}
+
+function routeHintScore(mode: RankedTaskMode, context: TaskModeSignalContext): number {
+  const path = getPathname(context.url);
+  return ROUTE_TASK_MODE_HINTS.filter(
+    (hint) => hint.taskMode === mode && hint.pathPattern.test(path),
+  ).reduce((sum, hint) => sum + hint.score, 0);
+}
+
+function scoreTaskMode(mode: RankedTaskMode, context: TaskModeSignalContext): number {
+  let score = 0;
+  const hasRoleOrRegionHint =
+    PAGE_ROLE_TASK_MODE_HINTS[context.pageRole] === mode ||
+    PRIMARY_REGION_TASK_MODE_HINTS[context.primaryRegion] === mode;
+  if (PAGE_ROLE_TASK_MODE_HINTS[context.pageRole] === mode) {
+    score += 6;
+  }
+  if (PRIMARY_REGION_TASK_MODE_HINTS[context.primaryRegion] === mode) {
+    score += 5;
+  }
+
+  const patterns = TASK_MODE_SIGNAL_PATTERNS[mode];
+  const titleMatchCount = countPatternMatches(patterns, [context.title]);
+  const signalMatchCount = countPatternMatches(patterns, context.signalText);
+  const highValueMatchCount = countPatternMatches(patterns, context.highValueText);
+  score += titleMatchCount * (mode === 'search' && !context.hasVisibleRegionRows ? 1 : 3);
+  score += signalMatchCount * 2;
+  score += highValueMatchCount * 3;
+
+  if (mode === 'search' && signalMatchCount >= 2) {
+    score += 2;
+  }
+
+  if (mode === 'search' && context.hasVisibleRegionRows && titleMatchCount > 0) {
+    score += 3;
+  }
+  score += routeHintScore(mode, context);
+  if (mode === 'compare' && COMPARE_HINT_PATTERN.test(context.url)) {
+    score += 4;
+  }
+  if (mode === 'extract' && EXTRACT_HINT_PATTERN.test(context.url)) {
+    score += 4;
+  }
+
+  if (
+    mode === 'search' &&
+    !context.hasVisibleRegionRows &&
+    !hasRoleOrRegionHint &&
+    routeHintScore(mode, context) === 0 &&
+    signalMatchCount < 2
+  ) {
+    return Math.min(score, 4);
+  }
+  if (
+    mode === 'search' &&
+    hasFormWorkflowSignal(context) &&
+    !hasSearchControlSignal(context) &&
+    !hasRoleOrRegionHint &&
+    routeHintScore(mode, context) === 0
+  ) {
+    return Math.min(score, 4);
+  }
+  return score;
+}
+
+function hasFormWorkflowSignal(context: TaskModeSignalContext): boolean {
+  return [...context.signalText, ...context.highValueText].some((item) =>
+    FORM_WORKFLOW_HINT_PATTERN.test(item),
+  );
+}
+
+function hasSearchControlSignal(context: TaskModeSignalContext): boolean {
+  return [...context.signalText, ...context.highValueText, context.title].some((item) =>
+    SEARCH_CONTROL_HINT_PATTERN.test(item),
+  );
+}
+
+function scoreReadTaskMode(context: TaskModeSignalContext): number {
+  let score = 0;
+  if (PAGE_ROLE_TASK_MODE_HINTS[context.pageRole] === 'read') {
+    score += 6;
+  }
+  if (PRIMARY_REGION_TASK_MODE_HINTS[context.primaryRegion] === 'read') {
+    score += 5;
+  }
+  return score;
+}
+
+export function inferReadPageTaskMode(
+  params: TaskModeInferenceParams,
+  highValueObjects: ReadPageHighValueObject[],
+): ReadPageTaskMode {
+  const context = buildTaskModeSignalContext(params, highValueObjects);
+  const readScore = scoreReadTaskMode(context);
+  const rankedModes: RankedTaskMode[] = ['monitor', 'search', 'extract', 'compare'];
+  const ranked = rankedModes
+    .map((mode) => ({ mode, score: scoreTaskMode(mode, context) }))
+    .sort((left, right) => right.score - left.score);
+
+  if (ranked[0]?.score >= 5 && ranked[0].score > readScore) {
+    return ranked[0].mode;
+  }
+
+  return 'read';
+}

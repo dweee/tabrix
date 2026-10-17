@@ -100,15 +100,15 @@ describe('V27-00 privacy-gate — redactForPersistence', () => {
 
   it('drops raw url / href / search keys but keeps urlPattern', () => {
     const input = {
-      urlPattern: 'github.com/repos/:owner/:repo/issues',
-      url: 'https://github.com/owner/repo/issues?q=secret',
-      href: 'https://github.com/owner/repo/issues#x',
+      urlPattern: 'code.example/repos/:owner/:repo/issues',
+      url: 'https://code.example/owner/repo/issues?q=secret',
+      href: 'https://code.example/owner/repo/issues#x',
       search: '?token=ABCDEF',
       method: 'GET',
     };
     const out = redactForPersistence(input, { kind: 'fact_snapshot' });
     expect(out).toEqual({
-      urlPattern: 'github.com/repos/:owner/:repo/issues',
+      urlPattern: 'code.example/repos/:owner/:repo/issues',
       method: 'GET',
     });
   });

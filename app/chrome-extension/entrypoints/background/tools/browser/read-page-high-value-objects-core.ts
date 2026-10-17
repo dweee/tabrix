@@ -129,8 +129,8 @@ export interface CandidateObject {
   /**
    * T5.4.5 — optional raw href mirrored from the originating
    * `ReadPageInteractiveElement`. Enables URL-based classification
-   * (e.g. distinguishing workflow_run_entry vs workflow_file_entry
-   * on GitHub `/actions`).
+   * (for example distinguishing result_card vs filter_control
+   * on visually dense list/detail pages).
    */
   href?: string;
 }
@@ -141,7 +141,7 @@ export interface ClassifiedCandidateObject extends CandidateObject {
   /**
    * T5.4.5 — optional namespaced sub-type set by family adapters when they
    * can distinguish finer categories than the neutral `objectType` enum
-   * (e.g. `github.workflow_run_entry` vs `github.workflow_file_entry`).
+   * (for example `result_card` vs `filter_control`).
    * Consumers MUST treat this as optional and prefix-matched.
    */
   objectSubType?: string;

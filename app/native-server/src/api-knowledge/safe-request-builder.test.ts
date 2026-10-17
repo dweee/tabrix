@@ -1,11 +1,7 @@
 /**
  * V26-FIX-04 — `buildSafeRequest` unit tests.
  *
- * Pins the builder's two branches and the safety boundary:
- *   - seed_adapter: bit-identical to the V25
- *     `buildPublicRequest` output for the same inputs (so the
- *     existing GitHub/npmjs Gate B tests stay green when the
- *     executor flips to lookup-first in FIX-04).
+ * Pins the builder safety boundary:
  *   - generic: produces an `https://<host><path>?<primary>=<value>`
  *     URL only when (a) the row has an observed primary query key
  *     and (b) the caller supplied a value for it.
@@ -60,8 +56,7 @@ function row(overrides: Partial<ScoredFixtureRow>): ScoredFixtureRow {
     responseShapeSummary: null,
     usableForTaskPersisted: true,
     noiseReason: null,
-    endpointSource:
-      overrides.family === 'github' || overrides.family === 'npmjs' ? 'seed_adapter' : 'observed',
+    endpointSource: 'observed',
     correlationConfidence: null,
     correlatedRegionId: null,
     confidenceReason: null,
@@ -93,163 +88,9 @@ const baseDataNeed: DataNeed = {
   intent: 'find tabrix repos',
   intentClass: 'read_only',
   semanticTypeWanted: 'search',
-  urlHint: 'https://github.com/search?q=tabrix',
+  urlHint: 'https://content.example/search?q=tabrix',
   pageRole: null,
 };
-
-describe('V26-FIX-04 buildSafeRequest — seed_adapter branch', () => {
-  it('builds a github_search_repositories URL identical to V25 builder', () => {
-    const m = match({
-      site: 'api.github.com',
-      urlPattern: 'api.github.com/search/repositories',
-      family: 'github',
-      semanticType: 'search',
-    });
-    const plan = buildSafeRequest(m, {
-      ...baseDataNeed,
-      params: { query: 'tabrix', sort: 'stars', order: 'desc' },
-    });
-    expect(plan).not.toBeNull();
-    expect(plan!.builderHint).toBe('seed_adapter');
-    expect(plan!.dataPurpose).toBe('search_list');
-    expect(plan!.url).toContain('https://api.github.com/search/repositories');
-    expect(plan!.url).toContain('q=tabrix');
-    expect(plan!.url).toContain('sort=stars');
-    expect(plan!.url).toContain('order=desc');
-    expect(plan!.url).toContain('per_page=10');
-    expect(plan!.requestShapeUsed).toEqual(['order', 'per_page', 'q', 'sort']);
-  });
-
-  it('builds a github_issues_list URL through search/issues when owner/repo are supplied', () => {
-    const m = match({
-      site: 'api.github.com',
-      urlPattern: 'api.github.com/repos/:owner/:repo/issues',
-      family: 'github',
-      semanticType: 'list',
-    });
-    const plan = buildSafeRequest(m, {
-      ...baseDataNeed,
-      semanticTypeWanted: 'list',
-      params: { owner: 'tabrix', repo: 'tabrix' },
-    });
-    expect(plan).not.toBeNull();
-    expect(plan!.builderHint).toBe('seed_adapter');
-    expect(plan!.dataPurpose).toBe('issue_list');
-    const url = new URL(plan!.url);
-    expect(`${url.origin}${url.pathname}`).toBe('https://api.github.com/search/issues');
-    expect(url.searchParams.get('q')).toBe('repo:tabrix/tabrix is:issue state:open');
-    expect(url.searchParams.get('sort')).toBe('created');
-    expect(url.searchParams.get('order')).toBe('desc');
-    expect(url.searchParams.get('per_page')).toBe('10');
-    expect(plan!.requestShapeUsed).toEqual(['order', 'per_page', 'q', 'sort']);
-  });
-
-  it('keeps additional issue search terms in the search/issues query', () => {
-    const m = match({
-      site: 'api.github.com',
-      urlPattern: 'api.github.com/repos/:owner/:repo/issues',
-      family: 'github',
-      semanticType: 'list',
-    });
-    const plan = buildSafeRequest(m, {
-      ...baseDataNeed,
-      semanticTypeWanted: 'list',
-      params: {
-        owner: 'guodaxia103',
-        repo: 'tabrix',
-        query: '__tabrix_pgb_02_no_match__',
-      },
-    });
-    expect(plan).not.toBeNull();
-    const url = new URL(plan!.url);
-    expect(url.searchParams.get('q')).toBe(
-      'repo:guodaxia103/tabrix is:issue state:open __tabrix_pgb_02_no_match__',
-    );
-    expect(plan!.requestShapeUsed).toEqual(['order', 'per_page', 'q', 'query', 'sort']);
-  });
-
-  it('refuses github_issues_list when owner/repo missing', () => {
-    const m = match({
-      site: 'api.github.com',
-      urlPattern: 'api.github.com/repos/:owner/:repo/issues',
-      family: 'github',
-      semanticType: 'list',
-    });
-    const plan = buildSafeRequest(m, { ...baseDataNeed, params: {} });
-    expect(plan).toBeNull();
-  });
-
-  it('builds a github_workflow_runs_list URL when owner/repo are supplied', () => {
-    const m = match({
-      site: 'api.github.com',
-      urlPattern: 'api.github.com/repos/:owner/:repo/actions/runs',
-      family: 'github',
-      semanticType: 'list',
-    });
-    const plan = buildSafeRequest(m, {
-      ...baseDataNeed,
-      semanticTypeWanted: 'list',
-      params: { owner: 'guodaxia103', repo: 'tabrix', limit: 1 },
-    });
-    expect(plan).not.toBeNull();
-    expect(plan!.builderHint).toBe('seed_adapter');
-    expect(plan!.dataPurpose).toBe('workflow_runs_list');
-    expect(plan!.url).toBe(
-      'https://api.github.com/repos/guodaxia103/tabrix/actions/runs?per_page=1',
-    );
-    expect(plan!.requestShapeUsed).toEqual(['per_page']);
-  });
-
-  it('uses the generic default when no workflow run limit is supplied', () => {
-    const m = match({
-      site: 'api.github.com',
-      urlPattern: 'api.github.com/repos/:owner/:repo/actions/runs',
-      family: 'github',
-      semanticType: 'list',
-    });
-    const plan = buildSafeRequest(m, {
-      ...baseDataNeed,
-      semanticTypeWanted: 'list',
-      params: { owner: 'guodaxia103', repo: 'tabrix' },
-    });
-    expect(plan).not.toBeNull();
-    expect(plan!.url).toBe(
-      'https://api.github.com/repos/guodaxia103/tabrix/actions/runs?per_page=10',
-    );
-  });
-
-  it('builds an npmjs_search_packages URL', () => {
-    const m = match({
-      site: 'registry.npmjs.org',
-      urlPattern: 'registry.npmjs.org/-/v1/search',
-      family: 'npmjs',
-      semanticType: 'search',
-    });
-    const plan = buildSafeRequest(m, {
-      ...baseDataNeed,
-      params: { query: 'react', limit: 5 },
-    });
-    expect(plan).not.toBeNull();
-    expect(plan!.builderHint).toBe('seed_adapter');
-    expect(plan!.dataPurpose).toBe('package_search');
-    expect(plan!.url).toBe('https://registry.npmjs.org/-/v1/search?text=react&size=5');
-    expect(plan!.requestShapeUsed).toEqual(['size', 'text']);
-  });
-
-  it('clamps limit to MAX_LIMIT=10', () => {
-    const m = match({
-      site: 'registry.npmjs.org',
-      urlPattern: 'registry.npmjs.org/-/v1/search',
-      family: 'npmjs',
-      semanticType: 'search',
-    });
-    const plan = buildSafeRequest(m, {
-      ...baseDataNeed,
-      params: { query: 'react', limit: 9999 },
-    });
-    expect(plan!.url).toContain('size=10');
-  });
-});
 
 describe('V26-FIX-04 buildSafeRequest — generic branch', () => {
   it('builds a generic URL using the observed primary query key', () => {
@@ -369,12 +210,12 @@ describe('V26-FIX-04 buildSafeRequest — generic branch', () => {
     expect(plan).toBeNull();
   });
 
-  it('refuses POST/non-GET methods even with seed urlPattern', () => {
+  it('refuses POST/non-GET methods', () => {
     const m = match({
-      site: 'api.github.com',
-      urlPattern: 'api.github.com/search/repositories',
+      site: 'api.example.com',
+      urlPattern: 'api.example.com/search',
       method: 'POST',
-      family: 'github',
+      family: 'observed',
       semanticType: 'search',
     });
     const plan = buildSafeRequest(m, { ...baseDataNeed, params: { query: 'tabrix' } });

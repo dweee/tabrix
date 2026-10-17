@@ -9,7 +9,7 @@
  *   2. Privacy / M4 negative: the response body is statically scanned
  *      for secrets that MUST NOT leak through these routes:
  *        - full URLs with query strings
- *        - any field from `memory_sessions.user_input`
+ *        - raw user free text captured during tool execution
  *        - cookie or auth header values
  *
  *      Negative tests both seed the upstream tables with poisoned
@@ -40,58 +40,36 @@ function seedDecision(opts: {
   intentSignature?: string;
   pageRole?: string | null;
   siteFamily?: string | null;
-  strategy?:
-    | 'experience_replay'
-    | 'experience_reuse'
-    | 'knowledge_light'
-    | 'read_page_markdown'
-    | 'read_page_required';
+  strategy?: 'knowledge_light' | 'read_page_markdown' | 'read_page_required';
   chosenLayer?: 'L0' | 'L0+L1' | 'L0+L1+L2' | null;
   layerDispatchReason?:
     | 'safety_override_full_layers'
     | 'user_intent_summary'
     | 'user_intent_select_or_open'
-    | 'user_intent_form_or_replay'
+    | 'user_intent_form_or_submit'
     | 'user_intent_detail_required'
     | 'simple_page_token_saving'
     | 'medium_page_overview_actions'
     | 'complex_page_detail_required'
-    | 'experience_replay_no_extra_read'
     | 'knowledge_light_read_only'
     | 'knowledge_light_action_required'
     | 'dispatcher_fallback_safe'
     | null;
   sourceRoute?:
     | 'read_page_required'
-    | 'experience_replay_skip_read'
     | 'knowledge_supported_read'
     | 'dispatcher_fallback_safe'
     | null;
   fallbackCause?: string | null;
   tokensSavedEstimate?: number | null;
-  fallbackStrategy?:
-    | 'experience_replay'
-    | 'experience_reuse'
-    | 'knowledge_light'
-    | 'read_page_markdown'
-    | 'read_page_required'
-    | null;
-  replayEligibleBlockedBy?:
-    | 'capability_off'
-    | 'unsupported_step_kind'
-    | 'non_portable_args'
-    | 'non_github_pageRole'
-    | 'below_threshold'
-    | 'stale_locator'
-    | 'none'
-    | null;
+  fallbackStrategy?: 'knowledge_light' | 'read_page_markdown' | 'read_page_required' | null;
 }): void {
   chooseContextRepo().recordDecision({
     decisionId: opts.decisionId,
     intentSignature: opts.intentSignature ?? 'open issues',
-    pageRole: opts.pageRole ?? 'repo_home',
-    siteFamily: opts.siteFamily ?? 'github',
-    strategy: opts.strategy ?? 'experience_reuse',
+    pageRole: opts.pageRole ?? 'workspace_home',
+    siteFamily: opts.siteFamily ?? 'workspace',
+    strategy: opts.strategy ?? 'knowledge_light',
     fallbackStrategy: opts.fallbackStrategy ?? null,
     createdAt: opts.createdAt,
     chosenLayer: opts.chosenLayer ?? 'L0',
@@ -103,7 +81,7 @@ function seedDecision(opts: {
     tokenEstimateFullRead: 200,
     knowledgeEndpointFamily: null,
     rankedCandidateCount: null,
-    replayEligibleBlockedBy: opts.replayEligibleBlockedBy ?? null,
+    replayEligibleBlockedBy: null,
     replayFallbackDepth: null,
   });
 }
@@ -180,9 +158,9 @@ describe('execution read routes (V25-03)', () => {
     seedDecision({
       decisionId: 'd-new',
       createdAt: '2026-04-22T10:00:00.000Z',
-      strategy: 'experience_replay',
-      sourceRoute: 'experience_replay_skip_read',
-      layerDispatchReason: 'experience_replay_no_extra_read',
+      strategy: 'knowledge_light',
+      sourceRoute: 'knowledge_supported_read',
+      layerDispatchReason: 'knowledge_light_read_only',
       tokensSavedEstimate: 250,
     });
     const res = await supertest(Server.getInstance().server)
@@ -192,8 +170,8 @@ describe('execution read routes (V25-03)', () => {
     expect(data.total).toBe(2);
     expect(data.decisions).toHaveLength(2);
     expect(data.decisions[0].decisionId).toBe('d-new');
-    expect(data.decisions[0].strategy).toBe('experience_replay');
-    expect(data.decisions[0].sourceRoute).toBe('experience_replay_skip_read');
+    expect(data.decisions[0].strategy).toBe('knowledge_light');
+    expect(data.decisions[0].sourceRoute).toBe('knowledge_supported_read');
     expect(data.decisions[0].chosenLayer).toBe('L0');
   });
 
@@ -216,18 +194,18 @@ describe('execution read routes (V25-03)', () => {
     expect(huge.body.data.limit).toBe(100); // capped to LIMIT_MAX
   });
 
-  test('GET /execution/savings/summary aggregates tokens + last replay', async () => {
+  test('GET /execution/savings/summary aggregates tokens + last completed decision', async () => {
     seedDecision({
       decisionId: 'd-1',
       createdAt: '2026-04-21T10:00:00.000Z',
-      strategy: 'experience_replay',
+      strategy: 'knowledge_light',
       chosenLayer: 'L0',
       tokensSavedEstimate: 100,
     });
     seedDecision({
       decisionId: 'd-2',
       createdAt: '2026-04-22T10:00:00.000Z',
-      strategy: 'experience_replay',
+      strategy: 'knowledge_light',
       chosenLayer: 'L0+L1',
       tokensSavedEstimate: 250,
     });
@@ -244,8 +222,7 @@ describe('execution read routes (V25-03)', () => {
     expect(data.tokensSavedEstimateSum).toBe(350);
     expect(data.layerCounts.L0).toBe(1);
     expect(data.layerCounts['L0+L1']).toBe(1);
-    expect(data.lastReplay?.decisionId).toBe('d-2');
-    expect(data.lastReplay?.outcome).toBe('completed');
+    expect(data.lastReplay).toBeNull();
   });
 
   test('GET /execution/action-paths/top groups by intent + pageRole + siteFamily', async () => {
@@ -253,13 +230,13 @@ describe('execution read routes (V25-03)', () => {
       decisionId: 'd-1',
       createdAt: '2026-04-22T10:00:00.000Z',
       intentSignature: 'open issues',
-      pageRole: 'repo_home',
+      pageRole: 'workspace_home',
     });
     seedDecision({
       decisionId: 'd-2',
       createdAt: '2026-04-22T11:00:00.000Z',
       intentSignature: 'open issues',
-      pageRole: 'repo_home',
+      pageRole: 'workspace_home',
     });
     seedDecision({
       decisionId: 'd-3',
@@ -274,13 +251,13 @@ describe('execution read routes (V25-03)', () => {
     expect(data.paths).toHaveLength(2);
     expect(data.paths[0]).toMatchObject({
       intentSignature: 'open issues',
-      pageRole: 'repo_home',
+      pageRole: 'workspace_home',
       decisionCount: 2,
     });
     expect(data.paths[1].intentSignature).toBe('list workflow runs');
   });
 
-  test('GET /execution/reliability/signals counts fallbacks + blocked replays', async () => {
+  test('GET /execution/reliability/signals counts dispatcher fallbacks', async () => {
     seedDecision({
       decisionId: 'd-1',
       createdAt: '2026-04-22T10:00:00.000Z',
@@ -292,7 +269,6 @@ describe('execution read routes (V25-03)', () => {
       decisionId: 'd-2',
       createdAt: '2026-04-22T11:00:00.000Z',
       sourceRoute: 'read_page_required',
-      replayEligibleBlockedBy: 'non_portable_args',
     });
     seedDecision({
       decisionId: 'd-3',
@@ -308,7 +284,7 @@ describe('execution read routes (V25-03)', () => {
     expect(data.fallbackSafeRate).toBeCloseTo(1 / 3, 3);
     expect(data.sourceRouteCounts.dispatcher_fallback_safe).toBe(1);
     expect(data.sourceRouteCounts.knowledge_supported_read).toBe(1);
-    expect(data.replayBlockedByCounts.non_portable_args).toBe(1);
+    expect(data.replayBlockedByCounts).toEqual({});
   });
 
   // ------------------------------------------------------------
@@ -330,7 +306,7 @@ describe('execution read routes (V25-03)', () => {
 
   describe('M4 privacy contract', () => {
     const POISON = {
-      url: 'https://github.com/a/b/issues?token=ghs_supersecretvalue&q=user_input',
+      url: 'https://code.example/a/b/issues?token=ghs_supersecretvalue&q=user_input',
       cookie: 'cookie=session=ghp_secretcookie',
       bearer: 'Bearer secret-bearer-token',
       userInput: 'user_input_PII_payload_should_never_leak',
@@ -341,7 +317,7 @@ describe('execution read routes (V25-03)', () => {
       // Full URLs with query strings — never echoed by these routes.
       expect(serialized.includes('?')).toBe(false);
       expect(serialized.includes('://')).toBe(false);
-      // user_input from memory_sessions — never joined or echoed.
+      // Runtime user free text — never joined or echoed.
       expect(serialized.includes(POISON.userInput)).toBe(false);
       // Cookie / auth header sentinels — never persisted by chooser
       // telemetry, must therefore never appear in any response body.
@@ -366,8 +342,8 @@ describe('execution read routes (V25-03)', () => {
         // can prove the route never tries to fetch the raw intent
         // from a sibling table.
         intentSignature: 'open issues',
-        pageRole: 'repo_home',
-        siteFamily: 'github',
+        pageRole: 'workspace_home',
+        siteFamily: 'workspace',
         // Free-text dispatcher fallback cause is the most realistic
         // surface for accidental URL leakage.
         fallbackCause: null,
@@ -419,9 +395,9 @@ describe('execution read routes (V25-03)', () => {
       expect(JSON.stringify(reliability.body).includes(sentinel)).toBe(false);
     });
 
-    test('memory_sessions.user_input is never readable through /execution/*', async () => {
-      // Seed memory data with the poison; the /execution routes must
-      // not touch memory_sessions and therefore must not echo it.
+    test('runtime task text is never readable through /execution/*', async () => {
+      // Seed runtime task data with the poison; the /execution routes must
+      // not touch runtime task text and therefore must not echo it.
       const task = sessionManager.createTask({
         taskType: 'browser-action',
         title: 'task with user_input poison',

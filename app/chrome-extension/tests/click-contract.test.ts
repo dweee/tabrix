@@ -3,11 +3,17 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { isClickSuccessOutcome } from '@tabrix/shared';
 import {
+  buildClickActionEvidenceResult,
+  buildClickHelperDispatchTimingPolicy,
+  buildClickHelperResponseTimeoutMs,
+  buildStructuredClickHelperErrorResult,
   mergeClickSignals,
   observeNewTabUntil,
   type ClickPageSignals,
 } from '@/entrypoints/background/tools/browser/interaction';
+import { buildPostActionReadbackEvidence } from '@/entrypoints/background/tools/browser/post-action-readback';
 
 const clickHelperSource = readFileSync(
   resolve(process.cwd(), 'inject-scripts/click-helper.js'),
@@ -233,14 +239,430 @@ describe('mergeClickSignals (pure function)', () => {
     expect(merged.success).toBe(true);
   });
 
-  it('focus-only change → focus_changed', () => {
+  it('focus-only change → focus_changed but not success', () => {
     const merged = mergeClickSignals(
       true,
       { ...zeroPage, focusChanged: true },
       { newTabOpened: false },
     );
     expect(merged.observedOutcome).toBe('focus_changed');
-    expect(merged.success).toBe(true);
+    expect(merged.success).toBe(false);
+    expect(isClickSuccessOutcome('focus_changed')).toBe(false);
+  });
+});
+
+describe('buildPostActionReadbackEvidence', () => {
+  it('treats lightweight filter clicks as dispatched actions that still need readback proof', () => {
+    const evidence = buildPostActionReadbackEvidence({
+      dispatchSucceeded: true,
+      actionKind: 'click',
+      observedOutcome: 'menu_opened',
+      candidateAction: { intent: 'filter.open' },
+    });
+
+    expect(evidence).toMatchObject({
+      status: 'fresh_read_required',
+      expectedEvidence: 'page_or_object_state_changed',
+    });
+  });
+
+  it('requires fresh readback before retry for dispatched most-collected sorting with no local change', () => {
+    const evidence = buildPostActionReadbackEvidence({
+      dispatchSucceeded: true,
+      actionKind: 'click',
+      observedOutcome: 'no_observed_change',
+      candidateAction: { intent: 'filter.option_select' },
+    });
+
+    expect(evidence).toMatchObject({
+      status: 'fresh_read_required',
+      freshReadRequired: true,
+      businessSuccessProven: false,
+      readbackSource: 'tool_dispatch_only',
+      requiredNextAction: 'chrome_read_page_force_refresh_same_tab',
+      expectedEvidence: 'search_results_or_url_query_changed',
+    });
+  });
+
+  it.each([
+    'filter.option_select',
+    'filter.time_range_select',
+    'search.apply_filter.sort',
+    'search.apply_filter.content_type',
+    'search.apply_filter.time_range',
+  ])('requires fresh readback before retry for dispatched %s with no local change', (intent) => {
+    const evidence = buildPostActionReadbackEvidence({
+      dispatchSucceeded: true,
+      actionKind: 'click',
+      observedOutcome: 'no_observed_change',
+      candidateAction: { intent },
+    });
+
+    expect(evidence).toMatchObject({
+      status: 'fresh_read_required',
+      freshReadRequired: true,
+      businessSuccessProven: false,
+      readbackSource: 'tool_dispatch_only',
+      requiredNextAction: 'chrome_read_page_force_refresh_same_tab',
+      expectedEvidence: 'search_results_or_url_query_changed',
+    });
+  });
+
+  it('requires fresh readback before retry for dispatched category selection with no local change', () => {
+    const evidence = buildPostActionReadbackEvidence({
+      dispatchSucceeded: true,
+      actionKind: 'click',
+      observedOutcome: 'no_observed_change',
+      candidateAction: { intent: 'search.category_select' },
+    });
+
+    expect(evidence).toMatchObject({
+      status: 'fresh_read_required',
+      freshReadRequired: true,
+      businessSuccessProven: false,
+      readbackSource: 'tool_dispatch_only',
+      requiredNextAction: 'chrome_read_page_force_refresh_same_tab',
+      expectedEvidence: 'search_results_or_url_query_changed',
+    });
+  });
+
+  it('marks a dispatched click with no observed change as not proven', () => {
+    const evidence = buildPostActionReadbackEvidence({
+      dispatchSucceeded: true,
+      actionKind: 'click',
+      observedOutcome: 'no_observed_change',
+      candidateAction: { intent: 'search.submit' },
+    });
+
+    expect(evidence).toMatchObject({
+      kind: 'post_action_readback_v1',
+      status: 'not_proven',
+      freshReadRequired: true,
+      businessSuccessProven: false,
+      requiredNextAction: 'stop_or_retry_after_fresh_read',
+      expectedEvidence: 'search_results_or_url_query_changed',
+    });
+  });
+
+  it('promotes only scoped verifier pass evidence to proven_by_fresh_readback', () => {
+    const evidence = buildPostActionReadbackEvidence({
+      dispatchSucceeded: true,
+      actionKind: 'click',
+      observedOutcome: 'spa_route_change',
+      verifierPassed: true,
+      verifierReason: 'expected_page_role_observed',
+      candidateAction: { intent: 'content.open_detail' },
+    });
+
+    expect(evidence).toMatchObject({
+      status: 'proven_by_fresh_readback',
+      freshReadRequired: false,
+      businessSuccessProven: true,
+      readbackSource: 'click_verifier',
+      requiredNextAction: 'none',
+      expectedEvidence: 'detail_region_or_content_transition',
+    });
+  });
+
+  it('promotes dom_changed only when a scoped verifier readback passes', () => {
+    const evidence = buildPostActionReadbackEvidence({
+      dispatchSucceeded: true,
+      actionKind: 'click',
+      observedOutcome: 'dom_changed',
+      verifierPassed: true,
+      verifierReason: 'scoped_region_state_observed',
+      candidateAction: { intent: 'filter.option_select' },
+    });
+
+    expect(evidence).toMatchObject({
+      status: 'proven_by_fresh_readback',
+      observedOutcome: 'dom_changed',
+      freshReadRequired: false,
+      businessSuccessProven: true,
+      readbackSource: 'click_verifier',
+      requiredNextAction: 'none',
+      expectedEvidence: 'search_results_or_url_query_changed',
+    });
+  });
+
+  it('treats focus-only click evidence as not proven for replay/business scoring', () => {
+    const evidence = buildPostActionReadbackEvidence({
+      dispatchSucceeded: true,
+      actionKind: 'click',
+      observedOutcome: 'focus_changed',
+      candidateAction: { intent: 'search.submit' },
+    });
+
+    expect(evidence).toMatchObject({
+      status: 'not_proven',
+      freshReadRequired: true,
+      businessSuccessProven: false,
+      readbackSource: 'none',
+      requiredNextAction: 'stop_or_retry_after_fresh_read',
+      expectedEvidence: 'search_results_or_url_query_changed',
+    });
+  });
+
+  it('keeps fill success as dispatch evidence that still needs fresh readback', () => {
+    const evidence = buildPostActionReadbackEvidence({
+      dispatchSucceeded: true,
+      actionKind: 'fill',
+      observedOutcome: 'input_value_written',
+      candidateAction: { intent: 'search.enter_query' },
+    });
+
+    expect(evidence).toMatchObject({
+      status: 'fresh_read_required',
+      observedOutcome: 'input_value_written',
+      freshReadRequired: true,
+      businessSuccessProven: false,
+      readbackSource: 'tool_dispatch_only',
+      expectedEvidence: 'form_value_state_changed',
+    });
+  });
+
+  it('builds ActionEvidenceResult without upgrading dispatch success to business success', () => {
+    const postActionReadback = buildPostActionReadbackEvidence({
+      dispatchSucceeded: true,
+      actionKind: 'click',
+      observedOutcome: 'menu_opened',
+      candidateAction: {
+        targetRef: 'tgt_filter',
+        intent: 'filter.open',
+        locatorChain: [{ type: 'ref', value: 'ref_filter_button' }],
+      },
+    });
+    const evidence = buildClickActionEvidenceResult({
+      actionId: 'click-7-test',
+      actionKind: 'click',
+      tabId: 7,
+      targetBinding: {
+        resolutionSource: 'candidate_stable_target_ref',
+        requestedFrameId: null,
+        candidateFrameId: null,
+        resolvedFrameId: null,
+        frameScope: 'default_frame',
+        dispatchTarget: 'ref',
+        stableTargetRefResolved: true,
+        claimBoundary: 'Target binding only proves where the click dispatched.',
+      },
+      candidateAction: {
+        targetRef: 'tgt_filter',
+        intent: 'filter.open',
+        locatorChain: [{ type: 'ref', value: 'ref_filter_button' }],
+      },
+      finalRef: 'ref_filter_button',
+      dispatchSucceeded: true,
+      postActionReadback,
+    });
+
+    expect(evidence).toMatchObject({
+      actionId: 'click-7-test',
+      actionKind: 'click',
+      tabId: 7,
+      toolSuccess: true,
+      dispatch: {
+        dispatched: true,
+        acceptedByBrowser: true,
+        errorCode: null,
+      },
+      targetBinding: {
+        requestedTargetRef: 'tgt_filter',
+        resolvedTargetRef: 'ref_filter_button',
+        dispatchTarget: 'ref',
+        targetBindingProven: true,
+      },
+      source: {
+        selectedDataSource: 'unknown',
+        sourceRouteHonestyVerdict: 'not_checked',
+      },
+      postAction: {
+        postActionReadbackStatus: 'fresh_read_required',
+        freshReadRequired: true,
+        readbackSource: 'tool_dispatch_only',
+      },
+      business: {
+        businessSuccessVerdict: 'not_proven',
+        businessSuccessProven: false,
+        nextRequiredCheck: 'chrome_read_page_force_refresh_same_tab',
+      },
+      browserHygiene: {
+        required: false,
+        status: 'not_checked',
+      },
+    });
+  });
+});
+
+describe('buildClickHelperDispatchTimingPolicy', () => {
+  it('caps lightweight filter clicks with a dynamic-panel window without waiting for navigation', () => {
+    expect(
+      buildClickHelperDispatchTimingPolicy({
+        waitForNavigation: true,
+        timeout: 15000,
+        intent: 'filter.option_select',
+      }),
+    ).toEqual({
+      waitForNavigation: false,
+      timeout: 13000,
+      reason: 'lightweight_post_action_intent',
+    });
+  });
+
+  it('does not shorten dynamic filter verification to the generic default click timeout', () => {
+    expect(
+      buildClickHelperDispatchTimingPolicy({
+        waitForNavigation: false,
+        timeout: 5000,
+        intent: 'filter.option_select',
+      }),
+    ).toEqual({
+      waitForNavigation: false,
+      timeout: 13000,
+      reason: 'lightweight_post_action_intent',
+    });
+  });
+
+  it('keeps a scheduler margin after dynamic post-action verification before timing out the bridge', () => {
+    const policy = buildClickHelperDispatchTimingPolicy({
+      waitForNavigation: false,
+      timeout: 5000,
+      intent: 'search.apply_filter.sort',
+    });
+
+    expect(buildClickHelperResponseTimeoutMs(policy)).toBe(16000);
+  });
+
+  it('treats objectized search filter controls as lightweight panel clicks', () => {
+    expect(
+      buildClickHelperDispatchTimingPolicy({
+        waitForNavigation: true,
+        timeout: 15000,
+        intent: 'search.open_filters',
+      }),
+    ).toEqual({
+      waitForNavigation: false,
+      timeout: 13000,
+      reason: 'lightweight_post_action_intent',
+    });
+    expect(
+      buildClickHelperDispatchTimingPolicy({
+        waitForNavigation: true,
+        timeout: 15000,
+        intent: 'search.apply_filter.time_range',
+      }),
+    ).toEqual({
+      waitForNavigation: false,
+      timeout: 13000,
+      reason: 'lightweight_post_action_intent',
+    });
+  });
+
+  it('keeps non-filter lightweight clicks on the short post-action window', () => {
+    expect(
+      buildClickHelperDispatchTimingPolicy({
+        waitForNavigation: true,
+        timeout: 15000,
+        intent: 'auth.refresh_qr',
+      }),
+    ).toMatchObject({
+      waitForNavigation: false,
+      timeout: 2000,
+    });
+  });
+
+  it('keeps caller timing policy for navigation-like clicks', () => {
+    expect(
+      buildClickHelperDispatchTimingPolicy({
+        waitForNavigation: true,
+        timeout: 15000,
+        intent: 'content.open_detail',
+      }),
+    ).toEqual({
+      waitForNavigation: true,
+      timeout: 15000,
+      reason: 'caller_requested',
+    });
+  });
+});
+
+describe('buildStructuredClickHelperErrorResult', () => {
+  it('keeps helper errors in the structured click contract instead of legacy text', () => {
+    const result = buildStructuredClickHelperErrorResult({
+      message: 'Element ref "ref_missing" not found',
+      clickMethod: 'ref',
+      browserSignals: { newTabOpened: false },
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      dispatchSucceeded: false,
+      observedOutcome: 'no_observed_change',
+      clickMethod: 'ref',
+      resultShape: 'structured_click_error',
+      lane: 'tabrix_owned',
+      verification: {
+        navigationOccurred: false,
+        urlChanged: false,
+        newTabOpened: false,
+        domChanged: false,
+        stateChanged: false,
+        focusChanged: false,
+      },
+    });
+    expect(result.message).toContain('click dispatch and post-action state are not proven');
+    expect(result.message).toContain('Element ref "ref_missing" not found');
+    expect(JSON.stringify(result)).not.toContain('legacy_text_error_normalized');
+  });
+
+  it('preserves target mismatch recovery guidance in structured click errors', () => {
+    const result = buildStructuredClickHelperErrorResult({
+      message: 'target_mismatch',
+      clickMethod: 'selector',
+      browserSignals: { newTabOpened: false },
+      reason: 'target_mismatch',
+      targetConsistency: {
+        verdict: 'target_mismatch',
+        expectedTarget: { tagName: 'LABEL' },
+        actualTarget: { tagName: 'INPUT' },
+      },
+      actionRecovery: {
+        status: 'not_proven',
+        reason: 'target_mismatch',
+        requiredNextAction: 'fresh_read_page_and_select_actual_target',
+        recommendedTool: 'chrome_read_page',
+        sameTabRequired: true,
+        instruction: 'Read the same tab again and choose a fresher target.',
+        claimBoundary: 'This does not prove the business action happened.',
+      },
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      dispatchSucceeded: false,
+      error: 'target_mismatch',
+      reason: 'target_mismatch',
+      targetConsistency: { verdict: 'target_mismatch' },
+      actionRecovery: {
+        requiredNextAction: 'fresh_read_page_and_select_actual_target',
+        recommendedTool: 'chrome_read_page',
+        sameTabRequired: true,
+      },
+    });
+  });
+
+  it('defaults missing browser signals to a non-proven structured error', () => {
+    const result = buildStructuredClickHelperErrorResult({
+      message: 'Error performing click: Could not establish connection',
+      clickMethod: 'selector',
+      browserSignals: { newTabOpened: false },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.dispatchSucceeded).toBe(false);
+    expect(result.observedOutcome).toBe('no_observed_change');
+    expect(result.clickDiff).toEqual({ kind: 'no_change' });
+    expect(result.resultShape).toBe('structured_click_error');
   });
 });
 
@@ -396,7 +818,7 @@ describe('observeNewTabUntil', () => {
     });
   });
 
-  it('non-verifier clicks still allow weak page outcomes to finish quickly', async () => {
+  it('non-verifier clicks do not treat focus-only signals as page outcome readiness', async () => {
     const observedPromise = observeNewTabUntil(
       3,
       Promise.resolve({
@@ -416,9 +838,11 @@ describe('observeNewTabUntil', () => {
       { maxMs: 75, verifierRequested: false },
     );
 
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(75);
     await expect(observedPromise).resolves.toMatchObject({
       newTabOpened: false,
-      waitDiagnostics: { newTabObservation: { reason: 'page_outcome_observed' } },
+      waitDiagnostics: { newTabObservation: { reason: 'ambiguous_cap_elapsed' } },
     });
   });
 });
@@ -427,6 +851,10 @@ describe('click-helper signals (end-to-end through jsdom)', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
     document.elementFromPoint = vi.fn(() => null);
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => 'visible',
+    });
     Element.prototype.scrollIntoView = vi.fn();
     class TestMouseEvent extends Event {
       clientX: number;
@@ -456,6 +884,27 @@ describe('click-helper signals (end-to-end through jsdom)', () => {
       OriginalMouseEvent;
     (globalThis as typeof globalThis & { PointerEvent?: typeof MouseEvent }).PointerEvent =
       OriginalPointerEvent;
+  });
+
+  it('dispatches pointerup before mouseup to match browser click order', async () => {
+    document.body.innerHTML = '<button id="btn">Order</button>';
+    const button = document.getElementById('btn') as HTMLButtonElement;
+    setRect(button, { left: 20, top: 30, width: 120, height: 32 });
+    document.elementFromPoint = vi.fn(() => button);
+    const eventOrder: string[] = [];
+    for (const eventName of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+      button.addEventListener(eventName, () => eventOrder.push(eventName));
+    }
+
+    const response = await sendClickRequest({
+      action: 'clickElement',
+      selector: '#btn',
+      waitForNavigation: false,
+      timeout: 1000,
+    });
+
+    expect(response.dispatchSucceeded).toBe(true);
+    expect(eventOrder).toEqual(['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']);
   });
 
   it('no-op click emits zero page-local signals (raw)', async () => {
@@ -505,6 +954,43 @@ describe('click-helper signals (end-to-end through jsdom)', () => {
       before: 'false',
       after: 'true',
     });
+
+    const merged = mergeClickSignals(response.dispatchSucceeded, response.signals, {
+      newTabOpened: false,
+    });
+    expect(merged.observedOutcome).toBe('state_toggled');
+    expect(merged.success).toBe(true);
+  });
+
+  it('waits for async filter state changes even when the document is hidden', async () => {
+    document.body.innerHTML = '<div id="filter" class="tags">最多收藏</div>';
+    const filter = document.getElementById('filter') as HTMLDivElement;
+    setRect(filter, { left: 20, top: 30, width: 120, height: 32 });
+    document.elementFromPoint = vi.fn(() => filter);
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => 'hidden',
+    });
+    filter.addEventListener('click', () => {
+      setTimeout(() => {
+        filter.className = 'tags selected';
+      }, 80);
+    });
+
+    const response = await sendClickRequest({
+      action: 'clickElement',
+      selector: '#filter',
+      waitForNavigation: false,
+      timeout: 1000,
+      intent: 'filter.option_select',
+    });
+
+    expect(response.dispatchSucceeded).toBe(true);
+    expect(response.signals.targetStateDelta.className).toEqual({
+      before: 'tags',
+      after: 'tags selected',
+    });
+    expect(response.signals.waitDiagnostics.verification.reason).toBe('target_state_changed');
 
     const merged = mergeClickSignals(response.dispatchSucceeded, response.signals, {
       newTabOpened: false,
@@ -700,5 +1186,433 @@ describe('click-helper signals (end-to-end through jsdom)', () => {
     expect(response.signals.focusChanged).toBe(true);
     expect(response.signals.waitDiagnostics.verification.reason).toBe('focus_changed');
     expect(response.signals.waitDiagnostics.verification.waitedMs).toBeLessThan(400);
+  });
+
+  it('returns blocked_by_overlay when a selector target is covered at its click point', async () => {
+    document.body.innerHTML =
+      '<button id="btn">获取验证码</button><div id="mask" class="modal-mask"></div>';
+    const button = document.getElementById('btn') as HTMLButtonElement;
+    const mask = document.getElementById('mask') as HTMLDivElement;
+    setRect(button, { left: 20, top: 30, width: 120, height: 32 });
+    setRect(mask, { left: 0, top: 0, width: 1000, height: 800 });
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1000 });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 800 });
+    document.elementFromPoint = vi.fn(() => mask);
+
+    const response = await sendClickRequest({
+      action: 'clickElement',
+      selector: '#btn',
+      waitForNavigation: false,
+      timeout: 1000,
+    });
+
+    expect(response.success).toBe(false);
+    expect(response.reason).toBe('blocked_by_overlay');
+    expect(response.dispatchSucceeded).toBe(false);
+    expect(response.actionRecovery).toMatchObject({
+      status: 'blocked',
+      reason: 'blocked_by_overlay',
+      requiredNextAction: 'handle_blocking_surface_then_retry',
+      recommendedTool: 'chrome_read_page',
+      sameTabRequired: true,
+    });
+    expect(response.targetConsistency).toMatchObject({
+      verdict: 'blocked_by_overlay',
+      expectedTarget: { tagName: 'BUTTON' },
+      actualTarget: { id: 'mask' },
+    });
+  });
+
+  it('allows a selector click when a link center hits its non-interactive text child', async () => {
+    document.body.innerHTML =
+      '<a id="live-link" href="#live"><span id="live-label">直播</span></a>';
+    const link = document.getElementById('live-link') as HTMLAnchorElement;
+    const label = document.getElementById('live-label') as HTMLSpanElement;
+    setRect(link, { left: 20, top: 30, width: 120, height: 32 });
+    setRect(label, { left: 28, top: 36, width: 40, height: 20 });
+    document.elementFromPoint = vi.fn(() => label);
+
+    const response = await sendClickRequest({
+      action: 'clickElement',
+      selector: '#live-link',
+      waitForNavigation: false,
+      timeout: 1000,
+    });
+
+    expect(response.dispatchSucceeded).toBe(true);
+    expect(response.elementInfo).toMatchObject({
+      tagName: 'A',
+      id: 'live-link',
+      targetConsistency: { verdict: 'matched' },
+    });
+    expect(response.signals.hashAfter).toBe('#live');
+  });
+
+  it('allows a selector click when a result-card link center hits another link layer with the same href', async () => {
+    document.body.innerHTML = `
+      <article>
+        <a id="image-link" href="#detail"><img id="cover" alt="cover" /></a>
+        <a id="title-link" href="#detail">AI 图片创作提示词合集</a>
+      </article>
+    `;
+    const imageLink = document.getElementById('image-link') as HTMLAnchorElement;
+    const titleLink = document.getElementById('title-link') as HTMLAnchorElement;
+    setRect(imageLink, { left: 20, top: 30, width: 240, height: 140 });
+    setRect(titleLink, { left: 20, top: 30, width: 240, height: 140 });
+    document.elementFromPoint = vi.fn(() => imageLink);
+
+    const response = await sendClickRequest({
+      action: 'clickElement',
+      selector: '#title-link',
+      waitForNavigation: false,
+      timeout: 1000,
+    });
+
+    expect(response.dispatchSucceeded).toBe(true);
+    expect(response.elementInfo).toMatchObject({
+      tagName: 'A',
+      id: 'title-link',
+      targetConsistency: { verdict: 'matched_by_same_href_action' },
+    });
+    expect(response.signals.hashAfter).toBe('#detail');
+  });
+
+  it('does not treat compact action links with mask-like class names as blocking overlays', async () => {
+    document.body.innerHTML = `
+      <article>
+        <a id="cover-link" class="cover mask" href="#detail">AI 图片创作提示词合集</a>
+        <a id="title-link" href="#detail">AI 图片创作提示词合集</a>
+      </article>
+    `;
+    const coverLink = document.getElementById('cover-link') as HTMLAnchorElement;
+    const titleLink = document.getElementById('title-link') as HTMLAnchorElement;
+    setRect(coverLink, { left: 20, top: 30, width: 240, height: 140 });
+    setRect(titleLink, { left: 20, top: 30, width: 240, height: 140 });
+    document.elementFromPoint = vi.fn(() => coverLink);
+
+    const response = await sendClickRequest({
+      action: 'clickElement',
+      selector: '#title-link',
+      waitForNavigation: false,
+      timeout: 1000,
+    });
+
+    expect(response.dispatchSucceeded).toBe(true);
+    expect(response.reason).not.toBe('blocked_by_overlay');
+    expect(response.elementInfo).toMatchObject({
+      tagName: 'A',
+      id: 'title-link',
+      targetConsistency: { verdict: 'matched_by_same_href_action' },
+    });
+    expect(response.signals.hashAfter).toBe('#detail');
+  });
+
+  it('allows a selector click when stacked card action layers share the same visual target', async () => {
+    document.body.innerHTML = `
+      <article>
+        <a id="cover-layer" class="cover mask" href="#expected"></a>
+        <a id="hit-layer" class="cover mask" href="#actual"></a>
+      </article>
+    `;
+    const coverLayer = document.getElementById('cover-layer') as HTMLAnchorElement;
+    const hitLayer = document.getElementById('hit-layer') as HTMLAnchorElement;
+    setRect(coverLayer, { left: 20, top: 30, width: 240, height: 140 });
+    setRect(hitLayer, { left: 20, top: 30, width: 240, height: 140 });
+    document.elementFromPoint = vi.fn(() => hitLayer);
+    let clicked = false;
+    coverLayer.addEventListener('click', () => {
+      clicked = true;
+    });
+
+    const response = await sendClickRequest({
+      action: 'clickElement',
+      selector: '#cover-layer',
+      waitForNavigation: false,
+      timeout: 1000,
+    });
+    expect(response).toMatchObject({
+      dispatchSucceeded: true,
+    });
+    expect(clicked).toBe(true);
+    expect(response.reason).not.toBe('target_mismatch');
+    expect(response.elementInfo).toMatchObject({
+      tagName: 'A',
+      id: 'cover-layer',
+      targetConsistency: { verdict: 'matched_by_visual_duplicate_action' },
+    });
+    expect(response.signals.hashAfter).toBe('#expected');
+  });
+
+  it('allows a selector click when a filter label hits another layer in the same action control', async () => {
+    document.body.innerHTML = `
+      <button id="filter-option" type="button">
+        <span id="filter-label">最多收藏</span>
+        <span id="filter-hit-layer" aria-hidden="true"></span>
+      </button>
+    `;
+    const button = document.getElementById('filter-option') as HTMLButtonElement;
+    const label = document.getElementById('filter-label') as HTMLSpanElement;
+    const hitLayer = document.getElementById('filter-hit-layer') as HTMLSpanElement;
+    setRect(button, { left: 20, top: 30, width: 160, height: 40 });
+    setRect(label, { left: 40, top: 40, width: 64, height: 18 });
+    setRect(hitLayer, { left: 40, top: 40, width: 64, height: 18 });
+    document.elementFromPoint = vi.fn(() => hitLayer);
+    let clicked = false;
+    button.addEventListener('click', () => {
+      clicked = true;
+      button.setAttribute('aria-selected', 'true');
+    });
+
+    const response = await sendClickRequest({
+      action: 'clickElement',
+      selector: '#filter-label',
+      waitForNavigation: false,
+      timeout: 1000,
+      intent: 'search.apply_filter.sort',
+    });
+
+    expect(response.dispatchSucceeded).toBe(true);
+    expect(clicked).toBe(true);
+    expect(response.elementInfo).toMatchObject({
+      tagName: 'SPAN',
+      id: 'filter-label',
+      targetConsistency: { verdict: 'matched_by_shared_action_ancestor' },
+    });
+    expect(button.getAttribute('aria-selected')).toBe('true');
+  });
+
+  it('allows a selector click when a framework filter chip uses non-semantic div/span layers', async () => {
+    document.body.innerHTML = `
+      <div id="filter-chip" class="filter-option selected">
+        <span id="filter-label">一周内</span>
+        <span id="filter-hit-layer" aria-hidden="true"></span>
+      </div>
+    `;
+    const chip = document.getElementById('filter-chip') as HTMLDivElement;
+    const label = document.getElementById('filter-label') as HTMLSpanElement;
+    const hitLayer = document.getElementById('filter-hit-layer') as HTMLSpanElement;
+    setRect(chip, { left: 20, top: 30, width: 120, height: 36 });
+    setRect(label, { left: 42, top: 39, width: 48, height: 18 });
+    setRect(hitLayer, { left: 42, top: 39, width: 48, height: 18 });
+    Object.defineProperty(window, 'getComputedStyle', {
+      configurable: true,
+      value: (element: Element) => ({
+        get display() {
+          return 'block';
+        },
+        get visibility() {
+          return 'visible';
+        },
+        get opacity() {
+          return '1';
+        },
+        get cursor() {
+          if (element === chip) {
+            throw new Error('style probe unavailable');
+          }
+          return 'auto';
+        },
+      }),
+    });
+    document.elementFromPoint = vi.fn(() => hitLayer);
+    let clicked = false;
+    chip.addEventListener('click', () => {
+      clicked = true;
+      chip.setAttribute('data-selected', 'true');
+    });
+
+    const response = await sendClickRequest({
+      action: 'clickElement',
+      selector: '#filter-label',
+      waitForNavigation: false,
+      timeout: 1000,
+      intent: 'search.apply_filter.time_range',
+    });
+
+    expect(response.dispatchSucceeded).toBe(true);
+    expect(clicked).toBe(true);
+    expect(response.elementInfo).toMatchObject({
+      tagName: 'SPAN',
+      id: 'filter-label',
+      targetConsistency: { verdict: 'matched_by_shared_action_ancestor' },
+    });
+    expect(response.signals.waitDiagnostics.helper).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: 'delegated_action_style_failed',
+          message: 'style probe unavailable',
+        }),
+      ]),
+    );
+    expect(chip.getAttribute('data-selected')).toBe('true');
+  });
+
+  it('does not prove auth.request_otp in the injected click helper', async () => {
+    document.body.innerHTML = '<button id="btn">获取验证码</button>';
+    const button = document.getElementById('btn') as HTMLButtonElement;
+    setRect(button, { left: 20, top: 30, width: 120, height: 32 });
+    document.elementFromPoint = vi.fn(() => button);
+    button.addEventListener('click', () => {
+      button.textContent = '重新发送 59秒';
+      button.setAttribute('disabled', '');
+    });
+
+    const response = await sendClickRequest({
+      action: 'clickElement',
+      selector: '#btn',
+      waitForNavigation: false,
+      timeout: 1000,
+      intent: 'auth.request_otp',
+    });
+
+    expect(response.dispatchSucceeded).toBe(true);
+    expect(response.authPostcondition).toBeUndefined();
+    expect(response.signals.targetStateDelta).toMatchObject({
+      disabled: { before: null, after: '' },
+    });
+  });
+
+  it('keeps auth.request_otp as generic click facts when no page change is observed', async () => {
+    document.body.innerHTML = '<button id="btn">获取验证码</button>';
+    const button = document.getElementById('btn') as HTMLButtonElement;
+    setRect(button, { left: 20, top: 30, width: 120, height: 32 });
+    document.elementFromPoint = vi.fn(() => button);
+
+    const response = await sendClickRequest({
+      action: 'clickElement',
+      selector: '#btn',
+      waitForNavigation: false,
+      timeout: 1000,
+      intent: 'auth.request_otp',
+    });
+
+    expect(response.dispatchSucceeded).toBe(true);
+    expect(response.authPostcondition).toBeUndefined();
+    expect(response.signals.targetStateDelta).toBeNull();
+  });
+
+  it('clicks an OTP sender span inside a label without promoting the click target to the input sibling', async () => {
+    document.body.innerHTML = `
+      <label id="auth-label" class="auth-code">
+        <input id="otp" placeholder="输入验证码" />
+        <span id="send" class="code-button active">获取验证码</span>
+      </label>
+    `;
+    const label = document.getElementById('auth-label') as HTMLLabelElement;
+    const input = document.getElementById('otp') as HTMLInputElement;
+    const send = document.getElementById('send') as HTMLSpanElement;
+    setRect(label, { left: 20, top: 20, width: 260, height: 40 });
+    setRect(input, { left: 20, top: 20, width: 170, height: 40 });
+    setRect(send, { left: 190, top: 20, width: 90, height: 40 });
+    document.elementFromPoint = vi.fn((x: number, _y: number) => (x < 190 ? input : send));
+
+    const response = await sendClickRequest({
+      action: 'clickElement',
+      selector: '#send',
+      waitForNavigation: false,
+      timeout: 1000,
+    });
+
+    expect(response.dispatchSucceeded).toBe(true);
+    expect(response.elementInfo).toMatchObject({
+      tagName: 'SPAN',
+      id: 'send',
+      targetConsistency: { verdict: 'matched' },
+    });
+  });
+
+  it('rejects a selector click when a label center would actually hit the OTP input', async () => {
+    document.body.innerHTML = `
+      <label id="auth-label" class="auth-code">
+        <input id="otp" placeholder="输入验证码" />
+        <span id="send" class="code-button active">获取验证码</span>
+      </label>
+    `;
+    const label = document.getElementById('auth-label') as HTMLLabelElement;
+    const input = document.getElementById('otp') as HTMLInputElement;
+    setRect(label, { left: 20, top: 20, width: 260, height: 40 });
+    setRect(input, { left: 20, top: 20, width: 170, height: 40 });
+    document.elementFromPoint = vi.fn(() => input);
+
+    const response = await sendClickRequest({
+      action: 'clickElement',
+      selector: '#auth-label',
+      waitForNavigation: false,
+      timeout: 1000,
+    });
+
+    expect(response).toMatchObject({
+      success: false,
+      dispatchSucceeded: false,
+      error: 'target_mismatch',
+      targetConsistency: { verdict: 'target_mismatch' },
+      actionRecovery: {
+        status: 'not_proven',
+        reason: 'target_mismatch',
+        requiredNextAction: 'fresh_read_page_and_select_actual_target',
+        recommendedTool: 'chrome_read_page',
+        sameTabRequired: true,
+      },
+    });
+  });
+
+  it('does not mark dispatch succeeded when both native and synthetic terminal clicks fail', async () => {
+    document.body.innerHTML = '<button id="btn">Fail</button>';
+    const button = document.getElementById('btn') as HTMLButtonElement;
+    setRect(button, { left: 20, top: 30, width: 120, height: 32 });
+    document.elementFromPoint = vi.fn(() => button);
+    const originalDispatch = button.dispatchEvent.bind(button);
+    button.dispatchEvent = vi.fn((event: Event) => {
+      if (event.type === 'click') {
+        throw new Error('synthetic click blocked');
+      }
+      return originalDispatch(event);
+    });
+    button.click = vi.fn(() => {
+      throw new Error('native click blocked');
+    });
+
+    const response = await sendClickRequest({
+      action: 'clickElement',
+      selector: '#btn',
+      waitForNavigation: false,
+      timeout: 20,
+    });
+
+    expect(response.success).toBe(false);
+    expect(response.dispatchSucceeded).toBe(false);
+    expect(response.signals.waitDiagnostics.dispatch).toMatchObject({
+      primaryClickDelivered: false,
+      failedEvents: expect.arrayContaining([
+        expect.objectContaining({ event: 'native_click' }),
+        expect.objectContaining({ event: 'click' }),
+      ]),
+    });
+  });
+
+  it('does not mark coordinate dispatch succeeded when the final coordinate target disappears', async () => {
+    document.body.innerHTML = '<button id="btn">Target</button>';
+    const button = document.getElementById('btn') as HTMLButtonElement;
+    setRect(button, { left: 20, top: 30, width: 120, height: 32 });
+    const elementFromPoint = vi
+      .fn()
+      .mockReturnValueOnce(button)
+      .mockReturnValueOnce(button)
+      .mockReturnValue(null);
+    document.elementFromPoint = elementFromPoint;
+
+    const response = await sendClickRequest({
+      action: 'clickElement',
+      coordinates: { x: 80, y: 46 },
+      waitForNavigation: false,
+      timeout: 20,
+    });
+
+    expect(response.success).toBe(false);
+    expect(response.dispatchSucceeded).toBe(false);
+    expect(response.signals.waitDiagnostics.dispatch).toMatchObject({
+      primaryClickDelivered: false,
+      failedEvents: [expect.objectContaining({ event: 'target_lookup' })],
+    });
   });
 });

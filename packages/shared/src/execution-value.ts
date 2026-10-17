@@ -3,14 +3,14 @@
  *
  * These types describe the response bodies of four read-only HTTP routes
  * exposed by the native server under `/execution/**` and consumed by the
- * Sidepanel `Execution` tab. They surface layer-dispatch and
- * ranked-replay telemetry, without ever exposing
+ * Sidepanel `Execution` tab. They surface layer-dispatch telemetry,
+ * without ever exposing
  * user-supplied free text.
  *
  * Privacy contract:
  *   - response bodies MUST NOT echo full URLs (no query strings, no fragments)
- *   - response bodies MUST NOT include any field from
- *     `memory_sessions.user_input`
+ *   - response bodies MUST NOT include raw user free text captured during
+ *     tool execution
  *   - response bodies MUST NOT include cookie or auth header values
  *   - intent is exposed only as the structural `intent_signature`
  *     (already lower-cased + redacted upstream)
@@ -19,7 +19,7 @@
  * multiple native-server versions; new fields must be optional.
  */
 
-import type { ContextStrategyName, TabrixChooseContextOutcome } from './choose-context';
+import type { ContextStrategyName } from './choose-context';
 import type {
   LayerDispatchReason,
   LayerSourceRoute,
@@ -40,7 +40,7 @@ export interface ExecutionRecentDecisionSummary {
   intentSignature: string;
   /** Optional structural pageRole. Empty string normalizes to null. */
   pageRole: string | null;
-  /** Closed enum (`'github'` today). Telemetry-only. */
+  /** Site-neutral family token. Telemetry-only. */
   siteFamily: string | null;
   /** Chosen strategy from the closed v1 set. */
   strategy: ContextStrategyName;
@@ -79,16 +79,8 @@ export interface ExecutionSavingsSummary {
    * legacy rows. Values are non-negative integers.
    */
   layerCounts: Record<ReadPageRequestedLayer | 'unknown', number>;
-  /**
-   * The most recent `experience_replay` decision + its outcome (if
-   * recorded). `null` when no replay has happened yet.
-   */
-  lastReplay: {
-    decisionId: string;
-    createdAt: string;
-    /** `'reuse' | 'fallback' | 'completed' | 'retried'` or `null` if no outcome row exists. */
-    outcome: TabrixChooseContextOutcome | null;
-  } | null;
+  /** Retired compatibility field; always `null` in current product paths. */
+  lastReplay: null;
   persistenceMode: 'disk' | 'memory' | 'off';
 }
 
@@ -143,10 +135,7 @@ export interface ExecutionReliabilitySignalSummary {
    * {@link LayerSourceRoute} union plus `'unknown'` for legacy rows.
    */
   sourceRouteCounts: Record<LayerSourceRoute | 'unknown', number>;
-  /**
-   * How many `experience_replay`-eligible decisions ended up blocked,
-   * grouped by reason. Empty object when no replay telemetry exists.
-   */
+  /** Retired compatibility field; always empty in current product paths. */
   replayBlockedByCounts: Record<string, number>;
   persistenceMode: 'disk' | 'memory' | 'off';
 }

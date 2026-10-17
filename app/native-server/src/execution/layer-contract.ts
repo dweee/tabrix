@@ -5,6 +5,7 @@ export type LayerContractDataSource =
   | 'dom_region_rows'
   | 'markdown'
   | 'api_rows'
+  | 'api_content'
   | 'api_detail'
   | 'cdp_enhanced_api_rows';
 
@@ -113,6 +114,18 @@ export function mapDataSourceToLayerContract(input: LayerContractInput): LayerCo
           input.dataSource === 'cdp_enhanced_api_rows'
             ? 'cdp_enhanced_api_rows_must_not_be_used_as_dom_locator_or_execution_target'
             : 'api_rows_must_not_be_used_as_dom_locator_or_execution_target',
+      });
+    case 'api_content':
+      return freezeEnvelope({
+        dataSource: 'api_content',
+        layer: 'L0+L1+L2',
+        locatorAuthority: false,
+        executionAuthority: false,
+        fallbackEntryLayer: input.fallbackEntryLayer ?? 'L0+L1',
+        reason: 'api_content_is_reading_surface_not_locator_authority',
+        allowedUses: sortUses(['reading_surface', 'detail_read']),
+        disallowedUses: sortUses(['locator', 'execution']),
+        escalationReason: 'api_content_must_not_be_used_as_dom_locator_or_execution_target',
       });
     case 'api_detail':
       return freezeEnvelope({
@@ -257,6 +270,7 @@ function defaultSurfaceForDataSource(
     case 'dom_region_rows':
       return 'dom';
     case 'api_rows':
+    case 'api_content':
     case 'api_detail':
     case 'cdp_enhanced_api_rows':
       return 'api';

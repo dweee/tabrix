@@ -24,13 +24,12 @@ export { javascriptTool } from './javascript';
 export { consoleTool } from './console';
 export { fileUploadTool } from './file-upload';
 export { readPageTool } from './read-page';
+export { collectResultCardsTool } from './collect-result-cards';
 export { computerTool } from './computer';
 export { handleDialogTool } from './dialog';
 export { handleDownloadTool } from './download';
-export { userscriptTool } from './userscript';
 export {
   performanceStartTraceTool,
   performanceStopTraceTool,
   performanceAnalyzeInsightTool,
 } from './performance';
-export { gifRecorderTool } from './gif-recorder';

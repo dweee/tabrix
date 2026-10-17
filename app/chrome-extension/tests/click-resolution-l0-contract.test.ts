@@ -22,6 +22,8 @@ import { readPageTool } from '@/entrypoints/background/tools/browser/read-page';
 import {
   __resetStableTargetRefRegistryForTests,
   getStableTargetRefRegistrySnapshot,
+  lookupCandidateActionTargetLocatorEntry,
+  recordCandidateActionTargetLocatorsSnapshot,
   lookupStableTargetRef,
 } from '@/entrypoints/background/tools/browser/stable-target-ref-registry';
 import { resolveCandidateActionTarget } from '@/entrypoints/background/tools/browser/candidate-action';
@@ -31,7 +33,7 @@ const FIXTURE_TAB = {
   windowId: 1,
   active: true,
   status: 'complete',
-  url: 'https://github.com/octocat/hello/pull/42',
+  url: 'https://code.example/octocat/hello/pull/42',
   title: 'PR #42 — octocat/hello',
 };
 
@@ -105,6 +107,19 @@ describe('V25-04 click-resolution L0 contract', () => {
     const snap = getStableTargetRefRegistrySnapshot();
     expect(snap.tabIds).toContain(FIXTURE_TAB.id);
     expect(snap.entryCounts[FIXTURE_TAB.id]).toBeGreaterThan(0);
+  });
+
+  it('read_page(L0) also records candidate action locators for same-tab fallback recovery', async () => {
+    setupExecutorMocks();
+    await runReadPage('L0');
+
+    const snap = getStableTargetRefRegistrySnapshot();
+    expect(snap.tabIds).toContain(FIXTURE_TAB.id);
+    expect(snap.candidateLocatorCounts[FIXTURE_TAB.id]).toBeGreaterThan(0);
+    expect(lookupCandidateActionTargetLocatorEntry(FIXTURE_TAB.id, 'ref_5')).toMatchObject({
+      selector: '[data-ref="5"]',
+      selectorType: 'css',
+    });
   });
 
   it('chrome_click_element resolves the same tgt_* (L0 read) to a live ref', async () => {
@@ -193,5 +208,162 @@ describe('V25-04 click-resolution L0 contract', () => {
     expect(resolved.source).toBe('unresolved_stable_target_ref');
     expect(resolved.unresolvedStableTargetRef).toBe('tgt_abcdef0123');
     expect(resolved.ref).toBeUndefined();
+  });
+
+  it('prefers the fresh candidate xpath over cached snapshot css for synthetic filter targets', () => {
+    const resolved = resolveCandidateActionTarget({
+      candidateAction: {
+        targetRef: 'ref_filter_time_range_84d3437b',
+        locatorChain: [
+          { type: 'ref', value: 'ref_filter_time_range_84d3437b' },
+          { type: 'aria', value: '一周内' },
+          { type: 'xpath', value: '//*[@role="button" and normalize-space(.)="一周内"]' },
+          { type: 'css', value: 'body > div:nth-of-type(9) button:nth-of-type(3)' },
+        ],
+      },
+      tabId: FIXTURE_TAB.id,
+      lookupCandidateActionTargetLocator: () => ({
+        selector: 'body > div:nth-of-type(4) button:nth-of-type(1)',
+        selectorType: 'css',
+      }),
+    });
+
+    expect(resolved).toMatchObject({
+      selector: '//*[@role="button" and normalize-space(.)="一周内"]',
+      selectorType: 'xpath',
+      source: 'candidate_locator_xpath',
+    });
+  });
+
+  it('prefers the fresh candidate xpath when callers copy a synthetic filter target into ref', () => {
+    const resolved = resolveCandidateActionTarget({
+      explicitRef: 'ref_filter_time_range_84d3437b',
+      candidateAction: {
+        targetRef: 'ref_filter_time_range_84d3437b',
+        locatorChain: [
+          { type: 'ref', value: 'ref_filter_time_range_84d3437b' },
+          { type: 'xpath', value: '//*[@role="button" and normalize-space(.)="一周内"]' },
+          { type: 'css', value: 'body > div:nth-of-type(9) button:nth-of-type(3)' },
+        ],
+      },
+      tabId: FIXTURE_TAB.id,
+      lookupCandidateActionTargetLocator: () => ({
+        selector: 'body > div:nth-of-type(4) button:nth-of-type(1)',
+        selectorType: 'css',
+      }),
+    });
+
+    expect(resolved.source).toBe('candidate_locator_xpath');
+    expect(resolved.selectorType).toBe('xpath');
+  });
+
+  it('executes a locator-backed floating option through its current snapshot css', () => {
+    const resolved = resolveCandidateActionTarget({
+      candidateAction: {
+        targetRef: 'ref_floating_option_4434fd2f',
+        executionTargetKind: 'snapshot_locator',
+        locatorChain: [
+          { type: 'ref', value: 'ref_floating_option_4434fd2f' },
+          { type: 'xpath', value: '//*[@data-filter-option="most-saved"]' },
+          { type: 'css', value: '[data-filter-option="most-saved"]' },
+        ],
+      },
+      tabId: FIXTURE_TAB.id,
+      lookupCandidateActionTargetLocator: () => undefined,
+    });
+
+    expect(resolved).toMatchObject({
+      selector: '[data-filter-option="most-saved"]',
+      selectorType: 'css',
+      source: 'candidate_locator_css',
+    });
+    expect(resolved.ref).toBeUndefined();
+  });
+
+  it('resolves a copied floating option targetRef through the recorded snapshot locator', () => {
+    const resolved = resolveCandidateActionTarget({
+      explicitRef: 'ref_floating_option_4434fd2f',
+      tabId: FIXTURE_TAB.id,
+      lookupCandidateActionTargetLocator: () => ({
+        selector: '[data-filter-option="most-saved"]',
+        selectorType: 'css',
+      }),
+    });
+
+    expect(resolved).toMatchObject({
+      selector: '[data-filter-option="most-saved"]',
+      selectorType: 'css',
+      source: 'candidate_snapshot_locator_css',
+    });
+    expect(resolved.ref).toBeUndefined();
+  });
+
+  it('prefers current snapshot css over a registered xpath for trusted pointer execution', () => {
+    const resolved = resolveCandidateActionTarget({
+      candidateAction: {
+        targetRef: 'ref_floating_option_4434fd2f',
+        executionTargetKind: 'snapshot_locator',
+        locatorChain: [
+          { type: 'ref', value: 'ref_floating_option_4434fd2f' },
+          { type: 'xpath', value: '//*[@data-filter-option="most-saved"]' },
+          { type: 'css', value: '[data-filter-option="most-saved"]' },
+        ],
+      },
+      tabId: FIXTURE_TAB.id,
+      lookupCandidateActionTargetLocator: () => ({
+        selector: '//*[@data-filter-option="most-saved"]',
+        selectorType: 'xpath',
+      }),
+    });
+
+    expect(resolved).toMatchObject({
+      selector: '[data-filter-option="most-saved"]',
+      selectorType: 'css',
+      source: 'candidate_locator_css',
+    });
+  });
+
+  it('resolves a copied visible search-input targetRef through its candidate css locator', () => {
+    const resolved = resolveCandidateActionTarget({
+      explicitRef: 'ref_search_input_5c8bafff',
+      candidateAction: {
+        targetRef: 'ref_search_input_5c8bafff',
+        locatorChain: [
+          { type: 'ref', value: 'ref_search_input_5c8bafff' },
+          { type: 'aria', value: 'Search' },
+          { type: 'css', value: 'textarea[aria-label="Search"]' },
+        ],
+      },
+      tabId: FIXTURE_TAB.id,
+      lookupCandidateActionTargetLocator: () => undefined,
+    });
+
+    expect(resolved).toMatchObject({
+      selector: 'textarea[aria-label="Search"]',
+      selectorType: 'css',
+      source: 'candidate_locator_css',
+    });
+  });
+
+  it('resolves a bare synthetic filter ref from the latest snapshot xpath locator', () => {
+    recordCandidateActionTargetLocatorsSnapshot(FIXTURE_TAB.id, [
+      {
+        targetRef: 'ref_filter_sort_c4ba7440',
+        selector: '//*[@role="button" and normalize-space(.)="最多收藏"]',
+        selectorType: 'xpath',
+      },
+    ]);
+
+    const resolved = resolveCandidateActionTarget({
+      explicitRef: 'ref_filter_sort_c4ba7440',
+      tabId: FIXTURE_TAB.id,
+      lookupCandidateActionTargetLocator: lookupCandidateActionTargetLocatorEntry,
+    });
+
+    expect(resolved).toMatchObject({
+      selector: '//*[@role="button" and normalize-space(.)="最多收藏"]',
+      selectorType: 'xpath',
+      source: 'candidate_snapshot_locator_xpath',
+    });
   });
 });

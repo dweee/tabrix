@@ -1,6 +1,49 @@
 import { type Tool } from '@modelcontextprotocol/sdk/types.js';
 import { TOOL_NAMES } from './names';
 
+export const TASK_SESSION_ID_PROPERTY = {
+  type: 'string',
+  description:
+    'Optional caller-provided task session key. Reuse the same value across choose_context/navigate/read/switch/fetch/click/fill/keyboard/close_tabs so Tabrix can keep current-page validation, run-owned tabs, read budgets, action verification, and cleanup tied to one AI task.',
+};
+
+const RUNTIME_POLICY_PROPERTY = {
+  type: 'object',
+  description:
+    'Optional browser runtime policy for task-owned operation. Use desiredExecutionMode=background or run_owned with focusPolicy=no_steal when Tabrix should work in the background without taking over the user-visible Chrome tab.',
+  properties: {
+    desiredExecutionMode: {
+      type: 'string',
+      enum: ['run_owned', 'background', 'current_tab_readonly', 'collaboration'],
+      description:
+        'run_owned/background asks Tabrix to prefer task-owned tabs and avoid disturbing the user. collaboration means user-visible operation is expected.',
+    },
+    focusPolicy: {
+      type: 'string',
+      enum: ['no_steal', 'allow_foreground_when_required', 'user_confirmed'],
+      description:
+        'no_steal means do not focus windows or activate newly-created tabs unless a later explicit action requires it.',
+    },
+    cleanupPolicy: {
+      type: 'string',
+      enum: ['close_run_owned', 'keep_handoff', 'keep_deliverable'],
+      description:
+        'close_run_owned means the caller expects task-owned tabs to be cleaned up with chrome_close_tabs when the task is done.',
+    },
+    nonInterference: {
+      type: 'string',
+      enum: ['strict'],
+      description:
+        'strict blocks mutating actions on tabs that are not proven run-owned or explicitly user-confirmed.',
+    },
+  },
+};
+
+const TASK_RUNTIME_PROPERTIES = {
+  taskSessionId: TASK_SESSION_ID_PROPERTY,
+  runtimePolicy: RUNTIME_POLICY_PROPERTY,
+};
+
 export const BROWSER_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.GET_WINDOWS_AND_TABS,
@@ -11,48 +54,16 @@ export const BROWSER_SCHEMAS: Tool[] = [
     },
     inputSchema: {
       type: 'object',
-      properties: {},
+      properties: {
+        includeDiagnostics: {
+          type: 'boolean',
+          description:
+            'Return full BrowserWorld diagnostics. Default false keeps the response compact for AI browser control.',
+        },
+      },
       required: [],
     },
   },
-  // {
-  //   name: TOOL_NAMES.RECORD_REPLAY.FLOW_RUN,
-  //   description:
-  //     'Run a recorded flow by ID with optional variables and run options. Returns a standardized run result.',
-  //   inputSchema: {
-  //     type: 'object',
-  //     properties: {
-  //       flowId: { type: 'string', description: 'ID of the flow to run' },
-  //       args: {
-  //         type: 'object',
-  //         description: 'Variable values for the flow (flat object of key/value)',
-  //       },
-  //       tabTarget: {
-  //         type: 'string',
-  //         description: "Target tab: 'current' or 'new' (default: current)",
-  //         enum: ['current', 'new'],
-  //       },
-  //       refresh: { type: 'boolean', description: 'Refresh before running (default false)' },
-  //       captureNetwork: {
-  //         type: 'boolean',
-  //         description: 'Capture network snippets for debugging (default false)',
-  //       },
-  //       returnLogs: { type: 'boolean', description: 'Return run logs (default false)' },
-  //       timeoutMs: { type: 'number', description: 'Global timeout in ms (optional)' },
-  //       startUrl: { type: 'string', description: 'Optional start URL to open before running' },
-  //     },
-  //     required: ['flowId'],
-  //   },
-  // },
-  // {
-  //   name: TOOL_NAMES.RECORD_REPLAY.LIST_PUBLISHED,
-  //   description: 'List published flows available as dynamic tools (for discovery).',
-  //   inputSchema: {
-  //     type: 'object',
-  //     properties: {},
-  //     required: [],
-  //   },
-  // },
   {
     name: TOOL_NAMES.BROWSER.PERFORMANCE_START_TRACE,
     description:
@@ -157,13 +168,14 @@ export const BROWSER_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.READ_PAGE,
     description:
-      'Get an accessibility-tree representation of visible page elements. Only returns elements visible in the viewport, and can optionally focus on interactive elements only.\nT3.2 contract: stable fields are mode/page/summary/interactiveElements/artifactRefs; candidateActions/pageContext/frameContext/historyRef/memoryHints are evolvable extensions.\nT5.0 task-view skeleton: taskMode/complexityLevel/sourceKind/highValueObjects/L0/L1/L2 provide a task-oriented view on top of the existing snapshot without replacing the T3.2 contract.\nSafe-first guidance: prefer this tool before screenshots, coordinate clicks, or javascript. If the element you need is still missing, use chrome_screenshot for visual confirmation. Reserve chrome_computer and chrome_javascript for explicit fallback/debug cases.\nLimitation: Does not work on chrome:// or browser-internal pages; may return degraded output on sparse localhost pages.',
+      'Read the current web page so the AI can decide what to do next. Returns the page summary, important page objects, and executable candidateActions with targetRef values for click/fill tools.\nDefault output is the standard read (internal value L0+L1) to keep token use low; request the detailed read (internal value L0+L1+L2) only when the AI needs detailed object refs. Use candidateActions/targetRef for browser control, not markdown text.\nAfter any click/fill/navigation, call chrome_read_page again when the AI needs to verify the page result before continuing.\nLimitation: Does not work on chrome:// or browser-internal pages; sparse or highly dynamic pages may need a screenshot fallback.',
     annotations: {
       readOnlyHint: true,
     },
     inputSchema: {
       type: 'object',
       properties: {
+        ...TASK_RUNTIME_PROPERTIES,
         filter: {
           type: 'string',
           description:
@@ -185,7 +197,7 @@ export const BROWSER_SCHEMAS: Tool[] = [
           type: 'string',
           enum: ['L0', 'L0+L1', 'L0+L1+L2'],
           description:
-            "Optional layer envelope. When omitted, preserves the legacy full L0+L1+L2 payload. 'L0' returns only the summary task layer (taskMode/pageRole/primaryRegion/focusObjectIds plus stable HVO targetRef registry); L1 and L2 task fields are dropped from the response. 'L0+L1' returns the L0 + L1 overview (highValueObjectIds + candidateActionIds) but suppresses L2 detail refs. 'L0+L1+L2' returns the full controlled expansion (current default behaviour). Stable HVO targetRef registry is ALWAYS written even at 'L0' so chrome_click_element resolution stays deterministic.",
+            "Optional internal detail envelope for advanced clients. Prefer the product meanings: 'L0' = light read, 'L0+L1' = standard read/default, 'L0+L1+L2' = detailed read. Light read returns only the summary task layer plus stable HVO targetRef registry; standard read adds high-value object and candidate-action ids while suppressing detailed refs; detailed read returns the full controlled expansion and must be requested explicitly. Stable HVO targetRef registry is always written even at 'L0' so chrome_click_element resolution stays deterministic.",
         },
         depth: {
           type: 'number',
@@ -204,6 +216,133 @@ export const BROWSER_SCHEMAS: Tool[] = [
         windowId: {
           type: 'number',
           description: 'Target window ID to pick active tab when tabId is omitted.',
+        },
+        frameId: {
+          type: 'number',
+          description:
+            'Optional Chrome frame ID for a targeted iframe/subframe read. Use only when Tabrix previously surfaced a concrete frameId; omitted means read the default responding frame. Candidate actions and targetRefs returned from a frame-targeted read are bound to that frame for later click/fill execution.',
+        },
+        includeAuthArtifacts: {
+          type: 'boolean',
+          description:
+            'Default false. When true, and only for an auth-scoped QR surface in an AI-operable tab, include a temporary auth_qr_image artifact reference for remote user login collaboration.',
+        },
+        assistantGuidance: {
+          type: 'object',
+          description:
+            'Optional AI-provided observation guidance for chrome_read_page. Tabrix uses it only to prioritize/filter what it observes (for example QR login over OTP controls); it is not Tabrix-side planning, not a success claim, and not permission to operate protected tabs.',
+          properties: {
+            taskKind: {
+              type: 'string',
+              enum: ['auth', 'search', 'extract_content', 'unknown'],
+              description: 'High-level task kind used only as an observation hint.',
+            },
+            authPreference: {
+              type: 'string',
+              enum: ['qr', 'otp', 'manual', 'auto'],
+              description:
+                "Preferred auth challenge to observe first. For example, use 'qr' when the user explicitly asked for扫码/scan login so OTP controls remain alternatives instead of the main path.",
+            },
+            requestedObjects: {
+              type: 'array',
+              items: {
+                type: 'string',
+                enum: [
+                  'auth_surface',
+                  'qr_image',
+                  'phone_input',
+                  'otp_input',
+                  'search_input',
+                  'result_cards',
+                  'detail_metrics',
+                ],
+              },
+              description:
+                'Observation targets the AI wants Tabrix to surface. These are filters/priorities only, not execution instructions.',
+            },
+            assistantProvidedTarget: {
+              type: 'object',
+              description:
+                'Optional target chosen by the AI after inspecting prior candidates. Tabrix may use selector/targetRef/frameId to retry scoped observation or artifact extraction, then return the updated page result.',
+              properties: {
+                purpose: {
+                  type: 'string',
+                  enum: ['auth_qr_image', 'click', 'fill', 'observe'],
+                },
+                targetRef: {
+                  type: 'string',
+                  description: 'Target ref from a recent read_page response in the same tab.',
+                },
+                selector: {
+                  type: 'string',
+                  description:
+                    'CSS selector selected by the AI from Tabrix-provided candidates; used only for scoped observation/extraction.',
+                },
+                frameId: {
+                  type: 'number',
+                  description: 'Optional frame id when the chosen target belongs to a subframe.',
+                },
+              },
+            },
+          },
+        },
+        forceRefresh: {
+          type: 'boolean',
+          description:
+            'Default false. When true, bypass read_page cached-read reuse and force a fresh browser read. Use after user-side login collaboration, QR scans, OTP/captcha/manual confirmation, or any external browser change that Tabrix did not perform through an MCP action.',
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: TOOL_NAMES.BROWSER.COLLECT_RESULT_CARDS,
+    description:
+      'Collect result-card objects across the current page by repeatedly reading the visible viewport, scrolling, merging, and de-duplicating cards until a requested Top N is reached or the page is exhausted. Use this when a search/feed/list page needs a stable top-N card set; do not use chrome_read_page alone to claim completeness on virtualized or infinite-scroll pages.',
+    annotations: {
+      readOnlyHint: false,
+      idempotentHint: false,
+    },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tabId: {
+          type: 'number',
+          description: 'Target an existing tab by ID (default: active tab).',
+        },
+        windowId: {
+          type: 'number',
+          description: 'Target window ID to pick active tab when tabId is omitted.',
+        },
+        minResults: {
+          type: 'number',
+          description: 'Minimum card count to collect before stopping. Default 10, max 50.',
+        },
+        maxScrolls: {
+          type: 'number',
+          description:
+            'Maximum number of downward scroll steps after the first viewport read. Default 4, max 10.',
+        },
+        scrollStepPx: {
+          type: 'number',
+          description:
+            'Pixels to scroll per step. Defaults to about 85% of the current viewport height.',
+        },
+        settleMs: {
+          type: 'number',
+          description:
+            'Milliseconds to wait after each scroll for lazy-loaded cards to appear. Default 700, max 5000.',
+        },
+        startFromTop: {
+          type: 'boolean',
+          description:
+            'Default true. Scroll to the top before collecting so Top N means the first results on the page. Set false to collect from the current viewport.',
+        },
+        outputMode: {
+          type: 'string',
+          enum: ['full', 'compact'],
+          description:
+            'Default full. Use compact for an AI-facing top-N card summary without verbose actionTarget/region payloads; use full when object projection or detailed debugging needs the complete structure.',
         },
       },
       required: [],
@@ -238,16 +377,32 @@ export const BROWSER_SCHEMAS: Tool[] = [
         candidateAction: {
           type: 'object',
           description:
-            'Optional action seed from chrome_read_page.candidateActions. Resolution order: explicit ref > candidateAction.targetRef > explicit selector > candidateAction.locatorChain(css/ref). aria locators are currently informational only.',
+            'Optional action seed from chrome_read_page.candidateActions. Resolution order: explicit ref > candidateAction.targetRef > explicit selector > candidateAction.locatorChain(xpath/css/ref). aria locators are currently informational only.',
           properties: {
             targetRef: {
               type: 'string',
               description: 'Preferred element ref from read_page candidateActions[*].targetRef.',
             },
+            executionTargetKind: {
+              type: 'string',
+              enum: ['page_ref', 'snapshot_locator', 'stable_ref'],
+              description:
+                'Preserve read_page candidateActions[*].executionTargetKind. snapshot_locator tells Tabrix to execute through the current XPath/CSS locator chain instead of treating the synthetic targetRef as a page-local ref.',
+            },
+            label: {
+              type: 'string',
+              description:
+                'Optional AI-facing read_page candidateActions[*].label. It is descriptive text only; execution still uses targetRef or locatorChain.',
+            },
+            intent: {
+              type: 'string',
+              description:
+                'Optional read_page candidateActions[*].intent, used to choose post-action verification such as auth.request_otp, search.submit, or content.open_detail.',
+            },
             locatorChain: {
               type: 'array',
               description:
-                'Fallback locator list from read_page candidateActions[*].locatorChain. Only css/ref are consumed in T3.2.',
+                'Fallback locator list from read_page candidateActions[*].locatorChain. xpath/css/ref are executable fallbacks; aria is informational.',
               items: {
                 type: 'object',
                 properties: {
@@ -367,83 +522,6 @@ export const BROWSER_SCHEMAS: Tool[] = [
       required: ['action'],
     },
   },
-  // {
-  //   name: TOOL_NAMES.BROWSER.USERSCRIPT,
-  //   description:
-  //     'Unified userscript tool (create/list/get/enable/disable/update/remove/send_command/export). Paste JS/CSS/Tampermonkey script and the system will auto-select the best strategy (insertCSS / persistent script in ISOLATED or MAIN world / once by CDP) with CSP-aware fallbacks.',
-  //   inputSchema: {
-  //     type: 'object',
-  //     properties: {
-  //       action: {
-  //         type: 'string',
-  //         description:
-  //           'Operation to perform',
-  //         enum: [
-  //           'create',
-  //           'list',
-  //           'get',
-  //           'enable',
-  //           'disable',
-  //           'update',
-  //           'remove',
-  //           'send_command',
-  //           'export',
-  //         ],
-  //       },
-  //       args: {
-  //         type: 'object',
-  //         description:
-  //           'Arguments for the specified action.\n- create: { script (required), name?, description?, matches?: string[], excludes?: string[], persist?: boolean (default true), runAt?: "document_start"|"document_end"|"document_idle"|"auto", world?: "auto"|"ISOLATED"|"MAIN", allFrames?: boolean (default true), mode?: "auto"|"css"|"persistent"|"once", dnrFallback?: boolean (default true), tags?: string[] }\n- list: { query?: string, status?: "enabled"|"disabled", domain?: string }\n- get: { id (required) }\n- enable/disable: { id (required) }\n- update: { id (required), script?, name?, description?, matches?, excludes?, runAt?, world?, allFrames?, persist?, dnrFallback?, tags? }\n- remove: { id (required) }\n- send_command: { id (required), payload?: string, tabId?: number }\n- export: {}\nTip: For a one-off execution that returns a value, use create with args.mode="once". The returned value is included as onceResult in the tool response.',
-  //         properties: {
-  //           // Common identifiers
-  //           id: { type: 'string', description: 'Userscript id (for get/enable/disable/update/remove/send_command)' },
-  //           // Create / Update fields
-  //           script: { type: 'string', description: 'JS/CSS/Tampermonkey script source (required for create)' },
-  //           name: { type: 'string', description: 'Userscript name (optional)' },
-  //           description: { type: 'string', description: 'Userscript description (optional)' },
-  //           matches: {
-  //             type: 'array',
-  //             items: { type: 'string' },
-  //             description: 'Match patterns for pages to apply to (e.g., https://*.example.com/*)'
-  //           },
-  //           excludes: {
-  //             type: 'array',
-  //             items: { type: 'string' },
-  //             description: 'Exclude patterns'
-  //           },
-  //           persist: { type: 'boolean', description: 'Persist userscript for matched pages (default true)' },
-  //           runAt: {
-  //             type: 'string',
-  //             description: 'Injection timing',
-  //             enum: ['document_start', 'document_end', 'document_idle', 'auto'],
-  //           },
-  //           world: {
-  //             type: 'string',
-  //             description: 'Execution world',
-  //             enum: ['auto', 'ISOLATED', 'MAIN'],
-  //           },
-  //           allFrames: { type: 'boolean', description: 'Inject into all frames (default true)' },
-  //           mode: {
-  //             type: 'string',
-  //             description:
-  //               'Injection strategy: auto | css | persistent | once. Use once to evaluate immediately (no persistence) and include the return value in onceResult.',
-  //             enum: ['auto', 'css', 'persistent', 'once'],
-  //           },
-  //           dnrFallback: { type: 'boolean', description: 'Use DNR fallback when needed (default true)' },
-  //           tags: { type: 'array', items: { type: 'string' }, description: 'Custom tags' },
-  //           // List filters
-  //           query: { type: 'string', description: 'Search by name/description (list action)' },
-  //           status: { type: 'string', enum: ['enabled', 'disabled'], description: 'Filter by status (list action)' },
-  //           domain: { type: 'string', description: 'Filter by domain (list action)' },
-  //           // Send command
-  //           payload: { type: 'string', description: 'Arbitrary payload (stringified) for send_command' },
-  //           tabId: { type: 'number', description: 'Target tab for send_command (default active tab)' },
-  //         },
-  //       },
-  //     },
-  //     required: ['action'],
-  //   },
-  // },
   {
     name: TOOL_NAMES.BROWSER.NAVIGATE,
     description:
@@ -454,6 +532,7 @@ export const BROWSER_SCHEMAS: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {
+        ...TASK_RUNTIME_PROPERTIES,
         url: {
           type: 'string',
           description:
@@ -493,6 +572,11 @@ export const BROWSER_SCHEMAS: Tool[] = [
           description:
             'Refresh the current active tab instead of navigating to a URL. When true, the url parameter is ignored. Defaults to false',
         },
+        settleTimeoutMs: {
+          type: 'number',
+          description:
+            'Optional navigation settle timeout in milliseconds. Defaults to the runtime standard timeout; use a larger value only for slow pages where a document must become readable. Clamped to 1000-60000.',
+        },
       },
       required: [],
     },
@@ -500,7 +584,7 @@ export const BROWSER_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.SCREENSHOT,
     description:
-      'Take a screenshot of the current page or a specific element. Prefer chrome_read_page before using screenshots for routine discovery, and use this tool for visual evidence or coordinate confirmation when the DOM/ref path is insufficient.\nLimitation: Full-page or large-viewport captures may time out on complex pages. If capture fails, try a smaller viewport before escalating to chrome_computer.',
+      'Take a screenshot of the current page or a specific element. Prefer chrome_read_page before using screenshots for routine discovery, and use this tool for visual confirmation or coordinate fallback when the DOM/ref path is insufficient.\nLimitation: Full-page or large-viewport captures may time out on complex pages. If capture fails, try a smaller viewport before escalating to chrome_computer.',
     annotations: {
       readOnlyHint: true,
     },
@@ -531,7 +615,7 @@ export const BROWSER_SCHEMAS: Tool[] = [
         },
         fullPage: {
           type: 'boolean',
-          description: 'Store screenshot of the entire page (default: true)',
+          description: 'Store screenshot of the entire page (default: false)',
         },
         savePng: {
           type: 'boolean',
@@ -551,6 +635,7 @@ export const BROWSER_SCHEMAS: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {
+        ...TASK_RUNTIME_PROPERTIES,
         tabIds: {
           type: 'array',
           items: { type: 'number' },
@@ -581,6 +666,7 @@ export const BROWSER_SCHEMAS: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {
+        ...TASK_RUNTIME_PROPERTIES,
         tabId: {
           type: 'number',
           description: 'The ID of the tab to switch to.',
@@ -781,6 +867,7 @@ export const BROWSER_SCHEMAS: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {
+        ...TASK_RUNTIME_PROPERTIES,
         url: {
           type: 'string',
           description: 'URL to fetch content from. If not provided, uses the current active tab',
@@ -807,6 +894,17 @@ export const BROWSER_SCHEMAS: Tool[] = [
           type: 'boolean',
           description:
             'Get the visible text content of the page with metadata. Ignored if htmlContent is true (default: true)',
+        },
+        textMode: {
+          type: 'string',
+          enum: ['body', 'full-visible'],
+          description:
+            'Text extraction mode when textContent is true. body (default) extracts the main article/body text to reduce noise; full-visible returns page-level visible text similar to document.body.innerText for coverage comparisons.',
+        },
+        settleTimeoutMs: {
+          type: 'number',
+          description:
+            'Optional timeout in milliseconds to wait for a newly opened URL tab to settle before extracting content. Defaults to a bounded web-content timeout; clamped to 1000-60000.',
         },
 
         selector: {
@@ -1214,7 +1312,7 @@ export const BROWSER_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.JAVASCRIPT,
     description:
-      'Execute JavaScript code in a browser tab and return the result. This is a high-risk debugger/fallback capability: do not use it for routine tab discovery, normal navigation waits, or simple content extraction when chrome_read_page, chrome_get_web_content, chrome_get_interactive_elements, chrome_click_element, or chrome_fill_or_select can do the job. Uses CDP Runtime.evaluate with awaitPromise and returnByValue; automatically falls back to chrome.scripting.executeScript if the debugger is busy. Output is sanitized (sensitive data redacted) and truncated by default.',
+      'Execute JavaScript code in a browser tab and return the result. This is an advanced fallback for cases where normal Tabrix tools cannot read or operate the page. Do not use it for routine tab discovery, navigation waits, or simple content extraction when chrome_read_page, chrome_get_web_content, chrome_get_interactive_elements, chrome_click_element, or chrome_fill_or_select can do the job. The calling AI/client must review the script intent, data access, and side effects before sending it. Uses CDP Runtime.evaluate with awaitPromise and returnByValue; automatically falls back to chrome.scripting.executeScript if the debugger is busy. Output is redacted and truncated by default.',
     annotations: {
       destructiveHint: true,
     },
@@ -1224,7 +1322,7 @@ export const BROWSER_SCHEMAS: Tool[] = [
         code: {
           type: 'string',
           description:
-            'JavaScript code to execute. Runs inside an async function body, so top-level await and "return ..." are supported.',
+            'JavaScript code to execute. Runs inside an async function body, so top-level await and "return ..." are supported. Before passing this code to Tabrix, the calling AI/client is responsible for checking whether the script reads sensitive data, changes page state, navigates, submits forms, deletes data, or has other user-visible side effects.',
         },
         tabId: {
           type: 'number',
@@ -1251,13 +1349,14 @@ export const BROWSER_SCHEMAS: Tool[] = [
   {
     name: TOOL_NAMES.BROWSER.CLICK,
     description:
-      'Click on an element in a web page. Supports multiple targeting methods: CSS selector, XPath, element ref (from chrome_read_page), or viewport coordinates. More focused than chrome_computer for simple click operations.',
+      'Click on or safely hover a known element in a web page. Supports multiple targeting methods: CSS selector, XPath, element ref (from chrome_read_page), or viewport coordinates for clicks. Hover is limited to ref/selector/candidateAction targets and must be followed by chrome_read_page verification. More focused than chrome_computer for simple element operations.',
     annotations: {
       destructiveHint: true,
     },
     inputSchema: {
       type: 'object',
       properties: {
+        ...TASK_RUNTIME_PROPERTIES,
         selector: {
           type: 'string',
           description: 'CSS selector or XPath for the element to click.',
@@ -1267,6 +1366,12 @@ export const BROWSER_SCHEMAS: Tool[] = [
           enum: ['css', 'xpath'],
           description: 'Type of selector (default: "css").',
         },
+        interaction: {
+          type: 'string',
+          enum: ['click', 'hover'],
+          description:
+            'Element interaction to perform. Default is "click". "hover" is a safe discovery action for known refs/selectors/candidateActions only; coordinate-only hover is intentionally rejected and should remain a chrome_computer fallback.',
+        },
         ref: {
           type: 'string',
           description: 'Element ref from chrome_read_page (takes precedence over selector).',
@@ -1274,16 +1379,32 @@ export const BROWSER_SCHEMAS: Tool[] = [
         candidateAction: {
           type: 'object',
           description:
-            'Optional action seed from chrome_read_page.candidateActions. Resolution order: explicit ref > candidateAction.targetRef > explicit selector > candidateAction.locatorChain(css/ref).',
+            'Optional action seed from chrome_read_page.candidateActions. Resolution order: explicit ref > candidateAction.targetRef > explicit selector > candidateAction.locatorChain(xpath/css/ref).',
           properties: {
             targetRef: {
               type: 'string',
               description: 'Preferred element ref from read_page candidateActions[*].targetRef.',
             },
+            executionTargetKind: {
+              type: 'string',
+              enum: ['page_ref', 'snapshot_locator', 'stable_ref'],
+              description:
+                'Preserve read_page candidateActions[*].executionTargetKind. snapshot_locator tells Tabrix to execute through the current XPath/CSS locator chain instead of treating the synthetic targetRef as a page-local ref.',
+            },
+            label: {
+              type: 'string',
+              description:
+                'Optional AI-facing read_page candidateActions[*].label. It is descriptive text only; execution still uses targetRef or locatorChain.',
+            },
+            intent: {
+              type: 'string',
+              description:
+                'Optional read_page candidateActions[*].intent, used to choose post-action verification such as auth.request_otp, search.submit, or content.open_detail.',
+            },
             locatorChain: {
               type: 'array',
               description:
-                'Fallback locator list from read_page candidateActions[*].locatorChain. css/ref are consumed in T3.2.',
+                'Fallback locator list from read_page candidateActions[*].locatorChain. xpath/css/ref are executable fallbacks; aria is informational.',
               items: {
                 type: 'object',
                 properties: {
@@ -1362,6 +1483,7 @@ export const BROWSER_SCHEMAS: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {
+        ...TASK_RUNTIME_PROPERTIES,
         selector: {
           type: 'string',
           description: 'CSS selector or XPath for the form element.',
@@ -1378,16 +1500,32 @@ export const BROWSER_SCHEMAS: Tool[] = [
         candidateAction: {
           type: 'object',
           description:
-            'Optional action seed from chrome_read_page.candidateActions. Resolution order: explicit ref > candidateAction.targetRef > explicit selector > candidateAction.locatorChain(css/ref).',
+            'Optional action seed from chrome_read_page.candidateActions. Resolution order: explicit ref > candidateAction.targetRef > explicit selector > candidateAction.locatorChain(xpath/css/ref).',
           properties: {
             targetRef: {
               type: 'string',
               description: 'Preferred element ref from read_page candidateActions[*].targetRef.',
             },
+            executionTargetKind: {
+              type: 'string',
+              enum: ['page_ref', 'snapshot_locator', 'stable_ref'],
+              description:
+                'Preserve read_page candidateActions[*].executionTargetKind. snapshot_locator tells Tabrix to execute through the current XPath/CSS locator chain instead of treating the synthetic targetRef as a page-local ref.',
+            },
+            label: {
+              type: 'string',
+              description:
+                'Optional AI-facing read_page candidateActions[*].label. It is descriptive text only; execution still uses targetRef or locatorChain.',
+            },
+            intent: {
+              type: 'string',
+              description:
+                'Optional read_page candidateActions[*].intent, used as execution context. Fill can carry search.enter_query, but search success still requires a fresh post-action read.',
+            },
             locatorChain: {
               type: 'array',
               description:
-                'Fallback locator list from read_page candidateActions[*].locatorChain. css/ref are consumed in T3.2.',
+                'Fallback locator list from read_page candidateActions[*].locatorChain. xpath/css/ref are executable fallbacks; aria is informational.',
               items: {
                 type: 'object',
                 properties: {
@@ -1421,60 +1559,6 @@ export const BROWSER_SCHEMAS: Tool[] = [
     },
   },
   {
-    name: TOOL_NAMES.BROWSER.REQUEST_ELEMENT_SELECTION,
-    description:
-      'Request the user to manually select one or more elements on the current page. This is a human-in-the-loop tool: the user must physically click elements in the browser, so expect a wait of seconds to minutes. Use as a fallback when you cannot reliably locate the target element after ~3 attempts using chrome_read_page combined with chrome_click_element/chrome_fill_or_select/chrome_computer. Returns element refs compatible with chrome_click_element/chrome_fill_or_select (including iframe frameId for cross-frame support).',
-    annotations: {
-      readOnlyHint: true,
-    },
-    inputSchema: {
-      type: 'object',
-      properties: {
-        requests: {
-          type: 'array',
-          description:
-            'A list of element selection requests. Each request produces exactly one picked element. The user will see these requests in a panel and select each element by clicking on the page.',
-          minItems: 1,
-          items: {
-            type: 'object',
-            properties: {
-              id: {
-                type: 'string',
-                description:
-                  'Optional stable request id for correlation. If omitted, an id is auto-generated (e.g., "req_1").',
-              },
-              name: {
-                type: 'string',
-                description:
-                  'Short label shown to the user describing what element to select (e.g., "Login button", "Email input field").',
-              },
-              description: {
-                type: 'string',
-                description:
-                  'Optional longer instruction shown to the user with more context (e.g., "Click on the primary login button in the top-right corner").',
-              },
-            },
-            required: ['name'],
-          },
-        },
-        timeoutMs: {
-          type: 'number',
-          description:
-            'Timeout in milliseconds for the user to complete all selections. Default: 180000 (3 minutes). Maximum: 600000 (10 minutes).',
-        },
-        tabId: {
-          type: 'number',
-          description: 'Target tab ID. If omitted, uses the current active tab.',
-        },
-        windowId: {
-          type: 'number',
-          description: 'Window ID to select active tab from (when tabId is omitted).',
-        },
-      },
-      required: ['requests'],
-    },
-  },
-  {
     name: TOOL_NAMES.BROWSER.KEYBOARD,
     description:
       'Simulate keyboard input on a web page. Sends key events (Enter, Tab, Escape, Ctrl+C, etc.) or key combinations. For typing text into form fields, prefer chrome_fill_or_select; this tool is best for keyboard shortcuts and special keys.',
@@ -1484,14 +1568,31 @@ export const BROWSER_SCHEMAS: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {
+        ...TASK_RUNTIME_PROPERTIES,
         keys: {
           type: 'string',
           description:
             'Keys or key combinations to simulate. Examples: "Enter", "Tab", "Ctrl+C", "Shift+Tab", "Ctrl+A, Backspace". For plain text typing, use chrome_fill_or_select instead.',
         },
+        key: {
+          type: 'string',
+          description:
+            'Alias for keys when sending a single key such as "Enter". Prefer keys for chords or multiple key events. Either keys or key must be provided.',
+        },
         selector: {
           type: 'string',
           description: 'CSS selector or XPath for target element to receive keyboard events.',
+        },
+        ref: {
+          type: 'string',
+          description:
+            'Element ref from the latest chrome_read_page result. Prefer this over relying on the current browser focus when pressing Enter on a searchbox or focused control.',
+        },
+        candidateAction: {
+          type: 'object',
+          description:
+            'Candidate action returned by chrome_read_page. When targetRef is present, chrome_keyboard focuses that exact element before dispatching keys.',
+          additionalProperties: true,
         },
         selectorType: {
           type: 'string',
@@ -1515,7 +1616,6 @@ export const BROWSER_SCHEMAS: Tool[] = [
           description: 'Target frame ID for iframe support.',
         },
       },
-      required: ['keys'],
     },
   },
   {
@@ -1659,216 +1759,6 @@ export const BROWSER_SCHEMAS: Tool[] = [
         windowId: {
           type: 'number',
           description: 'When tabId is omitted, use the active tab in this window',
-        },
-      },
-      required: ['action'],
-    },
-  },
-  {
-    name: TOOL_NAMES.BROWSER.GIF_RECORDER,
-    description:
-      'Record browser tab activity as an animated GIF.\n\nModes:\n- Fixed FPS mode (action="start"): Captures frames at regular intervals. Good for animations/videos.\n- Auto-capture mode (action="auto_start"): Captures frames automatically when chrome_computer or chrome_navigate actions succeed. Better for interaction recordings with natural pacing.\n\nUse "stop" to end recording and save the GIF.\nNote: Rapid start→stop sequences may produce "No recording in progress" errors due to initialization timing. Allow at least a few hundred milliseconds between start and stop.',
-    annotations: {
-      readOnlyHint: false,
-    },
-    inputSchema: {
-      type: 'object',
-      properties: {
-        action: {
-          type: 'string',
-          enum: ['start', 'stop', 'status', 'auto_start', 'capture', 'clear', 'export'],
-          description:
-            'Action to perform:\n- "start": Begin fixed-FPS recording (captures frames at regular intervals)\n- "auto_start": Begin auto-capture mode (frames captured on tool actions)\n- "stop": End recording and save GIF\n- "status": Get current recording state\n- "capture": Manually trigger a frame capture in auto mode\n- "clear": Clear all recording state and cached GIF without saving\n- "export": Export the last recorded GIF (download or drag&drop upload)',
-        },
-        tabId: {
-          type: 'number',
-          description:
-            'Target tab ID (default: active tab). Used with "start"/"auto_start" for recording, and with "export" (download=false) for drag&drop upload target.',
-        },
-        windowId: {
-          type: 'number',
-          description:
-            'When tabId is omitted, use the active tab in this window (default: current window).',
-        },
-        fps: {
-          type: 'number',
-          description:
-            'Frames per second for fixed-FPS mode (1-30, default: 5). Higher values = smoother but larger file.',
-        },
-        durationMs: {
-          type: 'number',
-          description:
-            'Maximum recording duration in milliseconds (default: 5000, max: 60000). Only for fixed-FPS mode.',
-        },
-        maxFrames: {
-          type: 'number',
-          description:
-            'Maximum number of frames to capture (default: 50 for fixed-FPS, 100 for auto mode, max: 300).',
-        },
-        width: {
-          type: 'number',
-          description: 'Output GIF width in pixels (default: 800, max: 1920).',
-        },
-        height: {
-          type: 'number',
-          description: 'Output GIF height in pixels (default: 600, max: 1080).',
-        },
-        maxColors: {
-          type: 'number',
-          description:
-            'Maximum colors in palette (default: 256). Lower values = smaller file size.',
-        },
-        filename: {
-          type: 'string',
-          description: 'Output filename (without extension). Defaults to timestamped name.',
-        },
-        captureDelayMs: {
-          type: 'number',
-          description:
-            'Auto-capture mode only: Delay in ms after action before capturing frame (default: 150). Allows UI to stabilize.',
-        },
-        frameDelayCs: {
-          type: 'number',
-          description:
-            'Auto-capture mode only: Display duration per frame in centiseconds (default: 20 = 200ms per frame).',
-        },
-        annotation: {
-          type: 'string',
-          description:
-            'Auto-capture mode only (action="capture"): Optional text label to render on the captured frame.',
-        },
-        download: {
-          type: 'boolean',
-          description:
-            'Export action only: Set to true (default) to download the GIF, or false to upload via drag&drop.',
-        },
-        coordinates: {
-          type: 'object',
-          description:
-            'Export action only (when download=false): Target coordinates for drag&drop upload.',
-          properties: {
-            x: { type: 'number' },
-            y: { type: 'number' },
-          },
-          required: ['x', 'y'],
-        },
-        ref: {
-          type: 'string',
-          description:
-            'Export action only (when download=false): Element ref from chrome_read_page for drag&drop target.',
-        },
-        selector: {
-          type: 'string',
-          description:
-            'Export action only (when download=false): CSS selector for drag&drop target element.',
-        },
-        enhancedRendering: {
-          type: 'object',
-          description:
-            'Auto-capture mode only: Configure visual overlays for recorded actions (click indicators, drag paths, labels). Pass `true` to enable all defaults.',
-          properties: {
-            clickIndicators: {
-              oneOf: [
-                { type: 'boolean' },
-                {
-                  type: 'object',
-                  properties: {
-                    enabled: {
-                      type: 'boolean',
-                      description: 'Enable click indicators (default: true)',
-                    },
-                    color: {
-                      type: 'string',
-                      description:
-                        'CSS color for click indicator (default: "rgba(255, 87, 34, 0.8)")',
-                    },
-                    radius: { type: 'number', description: 'Initial radius in px (default: 20)' },
-                    animationDurationMs: {
-                      type: 'number',
-                      description: 'Animation duration in ms (default: 400)',
-                    },
-                    animationFrames: {
-                      type: 'number',
-                      description: 'Number of animation frames (default: 3)',
-                    },
-                    animationIntervalMs: {
-                      type: 'number',
-                      description: 'Interval between animation frames in ms (default: 80)',
-                    },
-                  },
-                },
-              ],
-              description:
-                'Click indicator overlay config (true for defaults, or object for custom).',
-            },
-            dragPaths: {
-              oneOf: [
-                { type: 'boolean' },
-                {
-                  type: 'object',
-                  properties: {
-                    enabled: {
-                      type: 'boolean',
-                      description: 'Enable drag path rendering (default: true)',
-                    },
-                    color: {
-                      type: 'string',
-                      description: 'CSS color for drag path (default: "rgba(33, 150, 243, 0.7)")',
-                    },
-                    lineWidth: { type: 'number', description: 'Line width in px (default: 3)' },
-                    lineDash: {
-                      type: 'array',
-                      items: { type: 'number' },
-                      description: 'Dash pattern (default: [6, 4])',
-                    },
-                    arrowSize: {
-                      type: 'number',
-                      description: 'Arrow head size in px (default: 10)',
-                    },
-                  },
-                },
-              ],
-              description: 'Drag path overlay config (true for defaults, or object for custom).',
-            },
-            labels: {
-              oneOf: [
-                { type: 'boolean' },
-                {
-                  type: 'object',
-                  properties: {
-                    enabled: {
-                      type: 'boolean',
-                      description: 'Enable action labels (default: true)',
-                    },
-                    font: {
-                      type: 'string',
-                      description: 'Font for labels (default: "bold 12px sans-serif")',
-                    },
-                    textColor: { type: 'string', description: 'Text color (default: "#fff")' },
-                    bgColor: {
-                      type: 'string',
-                      description: 'Background color (default: "rgba(0,0,0,0.7)")',
-                    },
-                    padding: { type: 'number', description: 'Padding in px (default: 4)' },
-                    borderRadius: {
-                      type: 'number',
-                      description: 'Border radius in px (default: 4)',
-                    },
-                    offset: {
-                      type: 'object',
-                      properties: { x: { type: 'number' }, y: { type: 'number' } },
-                      description: 'Offset from action position (default: {x: 10, y: -20})',
-                    },
-                  },
-                },
-              ],
-              description: 'Action label overlay config (true for defaults, or object for custom).',
-            },
-            durationMs: {
-              type: 'number',
-              description: 'How long overlays remain visible in ms (default: 1500).',
-            },
-          },
         },
       },
       required: ['action'],

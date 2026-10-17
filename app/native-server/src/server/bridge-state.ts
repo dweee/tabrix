@@ -72,6 +72,7 @@ interface RecordHeartbeatOptions {
 const BROWSER_WATCH_INTERVAL_MS = 10_000;
 const HEARTBEAT_TIMEOUT_MS = 15_000;
 const DEGRADED_WINDOW_MS = 60_000;
+const BROWSER_PROCESS_SYNC_CACHE_MS = 1_000;
 
 export function detectBrowserProcessRunning(): boolean {
   try {
@@ -151,9 +152,11 @@ export class BridgeStateManager {
   };
 
   private watchTimer: NodeJS.Timeout | null = null;
+  private browserProcessSyncedAt: number | null = null;
 
   reset(): void {
     this.stopWatching();
+    this.browserProcessSyncedAt = null;
     this.snapshot = {
       bridgeState: 'BROWSER_NOT_RUNNING',
       browserProcessRunning: false,
@@ -233,8 +236,17 @@ export class BridgeStateManager {
     // A fresh heartbeat can only be sent by the browser-hosted extension. This
     // also covers Chromium forks whose executable name we do not recognize.
     const running = this.detectBrowserProcess() || heartbeatFresh;
+    this.browserProcessSyncedAt = Date.now();
     this.setBrowserProcessRunning(running);
     return running;
+  }
+
+  syncBrowserProcessIfStale(maxAgeMs: number = BROWSER_PROCESS_SYNC_CACHE_MS): boolean {
+    const now = Date.now();
+    if (this.browserProcessSyncedAt !== null && now - this.browserProcessSyncedAt <= maxAgeMs) {
+      return this.snapshot.browserProcessRunning;
+    }
+    return this.syncBrowserProcessNow();
   }
 
   setBrowserProcessRunning(running: boolean): void {

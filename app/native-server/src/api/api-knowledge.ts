@@ -1,45 +1,13 @@
 /**
- * Seed-adapter classification.
+ * Legacy API-knowledge compatibility surface.
  *
- * Every symbol in this file is part of the GitHub/npmjs *seed
- * adapter*: a hardcoded family table the v2.5 codebase used as the
- * sole API entry point. The mainline reader is the
- * Knowledge-driven on-demand path (`api-knowledge/endpoint-lookup` +
- * `api-knowledge/safe-request-builder` + `api-knowledge/knowledge-driven-reader`),
- * which is fed by the generic `network-observe-classifier`.
- *
- * This file is therefore a *compatibility surface*, not the mainline:
- *   - `direct-api-executor.tryDirectApiExecute` ALWAYS tries
- *     `lookupEndpointFamily` first when given a `dataNeed` +
- *     `knowledgeRepo`, and only falls back to `resolveApiKnowledgeCandidate`
- *     when the lookup misses.
- *   - Every result that this adapter feeds to the executor is labelled
- *     `endpointSource='seed_adapter'` in
- *     `DirectApiExecutionTelemetry` so reports can split the run mix into
- *     `observed` (mainline) vs
- *     `seed_adapter` (compatibility) vs `manual_seed` (reserved).
- *
- * Do NOT add new platform `*Family` entries here. Any new endpoint a
- * contributor wants to teach the reader about must go through the
- * network-observe classifier so it lands in the Memory DB as an `observed`
- * row first; the executor will then pick it up via the lookup path.
- *
- * The `seed_adapter` lineage is the only kind this file emits; the
- * other two members of the `endpointSource` closed enum are produced
- * elsewhere:
- *   - `observed` — emitted by `api-knowledge/safe-request-builder` when
- *     the looked-up row was captured by `chrome_network_capture`.
- *   - `manual_seed` — reserved for an operator-curated catalog; not
- *     produced by any current code path. Documented in the closed
- *     enum so future contributors do not re-invent it.
+ * Tabrix no longer ships platform-specific API seed adapters. API knowledge
+ * must come from observed browser/network evidence and Knowledge/Object
+ * projections, not from hardcoded site families.
  */
-export type ApiEndpointFamily =
-  | 'github_search_repositories'
-  | 'github_issues_list'
-  | 'github_workflow_runs_list'
-  | 'npmjs_search_packages';
+export type ApiEndpointFamily = string;
 
-export type ApiDataPurpose = 'search_list' | 'issue_list' | 'workflow_runs_list' | 'package_search';
+export type ApiDataPurpose = string;
 
 export type ApiKnowledgeFallbackReason =
   | 'unsupported_family'
@@ -198,7 +166,6 @@ export interface ApiKnowledgeIntentReadInput {
   limit?: number;
 }
 
-const READ_METHODS = new Set(['GET', 'HEAD']);
 const API_KNOWLEDGE_READ_TIMEOUT_MS = 2500;
 const API_KNOWLEDGE_COMPACT_RESULT_CACHE_TTL_MS = 120_000;
 const API_KNOWLEDGE_COMPACT_RESULT_CACHE_MAX = 64;
@@ -215,29 +182,9 @@ export function clearApiKnowledgeCompactResultCacheForTests(): void {
 }
 
 export function classifyApiKnowledgeMetadata(
-  input: ApiKnowledgeMetadataInput,
+  _input: ApiKnowledgeMetadataInput,
 ): ApiKnowledgeMetadata | null {
-  const parsed = parseUrl(input.url);
-  if (!parsed) return null;
-  const method = normalizeMethod(input.method);
-  const seed = classifySeedEndpoint(parsed, method);
-  if (!seed) return null;
-  return {
-    host: parsed.hostname.toLowerCase(),
-    pathPattern: seed.pathPattern,
-    method,
-    statusClass: statusClass(input.status),
-    timingMs:
-      typeof input.timingMs === 'number' && Number.isFinite(input.timingMs) && input.timingMs >= 0
-        ? input.timingMs
-        : null,
-    sizeClass: sizeClass(input.sizeBytes),
-    contentType: sanitizeContentType(input.contentType),
-    endpointFamily: seed.endpointFamily,
-    confidence: seed.confidence,
-    dataPurpose: seed.dataPurpose,
-    readAllowed: READ_METHODS.has(method),
-  };
+  return null;
 }
 
 export function resolveApiKnowledgeCandidate(input: {
@@ -245,91 +192,7 @@ export function resolveApiKnowledgeCandidate(input: {
   url?: string;
   pageRole?: string;
 }): ApiKnowledgeCandidate | null {
-  const intent = normalizeText(input.intent);
-  const parsed = input.url ? parseUrl(input.url) : null;
-  const host = parsed?.hostname.toLowerCase() ?? '';
-  const pageRole = normalizeText(input.pageRole ?? '');
-
-  if (host === 'github.com' || host.endsWith('.github.com')) {
-    const repo = parsed ? parseGithubRepo(parsed) : null;
-    const issueSearch = parsed ? parseGithubIssueSearch(parsed) : null;
-    const wantsIssues =
-      pageRole.includes('issues') ||
-      /\bissues?\b/.test(intent) ||
-      issueSearch !== null ||
-      parsed?.searchParams.get('type')?.toLowerCase() === 'issues';
-    if (issueSearch && wantsIssues) {
-      const params: Record<string, string> = {
-        owner: issueSearch.owner,
-        repo: issueSearch.repo,
-        state: issueSearch.state ?? 'open',
-      };
-      if (issueSearch.query) params.query = issueSearch.query;
-      return {
-        endpointFamily: 'github_issues_list',
-        dataPurpose: 'issue_list',
-        confidence: 0.86,
-        method: 'GET',
-        params,
-      };
-    }
-    if (repo && wantsIssues) {
-      return {
-        endpointFamily: 'github_issues_list',
-        dataPurpose: 'issue_list',
-        confidence: 0.86,
-        method: 'GET',
-        params: { owner: repo.owner, repo: repo.repo, state: 'open' },
-      };
-    }
-    if (wantsIssues) return null;
-    const wantsActions =
-      pageRole.includes('actions') ||
-      pageRole.includes('workflow') ||
-      /\b(actions?|workflow|workflows?|runs?)\b/.test(intent);
-    if (repo && wantsActions) {
-      return {
-        endpointFamily: 'github_workflow_runs_list',
-        dataPurpose: 'workflow_runs_list',
-        confidence: 0.84,
-        method: 'GET',
-        params: { owner: repo.owner, repo: repo.repo },
-      };
-    }
-    if (wantsActions) return null;
-    if (isSearchListIntent(intent, input.intent, 'github')) {
-      const params: Record<string, string> = { query: extractSearchQuery(input.intent) };
-      if (isGithubHotSearchIntent(intent, input.intent)) {
-        params.sort = 'stars';
-        params.order = 'desc';
-      }
-      return {
-        endpointFamily: 'github_search_repositories',
-        dataPurpose: 'search_list',
-        confidence: 0.82,
-        method: 'GET',
-        params,
-      };
-    }
-  }
-
-  if (
-    host === 'www.npmjs.com' ||
-    host === 'npmjs.com' ||
-    host === 'registry.npmjs.org' ||
-    /\b(npm|npmjs|package|packages?)\b/.test(intent)
-  ) {
-    if (isSearchListIntent(intent, input.intent, 'npmjs')) {
-      return {
-        endpointFamily: 'npmjs_search_packages',
-        dataPurpose: 'package_search',
-        confidence: 0.8,
-        method: 'GET',
-        params: { query: extractSearchQuery(input.intent) },
-      };
-    }
-  }
-
+  void input;
   return null;
 }
 
@@ -561,44 +424,6 @@ export async function readApiKnowledgeRowsForIntent(
   });
 }
 
-function classifySeedEndpoint(parsed: URL, method: ApiKnowledgeMetadata['method']) {
-  const host = parsed.hostname.toLowerCase();
-  const path = parsed.pathname;
-  if (host === 'api.github.com' && path === '/search/repositories') {
-    return {
-      endpointFamily: 'github_search_repositories' as const,
-      dataPurpose: 'search_list' as const,
-      pathPattern: '/search/repositories',
-      confidence: method === 'GET' || method === 'HEAD' ? 0.96 : 0.7,
-    };
-  }
-  if (host === 'api.github.com' && /^\/repos\/[^/]+\/[^/]+\/issues\/?$/.test(path)) {
-    return {
-      endpointFamily: 'github_issues_list' as const,
-      dataPurpose: 'issue_list' as const,
-      pathPattern: '/repos/:owner/:repo/issues',
-      confidence: method === 'GET' || method === 'HEAD' ? 0.94 : 0.7,
-    };
-  }
-  if (host === 'api.github.com' && /^\/repos\/[^/]+\/[^/]+\/actions\/runs\/?$/.test(path)) {
-    return {
-      endpointFamily: 'github_workflow_runs_list' as const,
-      dataPurpose: 'workflow_runs_list' as const,
-      pathPattern: '/repos/:owner/:repo/actions/runs',
-      confidence: method === 'GET' || method === 'HEAD' ? 0.93 : 0.7,
-    };
-  }
-  if (host === 'registry.npmjs.org' && path === '/-/v1/search') {
-    return {
-      endpointFamily: 'npmjs_search_packages' as const,
-      dataPurpose: 'package_search' as const,
-      pathPattern: '/-/v1/search',
-      confidence: method === 'GET' || method === 'HEAD' ? 0.94 : 0.7,
-    };
-  }
-  return null;
-}
-
 function apiKnowledgeReadCacheKey(method: string, url: string): string {
   return `${method.toUpperCase()} ${url}`;
 }
@@ -645,175 +470,33 @@ function cloneCompactRows(rows: ApiKnowledgeCompactRow[]): ApiKnowledgeCompactRo
 }
 
 function normalizeEndpointFamily(value: string): ApiEndpointFamily | null {
-  if (
-    value === 'github_search_repositories' ||
-    value === 'github_issues_list' ||
-    value === 'github_workflow_runs_list' ||
-    value === 'npmjs_search_packages'
-  ) {
-    return value;
-  }
-  return null;
+  const normalized = String(value || '').trim();
+  return normalized ? normalized.slice(0, 160) : null;
 }
 
 function normalizeDataPurpose(value: unknown): ApiDataPurpose | null {
-  if (
-    value === 'search_list' ||
-    value === 'issue_list' ||
-    value === 'workflow_runs_list' ||
-    value === 'package_search'
-  ) {
-    return value;
-  }
-  return null;
+  const normalized = typeof value === 'string' ? value.trim() : '';
+  return normalized ? normalized.slice(0, 80) : null;
 }
 
 function dataPurposeForFamily(endpointFamily: ApiEndpointFamily): ApiDataPurpose {
-  switch (endpointFamily) {
-    case 'github_search_repositories':
-      return 'search_list';
-    case 'github_issues_list':
-      return 'issue_list';
-    case 'github_workflow_runs_list':
-      return 'workflow_runs_list';
-    case 'npmjs_search_packages':
-      return 'package_search';
-  }
+  return endpointFamily;
 }
 
 function buildPublicRequest(
-  endpointFamily: ApiEndpointFamily,
-  params: Record<string, string | number | null | undefined>,
-  limit?: number,
+  _endpointFamily: ApiEndpointFamily,
+  _params: Record<string, string | number | null | undefined>,
+  _limit?: number,
 ): { url: string; limit: number; dataPurpose: ApiDataPurpose } | null {
-  const defaultLimit = 10;
-  const requestedLimit = Number(limit ?? defaultLimit);
-  const boundedLimit = Number.isFinite(requestedLimit)
-    ? Math.max(1, Math.min(10, Math.floor(requestedLimit)))
-    : 10;
-  switch (endpointFamily) {
-    case 'github_search_repositories': {
-      const q = cleanParam(params.query);
-      if (!q) return null;
-      const url = new URL('https://api.github.com/search/repositories');
-      url.searchParams.set('q', q);
-      if (cleanParam(params.sort).toLowerCase() === 'stars') {
-        url.searchParams.set('sort', 'stars');
-        url.searchParams.set(
-          'order',
-          cleanParam(params.order).toLowerCase() === 'asc' ? 'asc' : 'desc',
-        );
-      }
-      url.searchParams.set('per_page', String(boundedLimit));
-      return { url: url.toString(), limit: boundedLimit, dataPurpose: 'search_list' };
-    }
-    case 'github_issues_list': {
-      const owner = cleanParam(params.owner);
-      const repo = cleanParam(params.repo);
-      if (!owner || !repo) return null;
-      const state = cleanParam(params.state) || 'open';
-      const query = cleanParam(params.query);
-      const url = new URL('https://api.github.com/search/issues');
-      url.searchParams.set(
-        'q',
-        [`repo:${owner}/${repo}`, 'is:issue', `state:${state}`, query].filter(Boolean).join(' '),
-      );
-      url.searchParams.set('sort', 'created');
-      url.searchParams.set('order', 'desc');
-      url.searchParams.set('per_page', String(boundedLimit));
-      return { url: url.toString(), limit: boundedLimit, dataPurpose: 'issue_list' };
-    }
-    case 'github_workflow_runs_list': {
-      const owner = cleanParam(params.owner);
-      const repo = cleanParam(params.repo);
-      if (!owner || !repo) return null;
-      const url = new URL(`https://api.github.com/repos/${owner}/${repo}/actions/runs`);
-      url.searchParams.set('per_page', String(boundedLimit));
-      return { url: url.toString(), limit: boundedLimit, dataPurpose: 'workflow_runs_list' };
-    }
-    case 'npmjs_search_packages': {
-      const text = cleanParam(params.query);
-      if (!text) return null;
-      const url = new URL('https://registry.npmjs.org/-/v1/search');
-      url.searchParams.set('text', text);
-      url.searchParams.set('size', String(boundedLimit));
-      return { url: url.toString(), limit: boundedLimit, dataPurpose: 'package_search' };
-    }
-  }
+  return null;
 }
 
 function compactRows(
-  endpointFamily: ApiEndpointFamily,
-  body: unknown,
-  limit: number,
+  _endpointFamily: ApiEndpointFamily,
+  _body: unknown,
+  _limit: number,
 ): ApiKnowledgeCompactRow[] {
-  switch (endpointFamily) {
-    case 'github_search_repositories': {
-      const items = asArray((body as { items?: unknown })?.items).slice(0, limit);
-      return items.map((item) => {
-        const repositoryRecord = asRecord(item);
-        return {
-          name: stringOrNull(repositoryRecord.name),
-          fullName: stringOrNull(repositoryRecord.full_name),
-          description: stringOrNull(repositoryRecord.description),
-          language: stringOrNull(repositoryRecord.language),
-          stars: numberOrZero(repositoryRecord.stargazers_count),
-          url: stringOrNull(repositoryRecord.html_url),
-        };
-      });
-    }
-    case 'github_issues_list': {
-      const bodyRecord = asRecord(body);
-      const items = Array.isArray(body) ? body : asArray(bodyRecord.items);
-      return items.slice(0, limit).map((item) => {
-        const issueRecord = asRecord(item);
-        const labels = asArray(issueRecord.labels)
-          .map((label) => stringOrNull(asRecord(label).name))
-          .filter((label): label is string => !!label)
-          .join(',');
-        return {
-          number: numberOrZero(issueRecord.number),
-          title: stringOrNull(issueRecord.title),
-          state: stringOrNull(issueRecord.state),
-          labels,
-          url: stringOrNull(issueRecord.html_url),
-        };
-      });
-    }
-    case 'github_workflow_runs_list': {
-      const bodyRecord = asRecord(body);
-      const runs = Array.isArray(body) ? body : asArray(bodyRecord.workflow_runs);
-      return runs.slice(0, limit).map((item) => {
-        const workflowRunRecord = asRecord(item);
-        return {
-          name: stringOrNull(workflowRunRecord.name),
-          status: stringOrNull(workflowRunRecord.status),
-          conclusion: stringOrNull(workflowRunRecord.conclusion),
-          branch: stringOrNull(workflowRunRecord.head_branch),
-          event: stringOrNull(workflowRunRecord.event),
-          title: stringOrNull(workflowRunRecord.display_title),
-          createdAt: stringOrNull(workflowRunRecord.created_at),
-          url: stringOrNull(workflowRunRecord.html_url),
-        };
-      });
-    }
-    case 'npmjs_search_packages': {
-      const objects = asArray((body as { objects?: unknown })?.objects).slice(0, limit);
-      return objects.map((entry) => {
-        const pkg = asRecord(asRecord(entry).package);
-        const links = asRecord(pkg.links);
-        const scoreDetail = asRecord(asRecord(asRecord(entry).score).detail);
-        const quality = scoreDetail.quality;
-        return {
-          name: stringOrNull(pkg.name),
-          version: stringOrNull(pkg.version),
-          description: stringOrNull(pkg.description),
-          url: stringOrNull(links.npm),
-          quality: typeof quality === 'number' ? quality : null,
-        };
-      });
-    }
-  }
+  return [];
 }
 
 function fallback(args: {
@@ -849,14 +532,6 @@ function resolveFetch(): ApiKnowledgeFetch {
   return (mod.default ?? mod) as ApiKnowledgeFetch;
 }
 
-function parseUrl(value: string): URL | null {
-  try {
-    return new URL(value);
-  } catch {
-    return null;
-  }
-}
-
 function normalizeMethod(value: unknown): ApiKnowledgeMetadata['method'] {
   const method = typeof value === 'string' ? value.trim().toUpperCase() : 'GET';
   if (
@@ -870,128 +545,4 @@ function normalizeMethod(value: unknown): ApiKnowledgeMetadata['method'] {
     return method;
   }
   return 'OTHER';
-}
-
-function statusClass(value: unknown): string | null {
-  if (typeof value !== 'number' || !Number.isInteger(value) || value < 100) return null;
-  return `${Math.floor(value / 100)}xx`;
-}
-
-function sizeClass(value: unknown): ApiKnowledgeMetadata['sizeClass'] {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return 'unknown';
-  if (value === 0) return 'empty';
-  if (value <= 16 * 1024) return 'small';
-  if (value <= 256 * 1024) return 'medium';
-  return 'large';
-}
-
-function sanitizeContentType(value: unknown): string | null {
-  if (typeof value !== 'string') return null;
-  return value.split(';')[0]?.trim().toLowerCase().slice(0, 80) || null;
-}
-
-function normalizeText(value: string): string {
-  return value.toLowerCase().replace(/\s+/g, ' ').trim();
-}
-
-function isSearchListIntent(
-  normalizedIntent: string,
-  rawIntent: string,
-  family: 'github' | 'npmjs',
-): boolean {
-  if (/\b(search|find|list|repositories|repos?|projects?|packages?)\b/.test(normalizedIntent)) {
-    return true;
-  }
-  if (/搜索|查找|检索|列出|热门|前\s*\d+\s*个/.test(rawIntent)) {
-    return true;
-  }
-  if (family === 'github') {
-    return /仓库|代码库|项目/.test(rawIntent);
-  }
-  return /软件包|依赖包|npm\s*包|包/.test(rawIntent);
-}
-
-function isGithubHotSearchIntent(normalizedIntent: string, rawIntent: string): boolean {
-  return (
-    /热门|star\s*最多|前\s*\d+\s*个热门项目/i.test(rawIntent) ||
-    /\b(top|most starred|stars?|starred)\b/.test(normalizedIntent)
-  );
-}
-
-function extractSearchQuery(intent: string): string {
-  const cleaned = intent
-    .replace(
-      /\b(search|find|list|top|most\s+starred|starred|stars?|repositories|repos|repository|packages|package|npmjs|npm)\b/gi,
-      ' ',
-    )
-    .replace(/\b(first|top)\s+\d+\b/gi, ' ')
-    .replace(/前\s*\d+\s*个/g, ' ')
-    .replace(
-      /搜索|查找|检索|列出|热门|star\s*最多|相关|项目|仓库|代码库|软件包|依赖包|npm\s*包|包|上|的|和|以及/gi,
-      ' ',
-    )
-    .replace(/GitHub|github|NPMJS|npmjs|NPM|npm/g, ' ')
-    .replace(/[，。；：、]/g, ' ')
-    .replace(/\b(on|about|related|by|for)\b/gi, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return cleaned || intent.trim().slice(0, 80) || 'javascript';
-}
-
-function parseGithubRepo(parsed: URL): { owner: string; repo: string } | null {
-  const parts = parsed.pathname.split('/').filter(Boolean);
-  if (parts.length < 2) return null;
-  if (parts[0] === 'search') return null;
-  const [owner, repo] = parts;
-  if (!owner || !repo) return null;
-  return { owner, repo };
-}
-
-function parseGithubIssueSearch(
-  parsed: URL,
-): { owner: string; repo: string; state: string | null; query: string | null } | null {
-  if (parsed.pathname !== '/search') return null;
-  const type = parsed.searchParams.get('type')?.toLowerCase();
-  const q = parsed.searchParams.get('q') ?? '';
-  if (type !== 'issues' && !/\bis:issue\b/i.test(q)) return null;
-
-  const repoMatch = q.match(/\brepo:([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)/i);
-  if (!repoMatch) return null;
-  const stateMatch = q.match(/\bstate:(open|closed|all)\b/i);
-  const query = q
-    .replace(repoMatch[0], ' ')
-    .replace(/\bis:issue\b/gi, ' ')
-    .replace(/\btype:issue\b/gi, ' ')
-    .replace(/\bstate:(open|closed|all)\b/gi, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return {
-    owner: repoMatch[1],
-    repo: repoMatch[2],
-    state: stateMatch ? stateMatch[1].toLowerCase() : null,
-    query: query || null,
-  };
-}
-
-function cleanParam(value: unknown): string {
-  if (value === null || value === undefined) return '';
-  return String(value).trim().slice(0, 160);
-}
-
-function asArray(value: unknown): unknown[] {
-  return Array.isArray(value) ? value : [];
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-}
-
-function stringOrNull(value: unknown): string | null {
-  return typeof value === 'string' && value.length > 0 ? value : null;
-}
-
-function numberOrZero(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 }

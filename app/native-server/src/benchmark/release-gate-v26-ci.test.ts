@@ -1,9 +1,9 @@
 /**
- * V26 release gate — GitHub Actions fresh-checkout regression.
+ * V26 release gate — CI fresh-checkout regression.
  *
  * v2.6 real-browser Gate B evidence is maintainer-private. The local
  * owner-lane `release:check` must keep requiring the private transformed
- * report, but GitHub Actions cannot read `.claude/private-docs` from a
+ * report, but CI cannot read `.claude/private-docs` from a
  * fresh checkout. In Actions we therefore validate the committed public
  * release notes summary instead of failing on a missing private evidence
  * directory.
@@ -49,7 +49,7 @@ function scaffoldFixture(root: string, version: string): void {
 }
 
 function writeReleaseNotes(root: string, text: string): void {
-  const notesPath = path.join(root, 'docs', `RELEASE_NOTES_v${FIXTURE_VERSION}.md`);
+  const notesPath = path.join(root, 'docs', 'releases', `RELEASE_NOTES_v${FIXTURE_VERSION}.md`);
   fs.mkdirSync(path.dirname(notesPath), { recursive: true });
   fs.writeFileSync(notesPath, text, 'utf8');
 }
@@ -58,11 +58,10 @@ function releaseNotesBody(): string {
   return [
     '# Tabrix v2.6.0 Release Notes',
     '',
-    'Gate B strict PASS.',
+    '## Validation Summary',
     '',
-    'Endpoint source lineage includes observed, seed_adapter, manual_seed, and unknown.',
-    '',
-    'Broader arbitrary-site observed-endpoint reuse remains v2.7 scope.',
+    'This release was checked with public deterministic tests and maintainer-held real-browser scenarios.',
+    'Raw browser artifacts and private benchmark JSON are not published.',
     '',
   ].join('\n');
 }
@@ -86,8 +85,8 @@ function runReleaseCheck(env: NodeJS.ProcessEnv = {}): SpawnResult {
   };
 }
 
-describe('release-check v2.6 GitHub Actions fresh checkout', () => {
-  it('accepts public release notes summary in GitHub Actions when private evidence is absent', () => {
+describe('release-check v2.6 CI fresh checkout', () => {
+  it('accepts public release notes summary in CI when private evidence is absent', () => {
     const result = runReleaseCheck({ GITHUB_ACTIONS: 'true' });
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('release readiness check passed');
@@ -100,13 +99,11 @@ describe('release-check v2.6 GitHub Actions fresh checkout', () => {
     expect(result.stderr).toContain('missing benchmark directory');
   });
 
-  it('still rejects weak release notes in GitHub Actions fresh checkout mode', () => {
+  it('still rejects weak release notes in CI fresh checkout mode', () => {
     writeReleaseNotes(fixtureRoot, '# Tabrix v2.6.0\n\nTBD\n');
     const result = runReleaseCheck({ GITHUB_ACTIONS: 'true' });
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain('release notes still contain draft/TBD/do-not-ship language');
-    expect(result.stderr).toContain(
-      'release notes must include public-safe Gate B strict PASS summary',
-    );
+    expect(result.stderr).toContain('release notes must include a public validation summary');
   });
 });

@@ -24,6 +24,7 @@ interface ListenerStore {
   webNavOnCommitted: Array<(d: any) => void>;
   tabsOnCreated: Array<(t: any) => void>;
   webRequestOnCompleted: Array<(d: any) => void>;
+  webRequestOnErrorOccurred: Array<(d: any) => void>;
 }
 
 function installChromeStubs(): ListenerStore {
@@ -31,6 +32,7 @@ function installChromeStubs(): ListenerStore {
     webNavOnCommitted: [],
     tabsOnCreated: [],
     webRequestOnCompleted: [],
+    webRequestOnErrorOccurred: [],
   };
   const wn = (globalThis as any).chrome.webNavigation;
   wn.onCommitted.addListener = vi.fn((cb: any) => store.webNavOnCommitted.push(cb));
@@ -46,6 +48,10 @@ function installChromeStubs(): ListenerStore {
   wr.onCompleted.addListener = vi.fn((cb: any) => store.webRequestOnCompleted.push(cb));
   wr.onCompleted.removeListener = vi.fn((cb: any) => {
     store.webRequestOnCompleted = store.webRequestOnCompleted.filter((x) => x !== cb);
+  });
+  wr.onErrorOccurred.addListener = vi.fn((cb: any) => store.webRequestOnErrorOccurred.push(cb));
+  wr.onErrorOccurred.removeListener = vi.fn((cb: any) => {
+    store.webRequestOnErrorOccurred = store.webRequestOnErrorOccurred.filter((x) => x !== cb);
   });
   return store;
 }
@@ -211,6 +217,34 @@ describe('attachActionOutcomeObserver — synthetic flow', () => {
     observer.detach();
   });
 
+  it('captures network_failed signals scoped to the action tab', () => {
+    const observer = attach();
+    const handle = observer.observe({
+      actionId: 'act-6b',
+      actionKind: 'click',
+      tabId: 100,
+      urlPattern: 'example.test/list',
+    });
+    vi.advanceTimersByTime(80);
+    store.webRequestOnErrorOccurred.forEach((cb) =>
+      cb({
+        tabId: 100,
+        type: 'xmlhttprequest',
+        url: 'http://example.test/api/items?page=1',
+        error: 'net::ERR_FAILED',
+        timeStamp: 1_700_000_000_080,
+      }),
+    );
+    handle.flush();
+    if (sent[0]!.payload.kind === 'action_outcome') {
+      const signals = sent[0]!.payload.data.signals;
+      expect(signals.map((s) => s.kind)).toEqual(['network_failed']);
+      expect(signals[0]!.host).toBe('example.test');
+      expect(signals[0]!.pathPattern).toBe('/api/items');
+    }
+    observer.detach();
+  });
+
   it('records pushSignal() entries (dom_region_changed / dialog_opened)', () => {
     const observer = attach();
     const handle = observer.observe({
@@ -342,9 +376,11 @@ describe('attachActionOutcomeObserver — synthetic flow', () => {
     expect(store.webNavOnCommitted).toHaveLength(1);
     expect(store.tabsOnCreated).toHaveLength(1);
     expect(store.webRequestOnCompleted).toHaveLength(1);
+    expect(store.webRequestOnErrorOccurred).toHaveLength(1);
     observer.detach();
     expect(store.webNavOnCommitted).toHaveLength(0);
     expect(store.tabsOnCreated).toHaveLength(0);
     expect(store.webRequestOnCompleted).toHaveLength(0);
+    expect(store.webRequestOnErrorOccurred).toHaveLength(0);
   });
 });

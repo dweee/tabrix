@@ -6,7 +6,7 @@ import type {
   TabWindowContextEventEnvelope,
 } from './browser-fact';
 
-export type BridgeCommandAction = 'call_tool' | 'list_published_flows';
+export type BridgeCommandAction = 'call_tool';
 
 export interface BridgeHelloMessage {
   type: 'hello';
@@ -28,6 +28,12 @@ export interface BridgeHeartbeatMessage {
   tabCount?: number | null;
   windowCount?: number | null;
   autoConnectEnabled?: boolean | null;
+  /**
+   * Internal current browser window/tab snapshot. The native server
+   * projects this into the Object Library; it is not a public MCP
+   * response shape.
+   */
+  browserWorld?: unknown;
 }
 
 export interface BridgeCommandMessage {

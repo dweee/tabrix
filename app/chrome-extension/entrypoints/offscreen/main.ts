@@ -13,7 +13,7 @@
 
 import { MessageTarget, type SendMessageType } from '@/common/message-types';
 import { handleGifMessage } from './gif-encoder';
-import { initKeepalive } from './rr-keepalive';
+import { initKeepalive } from './keepalive';
 
 initKeepalive();
 

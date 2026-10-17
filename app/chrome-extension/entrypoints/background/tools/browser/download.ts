@@ -171,7 +171,9 @@ function getDownloadLeafName(item: chrome.downloads.DownloadItem): string {
     const url = new URL(item.url || '');
     const leaf = decodeURIComponent((url.pathname || '').split('/').pop() || '');
     if (leaf) return leaf;
-  } catch {}
+  } catch {
+    /* best-effort cleanup; download fallback continues */
+  }
   return `download-${item.id ?? Date.now()}`;
 }
 
@@ -463,18 +465,26 @@ async function waitForDownload(opts: {
     const cleanup = () => {
       try {
         if (timer) clearTimeout(timer);
-      } catch {}
+      } catch {
+        /* best-effort cleanup; download fallback continues */
+      }
       try {
         chrome.downloads.onCreated.removeListener(onCreated);
-      } catch {}
+      } catch {
+        /* best-effort cleanup; download fallback continues */
+      }
       try {
         chrome.downloads.onChanged.removeListener(onChanged);
-      } catch {}
+      } catch {
+        /* best-effort cleanup; download fallback continues */
+      }
       try {
         if (determineListener) {
           chrome.downloads.onDeterminingFilename.removeListener(determineListener);
         }
-      } catch {}
+      } catch {
+        /* best-effort cleanup; download fallback continues */
+      }
     };
     const matches = (item: chrome.downloads.DownloadItem) => {
       if (!filenameContains) return true;
@@ -518,7 +528,9 @@ async function waitForDownload(opts: {
         if (!waitForComplete) {
           fulfill(item);
         }
-      } catch {}
+      } catch {
+        /* best-effort cleanup; download fallback continues */
+      }
     };
     const onChanged = (delta: chrome.downloads.DownloadDelta) => {
       try {
@@ -533,7 +545,9 @@ async function waitForDownload(opts: {
             if (waitForComplete && item.state === 'complete') fulfill(item);
           })
           .catch(() => {});
-      } catch {}
+      } catch {
+        /* best-effort cleanup; download fallback continues */
+      }
     };
     determineListener = (item, suggest) => {
       try {
@@ -615,10 +629,14 @@ async function triggerDownloadAndWait(opts: {
       const cleanupById = () => {
         try {
           if (waitTimer) clearTimeout(waitTimer);
-        } catch {}
+        } catch {
+          /* best-effort cleanup; download fallback continues */
+        }
         try {
           chrome.downloads.onChanged.removeListener(onChangedById);
-        } catch {}
+        } catch {
+          /* best-effort cleanup; download fallback continues */
+        }
       };
       const finishById = async () => {
         try {
@@ -686,10 +704,14 @@ async function triggerDownloadAndWait(opts: {
     try {
       try {
         await chrome.downloads.cancel(downloadId);
-      } catch {}
+      } catch {
+        /* best-effort cleanup; download fallback continues */
+      }
       try {
         await chrome.downloads.erase({ id: downloadId });
-      } catch {}
+      } catch {
+        /* best-effort cleanup; download fallback continues */
+      }
       const response = await fetch(url, { credentials: 'include' });
       if (!response.ok) {
         throw new DownloadToolError('session', `Fallback fetch failed: HTTP ${response.status}`);
@@ -730,13 +752,19 @@ async function triggerDownloadAndWait(opts: {
     const cleanup = () => {
       try {
         if (timer) clearTimeout(timer);
-      } catch {}
+      } catch {
+        /* best-effort cleanup; download fallback continues */
+      }
       try {
         if (blockedProbeTimer) clearTimeout(blockedProbeTimer);
-      } catch {}
+      } catch {
+        /* best-effort cleanup; download fallback continues */
+      }
       try {
         chrome.downloads.onChanged.removeListener(onChanged);
-      } catch {}
+      } catch {
+        /* best-effort cleanup; download fallback continues */
+      }
     };
     const fail = (err: unknown) => {
       cleanup();

@@ -43,7 +43,7 @@ export interface DataNeed {
   semanticTypeWanted: 'search' | 'list' | 'detail' | 'pagination' | 'filter' | null;
   /** URL the user is already on. Used to derive the `site` for lookup. */
   urlHint: string | null;
-  /** Optional page-role hint (`issues_list`, `package_detail`, …). */
+  /** Optional page-role hint (`search_results`, `content_detail`, …). */
   pageRole: string | null;
   /**
    * Optional caller-supplied parameter map (e.g. `{ query: 'tabrix' }`).
@@ -79,17 +79,15 @@ export interface EndpointKnowledgeReader {
  *
  * Additive lookup evidence surface:
  *   - `endpointSource` — closed enum lineage (`observed` |
- *     `seed_adapter` | `manual_seed` | `unknown`). The executor and
+ *     historical `seed_adapter` | `manual_seed` | `unknown`). The executor and
  *     telemetry layer surface this so a downstream report can tell
- *     "we hit an observed endpoint" from "we fell back to the
- *     seed_adapter".
+ *     observed endpoint reuse from legacy data.
  *   - `correlationConfidence` — closed enum from the DOM/API correlation
  *     layer. Single-session results are capped at `'low_confidence'`.
- *   - `retiredPeer` — when the lookup deferred to an `observed` row
- *     instead of a same-site `seed_adapter` peer that *would* have
- *     matched, this carries the lineage of the de-prioritised
- *     `seed_adapter`. NEVER deletes the seed row; just makes the
- *     decision visible to a future Gate B / observability report.
+ *   - `retiredPeer` — when the lookup deferred to a better row instead
+ *     of a legacy peer that *would* have matched, this carries the
+ *     lineage of the de-prioritised peer. It never deletes old rows; it
+ *     only makes the decision visible to observability.
  *   - `chosenReason` — short closed-enum reason describing the
  *     ranking decision. See `EndpointLookupChosenReason` below.
  */
@@ -122,13 +120,11 @@ export interface EndpointMatch {
  *     thresholds (confidence floor + sample_count ≥ 2 + same
  *     semanticType) and won outright.
  *   - `'observed_preferred_over_seed_adapter'` — observed row
- *     met the retirement criteria and de-prioritised a
- *     same-site seed_adapter peer that also matched.
- *   - `'seed_adapter_fallback'` — no qualifying observed row was
- *     available (or it failed retirement criteria); the
- *     seed_adapter row was the best remaining option.
+ *     de-prioritised a matching legacy seed row.
+ *   - `'seed_adapter_fallback'` — historical compatibility value for
+ *     old reports. New execution paths should not choose it.
  *   - `'observed_only_match'` — only observed rows were available
- *     for the site; no seed_adapter peer existed.
+ *     for the site.
  *   - `'best_available'` — fallback for rows whose source is
  *     `'manual_seed'` / `'unknown'` (e.g. a legacy row with no
  *     family hint).
@@ -141,18 +137,16 @@ export type EndpointLookupChosenReason =
   | 'best_available';
 
 /**
- * Outcome of `buildSafeRequest`. `builderHint='seed_adapter'` means we
- * matched a known GitHub/npmjs urlPattern and reused the seed
- * builder; `builderHint='generic'` means we built the URL purely from
- * the persisted `urlPattern` + `queryKeys`.
+ * Outcome of `buildSafeRequest`. `builderHint='seed_adapter'` is retained only
+ * for historical compatibility; `builderHint='generic'` means we built the URL
+ * purely from the persisted `urlPattern` + `queryKeys`.
  */
 export interface SafeRequestPlan {
   url: string;
   method: 'GET';
   /**
-   * Seed-adapter closed-enum `dataPurpose` when `builderHint='seed_adapter'`.
-   * Free-form `'observed_<semanticType>'` for the generic branch — the
-   * executor uses this only as evidence, never as a routing key.
+   * Free-form data-purpose evidence. The executor uses this only as evidence,
+   * never as a routing key.
    */
   dataPurpose: string;
   /** Sorted list of query keys actually emitted into the URL. */
@@ -163,6 +157,6 @@ export interface SafeRequestPlan {
 /**
  * Closed-enum reader mode the executor surfaces back to telemetry / the
  * operation-log. `'knowledge_driven'` is the lookup-first path;
- * `'legacy_candidate'` is the existing candidate path.
+ * `'legacy_candidate'` is retained only for historical telemetry.
  */
 export type ReaderMode = 'knowledge_driven' | 'legacy_candidate';

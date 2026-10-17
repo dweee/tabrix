@@ -13,9 +13,9 @@ import {
   isAutoCaptureActive,
   type ActionMetadata,
   type ActionType,
-} from './gif-recorder';
+} from './gif-auto-capture';
 import { type CandidateActionInput, resolveCandidateActionTarget } from './candidate-action';
-import { lookupStableTargetRef } from './stable-target-ref-registry';
+import { lookupStableTargetRefEntry } from './stable-target-ref-registry';
 
 type MouseButton = 'left' | 'right' | 'middle';
 
@@ -336,7 +336,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
       explicitSelectorType: params.selectorType,
       candidateAction: params.candidateAction,
       tabId: tab.id,
-      lookupStableTargetRef,
+      lookupStableTargetRef: lookupStableTargetRefEntry,
     });
 
     // Same fail-closed contract as click/fill: never silently route an
@@ -352,6 +352,8 @@ class ComputerTool extends BaseBrowserToolExecutor {
     const resolvedRef = resolvedTarget.ref;
     const resolvedSelector = resolvedTarget.selector;
     const resolvedSelectorType = resolvedTarget.selectorType || params.selectorType;
+    const resolvedFrameId =
+      typeof params.frameId === 'number' ? params.frameId : resolvedTarget.frameId;
 
     switch (params.action) {
       case 'resize_page': {
@@ -407,44 +409,78 @@ class ComputerTool extends BaseBrowserToolExecutor {
 
         try {
           if (resolvedRef) {
-            await this.injectContentScript(tab.id, ['inject-scripts/accessibility-tree-helper.js']);
+            await this.injectContentScript(
+              tab.id,
+              ['inject-scripts/accessibility-tree-helper.js'],
+              false,
+              'ISOLATED',
+              false,
+              typeof resolvedFrameId === 'number' ? [resolvedFrameId] : undefined,
+            );
             // Scroll element into view first to ensure it's visible
             try {
-              await this.sendMessageToTab(tab.id, { action: 'focusByRef', ref: resolvedRef });
+              await this.sendMessageToTab(
+                tab.id,
+                { action: 'focusByRef', ref: resolvedRef },
+                resolvedFrameId,
+              );
             } catch {
               // Best effort - continue even if scroll fails
             }
             // Re-resolve coordinates after scroll
-            const resolved = await this.sendMessageToTab(tab.id, {
-              action: TOOL_MESSAGE_TYPES.RESOLVE_REF,
-              ref: resolvedRef,
-            });
+            const resolved = await this.sendMessageToTab(
+              tab.id,
+              {
+                action: TOOL_MESSAGE_TYPES.RESOLVE_REF,
+                ref: resolvedRef,
+              },
+              resolvedFrameId,
+            );
             if (resolved && resolved.success) {
               coord = project({ x: resolved.center.x, y: resolved.center.y });
               resolvedBy = 'ref';
             }
           } else if (resolvedSelector) {
-            await this.injectContentScript(tab.id, ['inject-scripts/accessibility-tree-helper.js']);
+            await this.injectContentScript(
+              tab.id,
+              ['inject-scripts/accessibility-tree-helper.js'],
+              false,
+              'ISOLATED',
+              false,
+              typeof resolvedFrameId === 'number' ? [resolvedFrameId] : undefined,
+            );
             const selectorType = resolvedSelectorType || 'css';
-            const ensured = await this.sendMessageToTab(tab.id, {
-              action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
-              selector: resolvedSelector,
-              isXPath: selectorType === 'xpath',
-            });
+            const ensured = await this.sendMessageToTab(
+              tab.id,
+              {
+                action: TOOL_MESSAGE_TYPES.ENSURE_REF_FOR_SELECTOR,
+                selector: resolvedSelector,
+                isXPath: selectorType === 'xpath',
+              },
+              resolvedFrameId,
+            );
             if (ensured && ensured.success) {
               // Scroll element into view first to ensure it's visible
               const resolvedRef = typeof ensured.ref === 'string' ? ensured.ref : undefined;
               if (resolvedRef) {
                 try {
-                  await this.sendMessageToTab(tab.id, { action: 'focusByRef', ref: resolvedRef });
+                  await this.sendMessageToTab(
+                    tab.id,
+                    { action: 'focusByRef', ref: resolvedRef },
+                    resolvedFrameId,
+                  );
                 } catch {
                   // Best effort - continue even if scroll fails
                 }
                 // Re-resolve coordinates after scroll
-                const reResolved = await this.sendMessageToTab(tab.id, {
-                  action: TOOL_MESSAGE_TYPES.RESOLVE_REF,
-                  ref: resolvedRef,
-                });
+                const reResolved = await this.sendMessageToTab(
+                  tab.id,
+                  {
+                    action: TOOL_MESSAGE_TYPES.RESOLVE_REF,
+                    ref: resolvedRef,
+                  },
+                  resolvedFrameId,
+                );
                 if (reResolved && reResolved.success) {
                   coord = project({ x: reResolved.center.x, y: reResolved.center.y });
                 } else {
@@ -547,6 +583,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
           // Prefer DOM click via ref
           const domResult = await clickTool.execute({
             ref: resolvedRef,
+            frameId: resolvedFrameId,
             waitForNavigation: false,
             timeout: TIMEOUTS.DEFAULT_WAIT * 5,
             button: params.action === 'right_click' ? 'right' : 'left',
@@ -559,7 +596,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
           const domResult = await clickTool.execute({
             selector: resolvedSelector,
             selectorType: resolvedSelectorType,
-            frameId: params.frameId,
+            frameId: resolvedFrameId,
             waitForNavigation: false,
             timeout: TIMEOUTS.DEFAULT_WAIT * 5,
             button: params.action === 'right_click' ? 'right' : 'left',
@@ -631,11 +668,22 @@ class ComputerTool extends BaseBrowserToolExecutor {
         // If ref is provided, resolve center via accessibility helper
         if (resolvedRef) {
           try {
-            await this.injectContentScript(tab.id, ['inject-scripts/accessibility-tree-helper.js']);
-            const resolved = await this.sendMessageToTab(tab.id, {
-              action: TOOL_MESSAGE_TYPES.RESOLVE_REF,
-              ref: resolvedRef,
-            });
+            await this.injectContentScript(
+              tab.id,
+              ['inject-scripts/accessibility-tree-helper.js'],
+              false,
+              'ISOLATED',
+              false,
+              typeof resolvedFrameId === 'number' ? [resolvedFrameId] : undefined,
+            );
+            const resolved = await this.sendMessageToTab(
+              tab.id,
+              {
+                action: TOOL_MESSAGE_TYPES.RESOLVE_REF,
+                ref: resolvedRef,
+              },
+              resolvedFrameId,
+            );
             if (resolved && resolved.success) {
               coord = project({ x: resolved.center.x, y: resolved.center.y })!;
             }
@@ -645,7 +693,14 @@ class ComputerTool extends BaseBrowserToolExecutor {
         } else if (resolvedSelector) {
           // Support selector-based click
           try {
-            await this.injectContentScript(tab.id, ['inject-scripts/accessibility-tree-helper.js']);
+            await this.injectContentScript(
+              tab.id,
+              ['inject-scripts/accessibility-tree-helper.js'],
+              false,
+              'ISOLATED',
+              false,
+              typeof resolvedFrameId === 'number' ? [resolvedFrameId] : undefined,
+            );
             const selectorType = resolvedSelectorType || 'css';
             const ensured = await this.sendMessageToTab(
               tab.id,
@@ -654,7 +709,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
                 selector: resolvedSelector,
                 isXPath: selectorType === 'xpath',
               },
-              params.frameId,
+              resolvedFrameId,
             );
             if (ensured && ensured.success) {
               coord = project({ x: ensured.center.x, y: ensured.center.y })!;
@@ -982,6 +1037,7 @@ class ComputerTool extends BaseBrowserToolExecutor {
           selector: resolvedSelector,
           selectorType: resolvedSelectorType,
           ref: resolvedRef,
+          frameId: resolvedFrameId,
           candidateAction: params.candidateAction,
           value: fillValue,
         });

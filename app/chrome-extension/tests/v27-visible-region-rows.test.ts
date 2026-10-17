@@ -67,10 +67,10 @@ describe('V27-P0-REAL-01 visible region rows', () => {
     expect(rows.rows[1].title).toBe('Family route checklist');
   });
 
-  it('groups GitHub-like repo search results without topic or footer rows', () => {
+  it('groups Workspace-like repo search results without topic or footer rows', () => {
     const rows = extractVisibleRegionRows({
       sourceRegion: 'search_results',
-      url: 'https://github.com/search?q=browser&type=repositories',
+      url: 'https://code.example/search?q=browser&type=repositories',
       title: 'Repository search results',
       viewport: { width: 1280, height: 720, dpr: 1 },
       pageContent: [
@@ -140,10 +140,201 @@ describe('V27-P0-REAL-01 visible region rows', () => {
     );
   });
 
-  it('groups sparse GitHub-like repo links with nearby metadata rows', () => {
+  it('binds a row target to the title link instead of an earlier description link', () => {
+    const rows = extractVisibleRegionRows({
+      sourceRegion: 'search_results',
+      url: 'https://code.example/search?q=tabrix&type=repositories',
+      title: 'Repository search results',
+      viewport: { width: 1280, height: 720, dpr: 1 },
+      pageContent: [
+        '- main "Repository search results" [ref=ref_main] (x=640,y=370)',
+        '  - generic "Repository result" [ref=ref_repo_1] (x=260,y=160)',
+        '    - link "AI browser intelligence extension for automatic tab classification and browser control" [ref=ref_desc_1_link] (x=260,y=188) href="/owner/repo"',
+        '    - heading "owner/repo" [ref=ref_heading_1] (x=260,y=150)',
+        '      - link "owner/repo" [ref=ref_repo_1_link] (x=260,y=150) href="/owner/repo"',
+        '    - link "browser" [ref=ref_topic_1] (x=260,y=226) href="/topics/browser"',
+        '    - generic "Updated May 8, 2026" [ref=ref_updated_1] (x=700,y=226)',
+        '  - generic "Repository result" [ref=ref_repo_2] (x=260,y=270)',
+        '    - link "Another generic browser automation description that should not win" [ref=ref_desc_2_link] (x=260,y=298) href="/owner/other"',
+        '    - heading "owner/other" [ref=ref_heading_2] (x=260,y=260)',
+        '      - link "owner/other" [ref=ref_repo_2_link] (x=260,y=260) href="/owner/other"',
+        '    - generic "Updated Apr 30, 2026" [ref=ref_updated_2] (x=700,y=336)',
+      ].join('\n'),
+    });
+
+    expect(rows.visibleRegionRowsUsed).toBe(true);
+    expect(rows.rows.map((row) => ({ title: row.title, targetRef: row.targetRef }))).toEqual([
+      { title: 'owner/repo', targetRef: 'ref_repo_1_link' },
+      { title: 'owner/other', targetRef: 'ref_repo_2_link' },
+    ]);
+  });
+
+  it('keeps more than five high-confidence visible result rows for list tasks', () => {
+    const pageContent = [
+      '- main "Repository search results" [ref=ref_main] (x=640,y=370)',
+      ...Array.from({ length: 10 }, (_, index) => {
+        const rowNumber = index + 1;
+        const y = 150 + index * 82;
+        return [
+          `  - generic "Repository result" [ref=ref_repo_${rowNumber}] (x=260,y=${y})`,
+          `    - link "example/project-${rowNumber}" [ref=ref_repo_${rowNumber}_link] (x=260,y=${y}) href="/example/project-${rowNumber}"`,
+          `    - generic "Repository ${rowNumber} summary" [ref=ref_desc_${rowNumber}] (x=260,y=${y + 28})`,
+          `    - link "${1000 - rowNumber}" [ref=ref_star_${rowNumber}] (x=620,y=${y + 56}) href="/example/project-${rowNumber}/stargazers"`,
+          `    - generic "Updated May ${rowNumber}, 2026" [ref=ref_updated_${rowNumber}] (x=700,y=${y + 56})`,
+        ].join('\n');
+      }),
+    ].join('\n');
+
+    const rows = extractVisibleRegionRows({
+      sourceRegion: 'search_results',
+      url: 'https://example.test/search?q=automation&type=repositories',
+      title: 'Repository search results',
+      viewport: { width: 1280, height: 720, dpr: 1 },
+      pageContent,
+      maxRows: 10,
+    });
+
+    expect(rows.visibleRegionRowsUsed).toBe(true);
+    expect(rows.rowCount).toBe(10);
+    expect(rows.visibleDomRowsCandidateCount).toBe(10);
+    expect(rows.visibleDomRowsSelectedCount).toBe(10);
+    expect(rows.targetRefCoverageRate).toBeGreaterThanOrEqual(0.95);
+    expect(rows.rows.map((row) => row.title)).toEqual(
+      Array.from({ length: 10 }, (_, index) => `example/project-${index + 1}`),
+    );
+  });
+
+  it('keeps top ten card-like visible text rows with author, time, and interaction fields', () => {
+    const visibleTextContent = [
+      '全部 图文 视频 用户 已筛选',
+      '排序依据 综合 最新 最多收藏 发布时间 不限 一周内',
+      'Nano Banana ai 创作 206',
+      '残光',
+      '1天前',
+      '370',
+      '古装男主发型不会写？这16组AI提示词直接抄！',
+      '域飞-Oui.Bo',
+      '6天前',
+      '93',
+      'Nano Banana ai 创作 207',
+      '残光',
+      '3天前',
+      '48',
+      '旧漫回旋/再见D伯爵，你想带走哪只非卖品？',
+      '奔跑的毛球君',
+      '昨天 17:37',
+      '31',
+      '我整理了一套 AI出图的套系工作流。',
+      'xy',
+      '4天前',
+      '26',
+      '属于我的创作团队带资来啦！接接接！',
+      '赛博剪刀手',
+      '昨天 18:57',
+      '12',
+      '为什么你AI生图总差点质感？',
+      '璐璐的创作工具箱',
+      '昨天 17:06',
+      '10',
+      'AI重构老城｜中式梦核独有的安静疏离感',
+      '郭源潮',
+      '昨天 16:08',
+      '3',
+      '亭台浸碧浪，飞花赴仙城',
+      '芴菲雅菡',
+      '昨天 11:01',
+      '2',
+      '郑州AI短剧培训',
+      '昨天 17:40',
+      '2',
+      '大家都在搜',
+      'AI照片生成',
+    ].join('\n');
+
+    const rows = extractVisibleRegionRows({
+      sourceRegion: 'search_results',
+      url: 'https://example.test/search_result?keyword=AI%E5%9B%BE%E7%89%87%E5%88%9B%E4%BD%9C',
+      title: 'AI图片创作 - Search results',
+      viewport: { width: 1280, height: 720, dpr: 1 },
+      pageContent: '',
+      visibleTextContent,
+      maxRows: 10,
+    });
+
+    expect(rows.visibleRegionRowsUsed).toBe(true);
+    expect(rows.rows.map((row) => row.title)).toEqual([
+      'Nano Banana ai 创作 206',
+      '古装男主发型不会写？这16组AI提示词直接抄！',
+      'Nano Banana ai 创作 207',
+      '旧漫回旋/再见D伯爵，你想带走哪只非卖品？',
+      '我整理了一套 AI出图的套系工作流。',
+      '属于我的创作团队带资来啦！接接接！',
+      '为什么你AI生图总差点质感？',
+      'AI重构老城｜中式梦核独有的安静疏离感',
+      '亭台浸碧浪，飞花赴仙城',
+      '郑州AI短剧培训',
+    ]);
+    expect(rows.rowCount).toBe(10);
+    expect(rows.rows[0]).toMatchObject({
+      primaryText: '残光',
+      metaText: '1天前',
+      interactionText: '370',
+    });
+    expect(rows.rows[1]).toMatchObject({
+      primaryText: '域飞-Oui.Bo',
+      metaText: '6天前',
+      interactionText: '93',
+    });
+    expect(rows.rows[9]).toMatchObject({
+      metaText: '昨天 17:40',
+      interactionText: '2',
+    });
+    expect(rows.rows.map((row) => row.title).join(' ')).not.toMatch(/大家都在搜|AI照片生成/);
+  });
+
+  it('filters shell rows when high-confidence business rows are present', () => {
+    const pageContent = [
+      '- main "Repository search results" [ref=ref_main] (x=640,y=370)',
+      ...Array.from({ length: 8 }, (_, index) => {
+        const rowNumber = index + 1;
+        const y = 150 + index * 82;
+        return [
+          `  - generic "Repository result" [ref=ref_repo_${rowNumber}] (x=260,y=${y})`,
+          `    - link "example/project-${rowNumber}" [ref=ref_repo_${rowNumber}_link] (x=260,y=${y}) href="/example/project-${rowNumber}"`,
+          `    - generic "Repository ${rowNumber} summary" [ref=ref_desc_${rowNumber}] (x=260,y=${y + 28})`,
+          `    - link "${1000 - rowNumber} stars" [ref=ref_star_${rowNumber}] (x=620,y=${y + 56}) href="/example/project-${rowNumber}/stargazers"`,
+        ].join('\n');
+      }),
+      '- link "Pull requests" [ref=ref_pull_requests] (x=30,y=80) href="/pulls"',
+      '- link "Issues" [ref=ref_issues] (x=30,y=110) href="/issues"',
+      '- link "Repositories" [ref=ref_repositories] (x=30,y=140) href="/search?type=repositories"',
+      '- link "TypeScript" [ref=ref_ts] (x=30,y=180) href="/search?l=typescript"',
+      '- link "Public" [ref=ref_public] (x=30,y=220) href="/search?visibility=public"',
+    ].join('\n');
+
+    const rows = extractVisibleRegionRows({
+      sourceRegion: 'search_results',
+      url: 'https://example.test/search?q=automation&type=repositories',
+      title: 'Repository search results',
+      viewport: { width: 1280, height: 720, dpr: 1 },
+      pageContent,
+      maxRows: 20,
+    });
+
+    expect(rows.visibleRegionRowsUsed).toBe(true);
+    expect(rows.rowCount).toBe(8);
+    expect(rows.rows.map((row) => row.title)).toEqual(
+      Array.from({ length: 8 }, (_, index) => `example/project-${index + 1}`),
+    );
+    expect(rows.rows.map((row) => row.title).join(' ')).not.toMatch(
+      /Pull requests|Issues|Repositories|TypeScript|Public/,
+    );
+  });
+
+  it('groups sparse Workspace-like repo links with nearby metadata rows', () => {
     const rows = extractVisibleRegionRows({
       sourceRegion: 'viewport',
-      url: 'https://github.com/search?q=ACP&type=repositories&s=stars&o=desc',
+      url: 'https://code.example/search?q=ACP&type=repositories&s=stars&o=desc',
       title: 'Repository search results',
       viewport: { width: 1280, height: 720, dpr: 1 },
       pageContent: [
@@ -737,6 +928,32 @@ describe('V27-P0-REAL-01 visible region rows', () => {
     );
   });
 
+  it('keeps compact menu actions out of search result rows', () => {
+    const rows = extractVisibleRegionRows({
+      sourceRegion: 'search_results',
+      url: 'https://example.test/search_result?keyword=AI%20image',
+      title: 'AI image - Search',
+      pageContent: [
+        '- main "AI image search results" [ref=ref_main] (x=640,y=370)',
+        '  - button "更多" [ref=ref_more] (x=80,y=520)',
+        '  - button "我" [ref=ref_me] (x=80,y=580)',
+        '  - article "Result card" [ref=ref_card_1] (x=420,y=180)',
+        '    - link "AI image prompt workflow examples" [ref=ref_result_1_link] (x=420,y=170) href="/items/image-prompt-workflow"',
+        '    - generic "Saved 2,945" [ref=ref_result_1_saved] (x=420,y=206)',
+        '  - article "Result card" [ref=ref_card_2] (x=420,y=300)',
+        '    - link "Reusable visual generation checklist" [ref=ref_result_2_link] (x=420,y=290) href="/items/visual-generation-checklist"',
+        '    - generic "Saved 1.8k" [ref=ref_result_2_saved] (x=420,y=326)',
+      ].join('\n'),
+    });
+
+    expect(rows.visibleRegionRowsUsed).toBe(true);
+    expect(rows.rows.map((row) => row.title)).toEqual([
+      'AI image prompt workflow examples',
+      'Reusable visual generation checklist',
+    ]);
+    expect(rows.rows.map((row) => row.title).join(' ')).not.toMatch(/更多|我/);
+  });
+
   it('rejects standalone short topic chips without dropping repo-like labels', () => {
     const rows = extractVisibleRegionRows({
       pageContent: [
@@ -1273,6 +1490,34 @@ describe('V27-P0-REAL-01 visible region rows', () => {
     });
     vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
     vi.spyOn(readPageTool as any, 'ensureInteractiveElementsHelper').mockResolvedValue(undefined);
+    const fallbackElements = [
+      {
+        type: 'button',
+        text: '登录',
+        selector: 'button.login',
+        coordinates: { x: 980, y: 48 },
+      },
+      {
+        type: 'button',
+        text: '手机号',
+        selector: 'button.phone-login',
+        coordinates: { x: 1010, y: 88 },
+      },
+      {
+        type: 'link',
+        text: 'Neutral product guide for AI workflows',
+        selector: 'section:nth-of-type(1) a.result-title',
+        href: '/items/1',
+        coordinates: { x: 300, y: 210 },
+      },
+      {
+        type: 'link',
+        text: 'Practical tool checklist for small teams',
+        selector: 'section:nth-of-type(2) a.result-title',
+        href: '/items/2',
+        coordinates: { x: 700, y: 220 },
+      },
+    ];
     const sendMessage = vi.spyOn(readPageTool as any, 'sendMessageToTab');
     sendMessage
       .mockResolvedValueOnce({
@@ -1291,34 +1536,13 @@ describe('V27-P0-REAL-01 visible region rows', () => {
       })
       .mockResolvedValueOnce({
         success: true,
-        elements: [
-          {
-            type: 'button',
-            text: '登录',
-            selector: 'button.login',
-            coordinates: { x: 980, y: 48 },
-          },
-          {
-            type: 'button',
-            text: '手机号',
-            selector: 'button.phone-login',
-            coordinates: { x: 1010, y: 88 },
-          },
-          {
-            type: 'link',
-            text: 'Neutral product guide for AI workflows',
-            selector: 'section:nth-of-type(1) a.result-title',
-            href: '/items/1',
-            coordinates: { x: 300, y: 210 },
-          },
-          {
-            type: 'link',
-            text: 'Practical tool checklist for small teams',
-            selector: 'section:nth-of-type(2) a.result-title',
-            href: '/items/2',
-            coordinates: { x: 700, y: 220 },
-          },
-        ],
+        elements: fallbackElements,
+        scrollY: 0,
+        pixelsBelow: 900,
+      })
+      .mockResolvedValue({
+        success: true,
+        elements: fallbackElements,
         scrollY: 0,
         pixelsBelow: 900,
       });
@@ -1855,6 +2079,51 @@ describe('V27-P0-REAL-01 visible region rows', () => {
     } finally {
       (chrome as any).scripting = originalScripting;
     }
+  });
+
+  it('treats reliable visible rows as ready even when text summary is weak', async () => {
+    vi.spyOn(readPageTool as any, 'tryGetTab').mockResolvedValue({
+      id: 5313,
+      windowId: 1,
+      active: true,
+      status: 'complete',
+      url: 'https://example.test/spa-search?q=ai',
+      title: 'SPA search',
+    });
+    vi.spyOn(readPageTool as any, 'injectContentScript').mockResolvedValue(undefined);
+    vi.spyOn(readPageTool as any, 'sendMessageToTab').mockResolvedValue({
+      success: true,
+      pageContent: [
+        '- main "Results" [ref=ref_main] (x=212,y=571)',
+        '  - article "Result card" [ref=ref_card_1] (x=212,y=120)',
+        '    - link "AI workflow setup guide" [ref=ref_card_1_link] (x=212,y=120) href="/items/1"',
+        '  - article "Result card" [ref=ref_card_2] (x=212,y=220)',
+        '    - link "AI tool comparison checklist" [ref=ref_card_2_link] (x=212,y=220) href="/items/2"',
+      ].join('\n'),
+      refMap: [
+        { ref: 'ref_card_1_link', selector: 'a[href="/items/1"]' },
+        { ref: 'ref_card_2_link', selector: 'a[href="/items/2"]' },
+      ],
+      stats: { processed: 5, included: 5, durationMs: 6 },
+      viewport: { width: 424, height: 1143, dpr: 1 },
+    });
+
+    const result = await readPageTool.execute({ mode: 'compact', render: 'markdown' });
+    const payload = JSON.parse((result.content[0] as { text: string }).text);
+
+    expect(result.isError).toBe(false);
+    expect(payload).toMatchObject({
+      kind: 'dom_region_rows',
+      selectedDataSource: 'dom_region_rows',
+      readinessVerdict: 'ready',
+      readinessReason: null,
+      rowCount: 2,
+      visibleRegionRowsUsed: true,
+    });
+    expect(payload.visibleRegionRows).toMatchObject({
+      targetRefCoverageRate: 0.99,
+      visibleRegionRowsUsed: true,
+    });
   });
 
   it('emits empty readiness evidence for empty pages without rows', async () => {

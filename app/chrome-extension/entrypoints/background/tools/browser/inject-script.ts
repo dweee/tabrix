@@ -2,6 +2,7 @@ import { createErrorResponse, ToolResult } from '@/common/tool-handler';
 import { BaseBrowserToolExecutor } from '../base-browser';
 import { TOOL_NAMES } from '@tabrix/shared';
 import { ExecutionWorld } from '@/common/constants';
+import { markBrowserWorldTabAiCreated } from '../../browser-world-inventory';
 
 interface InjectScriptParam {
   url?: string;
@@ -20,6 +21,8 @@ interface SendCommandToInjectScriptToolParam {
   eventName: string;
   payload?: string;
 }
+
+export const CREATED_TAB_READY_TIMEOUT_MS = 10000;
 
 const injectedTabs = new Map();
 class InjectScriptTool extends BaseBrowserToolExecutor {
@@ -60,10 +63,13 @@ class InjectScriptTool extends BaseBrowserToolExecutor {
             active: background === true ? false : true,
             windowId,
           });
+          markBrowserWorldTabAiCreated(tab.id);
 
-          // Wait for page to load
+          // Wait for a load signal instead of sleeping unconditionally.
           console.log('Waiting for page to load...');
-          await new Promise((resolve) => setTimeout(resolve, 3000));
+          if (typeof tab.id === 'number') {
+            tab = (await waitForCreatedTabReady(tab.id, CREATED_TAB_READY_TIMEOUT_MS)) ?? tab;
+          }
         }
       } else {
         const active = await this.getActiveTabInWindow(windowId);
@@ -169,6 +175,47 @@ async function isTabExists(tabId: number) {
     // An error is thrown if the tab doesn't exist.
     return false;
   }
+}
+
+async function waitForCreatedTabReady(
+  tabId: number,
+  timeoutMs: number,
+): Promise<chrome.tabs.Tab | undefined> {
+  const current = await chrome.tabs.get(tabId).catch(() => undefined);
+  if (current?.status === 'complete') {
+    return current;
+  }
+
+  return await new Promise((resolve) => {
+    let settled = false;
+    const finish = (tab?: chrome.tabs.Tab) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      chrome.tabs.onUpdated.removeListener(listener);
+      resolve(tab);
+    };
+    const listener = (
+      updatedTabId: number,
+      changeInfo: chrome.tabs.TabChangeInfo,
+      updatedTab: chrome.tabs.Tab,
+    ) => {
+      if (updatedTabId !== tabId) return;
+      if (changeInfo.status === 'complete' || updatedTab.status === 'complete') {
+        finish(updatedTab);
+      }
+    };
+    const timeoutId = setTimeout(() => finish(current), Math.max(0, timeoutMs));
+    chrome.tabs.onUpdated.addListener(listener);
+    void chrome.tabs
+      .get(tabId)
+      .then((tab) => {
+        if (tab?.status === 'complete') {
+          finish(tab);
+        }
+      })
+      .catch(() => undefined);
+  });
 }
 
 /**

@@ -1,187 +1,1148 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, test } from '@jest/globals';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from '@jest/globals';
+import { TOOL_NAMES } from '@tabrix/shared';
 import supertest from 'supertest';
 import Server from './index';
 import { sessionManager } from '../execution/session-manager';
+import { __hostConfigInternals } from '../host-config';
+import { buildMemoryTraceBindingHash } from '../memory/feedback-binding';
 
-async function seedOneSession(): Promise<{
-  taskId: string;
-  sessionId: string;
-  stepIds: string[];
-}> {
-  const task = sessionManager.createTask({
-    taskType: 'browser-action',
-    title: 'route-test task',
-    intent: 'inspect a github workflow run',
-    origin: 'jest',
-    labels: ['stage-3e', 'memory-routes'],
-  });
-  const session = sessionManager.startSession({
-    taskId: task.taskId,
-    transport: 'http',
-    clientName: 'jest-supertest',
-  });
-  const step1 = sessionManager.startStep({
-    sessionId: session.sessionId,
-    toolName: 'chrome_read_page',
-    inputSummary: 'read the workflow run page',
-  });
-  sessionManager.completeStep(session.sessionId, step1.stepId, {
-    status: 'completed',
-    resultSummary: 'ok',
-  });
-  const step2 = sessionManager.startStep({
-    sessionId: session.sessionId,
-    toolName: 'chrome_fill_or_select',
-    inputSummary: 'fill the rerun reason',
-  });
-  sessionManager.completeStep(session.sessionId, step2.stepId, {
-    status: 'failed',
-    errorCode: 'element_not_found',
-    errorSummary: 'the rerun button is not in the DOM',
-  });
-  sessionManager.finishSession(session.sessionId, { status: 'completed' });
+function textResult(payload: Record<string, unknown>) {
   return {
-    taskId: task.taskId,
-    sessionId: session.sessionId,
-    stepIds: [step1.stepId, step2.stepId],
+    content: [{ type: 'text' as const, text: JSON.stringify(payload) }],
   };
 }
 
+async function seedMkeRows(): Promise<void> {
+  const traceService = sessionManager.memoryTraces;
+  if (!traceService) throw new Error('MKE trace service is not available in tests');
+  const requestAt = Date.parse('2026-06-06T10:00:00.000Z');
+  const taskId = 'mke-route-task-1';
+
+  const readTrace = traceService.recordToolCall({
+    taskId,
+    taskIntent: 'inspect page and click action',
+    aiClient: 'jest',
+    toolName: 'chrome_read_page',
+    stepId: 'mke-step-read',
+    sequenceIndex: 1,
+    requestParams: { tabId: 7, includeHidden: false },
+    requestAtMs: requestAt,
+    responseAtMs: requestAt + 20,
+    result: textResult({
+      page: { url: 'https://example.test/workspaces/123' },
+      summary: { pageRole: 'workspace', quality: 'fresh' },
+      sourceRoute: 'dom_snapshot',
+      selectedDataSource: 'dom',
+      freshness: 'fresh',
+      tabId: 7,
+      candidateActions: [
+        {
+          targetRef: 'ref_button_1',
+          actionType: 'click',
+          actionability: true,
+        },
+      ],
+    }),
+    resultSummary: 'fresh page read',
+  });
+
+  traceService.recordAiBusinessFeedback({
+    traceId: readTrace.traceId,
+    taskId: readTrace.taskId,
+    toolName: readTrace.toolName,
+    toolCallId: readTrace.toolCallId,
+    sequenceIndex: readTrace.sequenceIndex,
+    traceBindingHash: buildMemoryTraceBindingHash(readTrace),
+    businessStatus: 'achieved',
+    confidence: 0.92,
+    reasonCode: 'page_inventory_read',
+    summary: 'AI judged the page inventory read as useful for the next action',
+    evaluationVersion: 'ai_feedback_v1',
+    rubricVersion: 'tabrix_ai_business_feedback_v1',
+    evaluatorModel: 'jest-ai-evaluator',
+    userGoalSnapshot: 'inspect page and click action',
+    experienceCandidate: true,
+    sourceToolName: 'chrome_click_element',
+    sourceToolCallId: 'feedback-call-1',
+    receivedAt: '2026-06-06T10:00:00.080Z',
+  });
+
+  const clickTrace = traceService.recordToolCall({
+    taskId,
+    taskIntent: 'inspect page and click action',
+    aiClient: 'jest',
+    toolName: 'chrome_click_element',
+    stepId: 'mke-step-click',
+    sequenceIndex: 2,
+    requestParams: { tabId: 7, ref: 'ref_button_1', selectorType: 'ref' },
+    requestAtMs: requestAt + 30,
+    responseAtMs: requestAt + 50,
+    result: textResult({
+      ok: true,
+      tabId: 7,
+      pageUrl: 'https://example.test/workspaces/123',
+      summary: { pageRole: 'workspace', quality: 'fresh' },
+      actionEvidenceResult: {
+        business: {
+          businessSuccessVerdict: 'proven',
+          businessSuccessProven: true,
+        },
+      },
+    }),
+    resultSummary: 'clicked button',
+  });
+  traceService.recordAiBusinessFeedback({
+    traceId: clickTrace.traceId,
+    taskId: clickTrace.taskId,
+    toolName: clickTrace.toolName,
+    toolCallId: clickTrace.toolCallId,
+    sequenceIndex: clickTrace.sequenceIndex,
+    traceBindingHash: buildMemoryTraceBindingHash(clickTrace),
+    businessStatus: 'achieved',
+    confidence: 0.93,
+    reasonCode: 'clicked_expected_control',
+    summary: 'AI verified the click completed the intended page action',
+    evaluationVersion: 'ai_feedback_v1',
+    rubricVersion: 'tabrix_ai_business_feedback_v1',
+    evaluatorModel: 'jest-ai-evaluator',
+    userGoalSnapshot: 'inspect page and click action',
+    experienceCandidate: true,
+    sourceToolName: 'chrome_click_element',
+    sourceToolCallId: 'feedback-call-2',
+    receivedAt: '2026-06-06T10:00:00.090Z',
+  });
+
+  await sessionManager.flushMkeMemoryTraceWrites();
+  sessionManager.projectMkeKnowledgeIdle({
+    nowIso: '2026-06-06T10:00:01.000Z',
+  });
+  sessionManager.projectMkeExperienceIdle({
+    nowIso: '2026-06-06T10:00:02.000Z',
+  });
+}
+
 describe('memory read routes (B-001 · Stage 3e)', () => {
+  const configFile = path.join(os.tmpdir(), 'tabrix-memory-routes-test-config.json');
+
   beforeAll(async () => {
+    __hostConfigInternals.setConfigFileForTesting(configFile);
     await Server.getInstance().ready();
   });
 
   beforeEach(() => {
     sessionManager.reset();
+    fs.rmSync(configFile, { force: true });
   });
 
   afterEach(() => {
     sessionManager.reset();
+    fs.rmSync(configFile, { force: true });
   });
 
-  test('GET /memory/sessions returns an empty list on a virgin DB', async () => {
-    const res = await supertest(Server.getInstance().server)
-      .get('/memory/sessions')
-      .expect(200)
-      .expect('Content-Type', /json/);
-
-    expect(res.body).toMatchObject({
-      status: 'ok',
-      data: {
-        sessions: [],
-        total: 0,
-        limit: 20,
-        offset: 0,
-      },
-    });
-    // Persistence mode is test-mode in-memory; the route echoes it so
-    // the UI can show a neutral message when disk persistence is off.
-    expect(['disk', 'memory', 'off']).toContain(res.body.data.persistenceMode);
+  afterAll(() => {
+    __hostConfigInternals.setConfigFileForTesting(null);
+    fs.rmSync(configFile, { force: true });
   });
 
-  test('GET /memory/sessions lists recent sessions with task title + step count', async () => {
-    const seeded = await seedOneSession();
-    const res = await supertest(Server.getInstance().server).get('/memory/sessions').expect(200);
-
-    expect(res.body.data.total).toBe(1);
-    expect(res.body.data.sessions).toHaveLength(1);
-    expect(res.body.data.sessions[0]).toMatchObject({
-      sessionId: seeded.sessionId,
-      taskId: seeded.taskId,
-      taskTitle: 'route-test task',
-      taskIntent: 'inspect a github workflow run',
-      transport: 'http',
-      clientName: 'jest-supertest',
-      status: 'completed',
-      stepCount: 2,
-    });
-  });
-
-  test('GET /memory/sessions honors limit and offset', async () => {
-    for (let i = 0; i < 3; i += 1) {
-      // Each seed increments the wall clock by 1ms so listRecent order
-      // is deterministic for this assertion.
-      await new Promise((resolve) => setTimeout(resolve, 2));
-      await seedOneSession();
-    }
-    const first = await supertest(Server.getInstance().server)
-      .get('/memory/sessions?limit=2&offset=0')
-      .expect(200);
-    const second = await supertest(Server.getInstance().server)
-      .get('/memory/sessions?limit=2&offset=2')
-      .expect(200);
-
-    expect(first.body.data.total).toBe(3);
-    expect(first.body.data.sessions).toHaveLength(2);
-    expect(first.body.data.limit).toBe(2);
-    expect(second.body.data.sessions).toHaveLength(1);
-    expect(second.body.data.offset).toBe(2);
-  });
-
-  test('GET /memory/sessions/:sessionId/steps returns steps in chronological order', async () => {
-    const seeded = await seedOneSession();
-    const res = await supertest(Server.getInstance().server)
-      .get(`/memory/sessions/${seeded.sessionId}/steps`)
-      .expect(200);
-
-    expect(res.body).toMatchObject({
-      status: 'ok',
-      data: { sessionId: seeded.sessionId },
-    });
-    expect(res.body.data.steps).toHaveLength(2);
-    expect(res.body.data.steps[0]).toMatchObject({
-      stepId: seeded.stepIds[0],
-      toolName: 'chrome_read_page',
-      status: 'completed',
-    });
-    expect(res.body.data.steps[1]).toMatchObject({
-      stepId: seeded.stepIds[1],
-      toolName: 'chrome_fill_or_select',
-      status: 'failed',
-      errorCode: 'element_not_found',
-    });
-  });
-
-  test('GET /memory/sessions/:sessionId/steps returns [] for an unknown session', async () => {
-    const res = await supertest(Server.getInstance().server)
-      .get('/memory/sessions/does-not-exist/steps')
-      .expect(200);
-    expect(res.body.data.steps).toEqual([]);
-  });
-
-  test('GET /memory/tasks/:taskId returns the task when it exists', async () => {
-    const seeded = await seedOneSession();
-    const res = await supertest(Server.getInstance().server)
-      .get(`/memory/tasks/${seeded.taskId}`)
-      .expect(200);
-
-    expect(res.body).toMatchObject({
-      status: 'ok',
-      data: {
-        task: {
-          taskId: seeded.taskId,
-          title: 'route-test task',
-          intent: 'inspect a github workflow run',
-        },
-      },
-    });
-  });
-
-  test('GET /memory/tasks/:taskId returns 404 for an unknown task', async () => {
-    const res = await supertest(Server.getInstance().server)
-      .get('/memory/tasks/does-not-exist')
-      .expect(404);
-    expect(res.body.status).toBe('error');
-    expect(res.body.message).toBe('Task not found');
-  });
-
-  test('write verbs are not registered (read-only invariant)', async () => {
-    // POST / PUT / PATCH / DELETE against the memory namespace must 404.
+  test('retired session/task routes are not registered', async () => {
+    await supertest(Server.getInstance().server).get('/memory/sessions').expect(404);
+    await supertest(Server.getInstance().server).get('/memory/sessions/anything/steps').expect(404);
+    await supertest(Server.getInstance().server).get('/memory/tasks/any').expect(404);
     await supertest(Server.getInstance().server).post('/memory/sessions').expect(404);
     await supertest(Server.getInstance().server)
       .delete('/memory/sessions/anything/steps')
       .expect(404);
     await supertest(Server.getInstance().server).put('/memory/tasks/any').expect(404);
+  });
+
+  test('Object Library storage preferences are not a product API surface', async () => {
+    await supertest(Server.getInstance().server)
+      .get('/memory/mke/object-storage-preferences')
+      .expect(404);
+    await supertest(Server.getInstance().server)
+      .patch('/memory/mke/object-storage-preferences')
+      .send({ enabled: true })
+      .expect(404);
+  });
+
+  test('GET /memory/mke/traces returns sanitized trace summaries', async () => {
+    await seedMkeRows();
+
+    const res = await supertest(Server.getInstance().server)
+      .get('/memory/mke/traces?limit=10&offset=0')
+      .expect(200);
+
+    expect(res.body.data.total).toBe(2);
+    expect(res.body.data.traces).toHaveLength(2);
+    expect(res.body.data.traces[0]).toMatchObject({
+      toolName: 'chrome_click_element',
+      display: {
+        title: 'inspect page and click action',
+        methodLabel: '点击元素',
+      },
+      aiFeedback: {
+        businessStatus: 'achieved',
+        confidence: 0.93,
+        reasonCode: 'clicked_expected_control',
+        summary: 'AI verified the click completed the intended page action',
+      },
+      aiFeedbackRequired: true,
+      aiFeedbackState: 'recorded',
+    });
+    const removedSyntheticScoreKey = ['system', 'Evidence', 'Score'].join('');
+    const removedSyntheticPayloadKey = ['system', 'Evidence'].join('');
+    expect(res.body.data.traces[0]).not.toHaveProperty(removedSyntheticScoreKey);
+    expect(res.body.data.traces[0]).not.toHaveProperty(removedSyntheticPayloadKey);
+    expect(JSON.stringify(res.body.data.traces[0])).not.toContain('evidenceRefs');
+    expect(res.body.data.traces[0]).not.toHaveProperty('businessSuccess');
+    expect(res.body.data.traces[0]).not.toHaveProperty('aiFeedbackScore');
+    expect(res.body.data.traces[0]).not.toHaveProperty('statusView');
+    expect(res.body.data.traces[0]).not.toHaveProperty('taskId');
+    expect(res.body.data.traces[0]).not.toHaveProperty('toolCallId');
+    expect(res.body.data.traces[0]).not.toHaveProperty('sequenceIndex');
+    expect(res.body.data.traces[0]).not.toHaveProperty('toolSuccess');
+    expect(res.body.data.traces[0]).not.toHaveProperty('tabId');
+    expect(res.body.data.traces[0]).not.toHaveProperty('windowId');
+    expect(res.body.data.traces[0]).not.toHaveProperty('redactionState');
+    expect(res.body.data.traces[0]).not.toHaveProperty('sourceRoute');
+    expect(res.body.data.traces[0]).not.toHaveProperty('selectedDataSource');
+    expect(res.body.data.traces[0]).not.toHaveProperty('tokenTotal');
+    expect(res.body.data.traces[0]).not.toHaveProperty('resultSummary');
+    expect(res.body.data.traces[0].pageIdentity.label).toBe('example.test');
+    expect(res.body.data.traces[0]).not.toHaveProperty('requestParams');
+    expect(res.body.data.traces[0]).not.toHaveProperty('response');
+    expect(res.body.data.traces[0]).not.toHaveProperty('postObservation');
+    expect(res.body.data.traces[1]).toMatchObject({
+      toolName: 'chrome_read_page',
+      aiFeedback: {
+        businessStatus: 'achieved',
+        confidence: 0.92,
+        reasonCode: 'page_inventory_read',
+        summary: 'AI judged the page inventory read as useful for the next action',
+      },
+      aiFeedbackRequired: true,
+      aiFeedbackState: 'recorded',
+    });
+    expect(res.body.data.traces[1]).not.toHaveProperty(removedSyntheticScoreKey);
+    expect(res.body.data.traces[1]).not.toHaveProperty(removedSyntheticPayloadKey);
+    expect(JSON.stringify(res.body.data.traces[1])).not.toContain('evidenceRefs');
+    expect(res.body.data.traces[1]).not.toHaveProperty('businessSuccess');
+    expect(res.body.data.traces[1]).not.toHaveProperty('aiFeedbackScore');
+    expect(res.body.data.traces[1]).not.toHaveProperty('statusView');
+    expect(res.body.data.traces[1]).not.toHaveProperty('resultSummary');
+    expect(res.body.data.traces[1].aiFeedback).not.toHaveProperty('rawInput');
+    expect(res.body.data.traces[1].aiFeedback).not.toHaveProperty('response');
+    expect(res.body.data.traces[1].aiFeedback).not.toHaveProperty('sourceKind');
+    expect(res.body.data.traces[1].aiFeedback).not.toHaveProperty('sourceToolName');
+    expect(res.body.data.traces[1].aiFeedback).not.toHaveProperty('sourceToolCallId');
+    expect(res.body.data.traces[1].aiFeedback).not.toHaveProperty('traceBindingHash');
+  });
+
+  test.each([
+    [TOOL_NAMES.BROWSER.GET_WINDOWS_AND_TABS],
+    [TOOL_NAMES.BROWSER.PERFORMANCE_START_TRACE],
+    [TOOL_NAMES.BROWSER.PERFORMANCE_STOP_TRACE],
+    [TOOL_NAMES.CONTEXT.CHOOSE],
+    [TOOL_NAMES.CONTEXT.RECORD_OUTCOME],
+    [TOOL_NAMES.MEMORY.RECORD_AI_FEEDBACK],
+  ])(
+    'GET /memory/mke/traces marks internal maintenance tool as not required: %s',
+    async (toolName) => {
+      const traceService = sessionManager.memoryTraces;
+      if (!traceService) throw new Error('MKE trace service is not available in tests');
+      const requestAt = Date.parse('2026-06-06T10:30:00.000Z');
+
+      traceService.recordToolCall({
+        taskId: 'internal-maintenance-task',
+        taskIntent: '维护内部学习状态',
+        aiClient: 'jest',
+        toolName,
+        stepId: 'internal-maintenance-step',
+        sequenceIndex: 1,
+        requestParams: {},
+        requestAtMs: requestAt,
+        responseAtMs: requestAt + 20,
+        result: textResult({ status: 'ok' }),
+        resultSummary: 'internal maintenance',
+      });
+      await sessionManager.flushMkeMemoryTraceWrites();
+
+      const res = await supertest(Server.getInstance().server)
+        .get('/memory/mke/traces?limit=10&offset=0')
+        .expect(200);
+
+      expect(res.body.data.traces).toHaveLength(1);
+      expect(res.body.data.traces[0]).toMatchObject({
+        toolName,
+        aiFeedbackRequired: false,
+        aiFeedbackState: 'not_required',
+        aiFeedback: null,
+      });
+    },
+  );
+
+  test.each([
+    [TOOL_NAMES.BROWSER.SCREENSHOT],
+    [TOOL_NAMES.BROWSER.CONSOLE],
+    [TOOL_NAMES.BROWSER.NETWORK_CAPTURE],
+    [TOOL_NAMES.BROWSER.HISTORY],
+    [TOOL_NAMES.BROWSER.BOOKMARK_SEARCH],
+    [TOOL_NAMES.BROWSER.PERFORMANCE_ANALYZE_INSIGHT],
+  ])(
+    'GET /memory/mke/traces keeps AI-requested auxiliary browser trace pending: %s',
+    async (toolName) => {
+      const traceService = sessionManager.memoryTraces;
+      if (!traceService) throw new Error('MKE trace service is not available in tests');
+      const requestAt = Date.parse('2026-06-06T10:30:00.000Z');
+
+      traceService.recordToolCall({
+        taskId: 'browser-inventory-task',
+        taskIntent: `Run MCP tool ${toolName}`,
+        aiClient: 'jest',
+        toolName,
+        stepId: 'browser-inventory-step',
+        sequenceIndex: 1,
+        requestParams: {},
+        requestAtMs: requestAt,
+        responseAtMs: requestAt + 20,
+        result: textResult({
+          source: 'chrome_windows_get_all_with_browser_world_inventory',
+          browserWorld: { status: 'fresh', windows: [], tabs: [] },
+        }),
+        resultSummary: 'browser inventory read',
+      });
+      await sessionManager.flushMkeMemoryTraceWrites();
+
+      const res = await supertest(Server.getInstance().server)
+        .get('/memory/mke/traces?limit=10&offset=0')
+        .expect(200);
+
+      expect(res.body.data.traces).toHaveLength(1);
+      expect(res.body.data.traces[0]).toMatchObject({
+        toolName,
+        aiFeedbackRequired: true,
+        aiFeedbackState: 'pending',
+        aiFeedback: null,
+      });
+    },
+  );
+
+  test.each([
+    [TOOL_NAMES.BROWSER.NETWORK_REQUEST],
+    [TOOL_NAMES.BROWSER.BOOKMARK_ADD],
+    [TOOL_NAMES.BROWSER.BOOKMARK_DELETE],
+    [TOOL_NAMES.BROWSER.CLOSE_TABS],
+    [TOOL_NAMES.BROWSER.SWITCH_TAB],
+    [TOOL_NAMES.BROWSER.JAVASCRIPT],
+    [TOOL_NAMES.BROWSER.COMPUTER],
+  ])(
+    'GET /memory/mke/traces keeps actionful generic browser trace pending: %s',
+    async (toolName) => {
+      const traceService = sessionManager.memoryTraces;
+      if (!traceService) throw new Error('MKE trace service is not available in tests');
+      const requestAt = Date.parse('2026-06-06T10:31:00.000Z');
+
+      traceService.recordToolCall({
+        taskId: 'actionful-generic-browser-task',
+        taskIntent: `Run MCP tool ${toolName}`,
+        aiClient: 'jest',
+        toolName,
+        stepId: 'actionful-generic-browser-step',
+        sequenceIndex: 1,
+        requestParams: {},
+        requestAtMs: requestAt,
+        responseAtMs: requestAt + 20,
+        result: textResult({ status: 'ok' }),
+        resultSummary: 'actionful generic browser step',
+      });
+      await sessionManager.flushMkeMemoryTraceWrites();
+
+      const res = await supertest(Server.getInstance().server)
+        .get('/memory/mke/traces?limit=10&offset=0')
+        .expect(200);
+
+      expect(res.body.data.traces).toHaveLength(1);
+      expect(res.body.data.traces[0]).toMatchObject({
+        toolName,
+        aiFeedbackRequired: true,
+        aiFeedbackState: 'pending',
+        aiFeedback: null,
+      });
+    },
+  );
+
+  test.each([
+    [TOOL_NAMES.BROWSER.GET_INTERACTIVE_ELEMENTS],
+    [TOOL_NAMES.BROWSER.WEB_FETCHER],
+    [TOOL_NAMES.BROWSER.HANDLE_DOWNLOAD],
+    [TOOL_NAMES.BROWSER.KEYBOARD],
+  ])(
+    'GET /memory/mke/traces marks task-progressing browser trace as pending: %s',
+    async (toolName) => {
+      const traceService = sessionManager.memoryTraces;
+      if (!traceService) throw new Error('MKE trace service is not available in tests');
+      const requestAt = Date.parse('2026-06-06T10:32:00.000Z');
+
+      traceService.recordToolCall({
+        taskId: 'task-meaningful-browser-step',
+        taskIntent: '完成用户目标中的一个浏览器步骤',
+        aiClient: 'jest',
+        toolName,
+        stepId: 'task-meaningful-browser-step-1',
+        sequenceIndex: 1,
+        requestParams: {},
+        requestAtMs: requestAt,
+        responseAtMs: requestAt + 20,
+        result: textResult({ status: 'ok' }),
+        resultSummary: 'task meaningful browser step',
+      });
+      await sessionManager.flushMkeMemoryTraceWrites();
+
+      const res = await supertest(Server.getInstance().server)
+        .get('/memory/mke/traces?limit=10&offset=0')
+        .expect(200);
+
+      expect(res.body.data.traces).toHaveLength(1);
+      expect(res.body.data.traces[0]).toMatchObject({
+        toolName,
+        aiFeedbackRequired: true,
+        aiFeedbackState: 'pending',
+        aiFeedback: null,
+      });
+    },
+  );
+
+  test.each([
+    [TOOL_NAMES.BROWSER.SCREENSHOT],
+    [TOOL_NAMES.BROWSER.CONSOLE],
+    [TOOL_NAMES.BROWSER.NETWORK_CAPTURE],
+    [TOOL_NAMES.BROWSER.CLOSE_TABS],
+    [TOOL_NAMES.BROWSER.SWITCH_TAB],
+  ])(
+    'GET /memory/mke/traces marks auxiliary browser trace as pending when it serves task context: %s',
+    async (toolName) => {
+      const traceService = sessionManager.memoryTraces;
+      if (!traceService) throw new Error('MKE trace service is not available in tests');
+      const requestAt = Date.parse('2026-06-06T10:33:00.000Z');
+
+      traceService.recordToolCall({
+        taskId: 'task-auxiliary-browser-step',
+        taskIntent: '完成用户目标中的关键浏览器步骤',
+        aiClient: 'jest',
+        toolName,
+        stepId: 'task-auxiliary-browser-step-1',
+        sequenceIndex: 1,
+        requestParams: {},
+        requestAtMs: requestAt,
+        responseAtMs: requestAt + 20,
+        result: textResult({ status: 'ok' }),
+        resultSummary: 'task auxiliary browser step',
+      });
+      await sessionManager.flushMkeMemoryTraceWrites();
+
+      const res = await supertest(Server.getInstance().server)
+        .get('/memory/mke/traces?limit=10&offset=0')
+        .expect(200);
+
+      expect(res.body.data.traces).toHaveLength(1);
+      expect(res.body.data.traces[0]).toMatchObject({
+        toolName,
+        aiFeedbackRequired: true,
+        aiFeedbackState: 'pending',
+        aiFeedback: null,
+      });
+    },
+  );
+
+  test('GET /memory/mke/traces marks failed task-meaningful browser tool as pending', async () => {
+    const traceService = sessionManager.memoryTraces;
+    if (!traceService) throw new Error('MKE trace service is not available in tests');
+    const requestAt = Date.parse('2026-06-06T10:35:00.000Z');
+
+    traceService.recordToolCall({
+      taskId: 'failed-read-task',
+      taskIntent: '读取页面',
+      aiClient: 'jest',
+      toolName: TOOL_NAMES.BROWSER.READ_PAGE,
+      stepId: 'failed-read-step',
+      sequenceIndex: 1,
+      requestParams: { tabId: 7 },
+      requestAtMs: requestAt,
+      responseAtMs: requestAt + 20,
+      result: {
+        content: [{ type: 'text' as const, text: JSON.stringify({ status: 'error' }) }],
+        isError: true,
+      },
+      resultSummary: 'read failed',
+    });
+    await sessionManager.flushMkeMemoryTraceWrites();
+
+    const res = await supertest(Server.getInstance().server)
+      .get('/memory/mke/traces?limit=10&offset=0')
+      .expect(200);
+
+    expect(res.body.data.traces[0]).toMatchObject({
+      toolName: TOOL_NAMES.BROWSER.READ_PAGE,
+      aiFeedbackRequired: true,
+      aiFeedbackState: 'pending',
+      aiFeedback: null,
+    });
+  });
+
+  test('GET /memory/mke/traces marks default high-signal browser trace as pending', async () => {
+    const traceService = sessionManager.memoryTraces;
+    if (!traceService) throw new Error('MKE trace service is not available in tests');
+    const requestAt = Date.parse('2026-06-06T10:40:00.000Z');
+
+    traceService.recordToolCall({
+      taskId: 'default-tool-run-task',
+      taskIntent: `Run MCP tool ${TOOL_NAMES.BROWSER.READ_PAGE}`,
+      aiClient: 'jest',
+      toolName: TOOL_NAMES.BROWSER.READ_PAGE,
+      stepId: 'default-tool-run-step',
+      sequenceIndex: 1,
+      requestParams: { tabId: 7 },
+      requestAtMs: requestAt,
+      responseAtMs: requestAt + 20,
+      result: textResult({
+        page: { url: 'https://example.test/search' },
+        summary: { pageRole: 'search_results', quality: 'usable' },
+      }),
+      resultSummary: 'default tool-run read',
+    });
+    await sessionManager.flushMkeMemoryTraceWrites();
+
+    const res = await supertest(Server.getInstance().server)
+      .get('/memory/mke/traces?limit=10&offset=0')
+      .expect(200);
+
+    expect(res.body.data.traces[0]).toMatchObject({
+      toolName: TOOL_NAMES.BROWSER.READ_PAGE,
+      aiFeedbackRequired: true,
+      aiFeedbackState: 'pending',
+      aiFeedback: null,
+    });
+  });
+
+  test('GET /memory/mke/traces does not expose orphan legacy score as AI score', async () => {
+    const traceService = sessionManager.memoryTraces;
+    if (!traceService) throw new Error('MKE trace service is not available in tests');
+    const trace = traceService.recordToolCall({
+      taskId: 'mke-route-task-orphan-score',
+      taskIntent: 'read a page before AI evaluation',
+      aiClient: 'jest',
+      toolName: 'chrome_read_page',
+      stepId: 'mke-step-orphan-score',
+      sequenceIndex: 1,
+      requestParams: { tabId: 11 },
+      requestAtMs: Date.parse('2026-06-06T12:00:00.000Z'),
+      responseAtMs: Date.parse('2026-06-06T12:00:00.050Z'),
+      result: textResult({
+        page: { url: 'https://example.test/search' },
+        summary: { pageRole: 'search_results', quality: 'usable' },
+      }),
+      resultSummary: 'read page without AI evaluation',
+    });
+    (traceService as any).repo.updateAiFeedback({
+      traceId: trace.traceId,
+      aiFeedbackScore: 0.99,
+      aiFeedback: null,
+    });
+
+    const res = await supertest(Server.getInstance().server)
+      .get('/memory/mke/traces?limit=10&offset=0')
+      .expect(200);
+
+    expect(res.body.data.traces[0]).toMatchObject({
+      traceId: trace.traceId,
+      aiFeedbackState: 'pending',
+      aiFeedback: null,
+    });
+    expect(res.body.data.traces[0]).not.toHaveProperty('aiFeedbackScore');
+    expect(res.body.data.traces[0]).not.toHaveProperty('statusView');
+  });
+
+  test('GET /memory/mke/traces exposes AI feedback without legacy business status', async () => {
+    const traceService = sessionManager.memoryTraces;
+    if (!traceService) throw new Error('MKE trace service is not available in tests');
+    const requestAt = Date.parse('2026-06-06T11:00:00.000Z');
+
+    const trace = traceService.recordToolCall({
+      taskId: 'mke-route-task-conflict',
+      taskIntent: 'apply a filter and verify the results',
+      aiClient: 'jest',
+      toolName: 'chrome_click_element',
+      stepId: 'mke-step-conflict',
+      sequenceIndex: 1,
+      requestParams: { tabId: 9, selector: '[data-filter]' },
+      requestAtMs: requestAt,
+      responseAtMs: requestAt + 40,
+      result: textResult({
+        success: true,
+        pageUrl: 'https://example.test/search',
+        businessSuccess: 'not_achieved',
+      }),
+      resultSummary: 'click dispatched but filter state was not verified',
+    });
+
+    traceService.recordAiBusinessFeedback({
+      traceId: trace.traceId,
+      taskId: trace.taskId,
+      toolName: trace.toolName,
+      toolCallId: trace.toolCallId,
+      sequenceIndex: trace.sequenceIndex,
+      traceBindingHash: buildMemoryTraceBindingHash(trace),
+      businessStatus: 'achieved',
+      confidence: 0.91,
+      reasonCode: 'ai_overstated_completion',
+      summary: 'AI thought the filter was applied',
+      receivedAt: '2026-06-06T11:00:00.090Z',
+    });
+
+    const res = await supertest(Server.getInstance().server)
+      .get('/memory/mke/traces?limit=10&offset=0')
+      .expect(200);
+
+    expect(res.body.data.traces[0]).toMatchObject({
+      traceId: trace.traceId,
+      aiFeedback: {
+        businessStatus: 'achieved',
+        confidence: 0.91,
+        reasonCode: 'ai_overstated_completion',
+        summary: 'AI thought the filter was applied',
+      },
+      aiFeedbackState: 'recorded',
+    });
+    expect(res.body.data.traces[0]).not.toHaveProperty('businessSuccess');
+    expect(res.body.data.traces[0]).not.toHaveProperty('aiFeedbackScore');
+    expect(res.body.data.traces[0]).not.toHaveProperty('statusView');
+  });
+
+  test('GET /memory/mke/knowledge returns sanitized knowledge summaries', async () => {
+    await seedMkeRows();
+
+    const res = await supertest(Server.getInstance().server)
+      .get('/memory/mke/knowledge')
+      .expect(200);
+
+    expect(res.body.data.total).toBe(1);
+    expect(res.body.data.knowledgeModels[0]).toMatchObject({
+      siteFamily: 'example.test',
+      pageRole: 'workspace',
+      observationCount: 2,
+    });
+    expect(res.body.data.knowledgeModels[0]).not.toHaveProperty('pageStateModel');
+    expect(res.body.data.knowledgeModels[0]).not.toHaveProperty('objectGraph');
+    expect(res.body.data.knowledgeModels[0]).not.toHaveProperty('sourceTraceIds');
+    expect(res.body.data.knowledgeModels[0]).not.toHaveProperty('sourceTraceCount');
+    expect(res.body.data.knowledgeModels[0]).not.toHaveProperty('confidenceScore');
+    expect(res.body.data.knowledgeModels[0]).not.toHaveProperty('driftScore');
+  });
+
+  test('GET /memory/mke/browser-objects does not expose read_page internals as browser tabs', async () => {
+    await seedMkeRows();
+
+    const res = await supertest(Server.getInstance().server)
+      .get('/memory/mke/browser-objects')
+      .expect(200);
+
+    expect(res.body.data.total).toBe(0);
+    expect(res.body.data.browserObjects).toEqual([]);
+  });
+
+  test('GET /memory/mke/browser-objects lists simple browser tab webpage summaries', async () => {
+    const traceService = sessionManager.memoryTraces;
+    if (!traceService) throw new Error('MKE trace service is not available in tests');
+    const requestAt = Date.parse('2026-06-06T12:00:00.000Z');
+
+    traceService.recordToolCall({
+      taskId: 'browser-object-route-task',
+      taskIntent: 'inspect browser context',
+      aiClient: 'jest',
+      toolName: 'get_windows_and_tabs',
+      stepId: 'browser-object-step',
+      sequenceIndex: 1,
+      requestParams: {},
+      requestAtMs: requestAt,
+      responseAtMs: requestAt + 18,
+      result: textResult({
+        source: 'chrome_windows_get_all_with_browser_world_inventory',
+        browserWorld: {
+          status: 'fresh',
+          windows: [
+            { windowId: 10, focused: true, state: 'maximized', tabCount: 1, activeTabId: 21 },
+          ],
+          tabs: [
+            {
+              tabId: 21,
+              windowId: 10,
+              active: true,
+              status: 'complete',
+              ownerType: 'ai',
+              canTabrixOperate: true,
+              url: 'https://example.test/search?spm=tracking&q=private-token&tab=demohouse&access_token=real-secret#/experience/llm',
+              title: 'Search results - Example',
+            },
+            {
+              tabId: 22,
+              windowId: 10,
+              active: false,
+              status: 'complete',
+              ownerType: 'user_or_page',
+              canTabrixOperate: false,
+              operabilityReason: 'browser_internal_page',
+              url: 'chrome://newtab/',
+              title: 'New Tab',
+            },
+          ],
+        },
+      }),
+      resultSummary: 'browser inventory read',
+    });
+    await traceService.flushAsyncWrites();
+
+    const res = await supertest(Server.getInstance().server)
+      .get('/memory/mke/browser-objects?limit=10&offset=0')
+      .expect(200);
+
+    expect(res.body.data.total).toBe(2);
+    const objects = res.body.data.browserObjects as Array<Record<string, unknown>>;
+    const tab = objects.find((object) => object.url === 'https://example.test/search');
+    expect(tab).toMatchObject({
+      title: 'Search results - Example',
+      url: 'https://example.test/search',
+      location: 'example.test',
+      tabId: '21',
+      status: 'running',
+    });
+    expect(JSON.stringify(tab)).not.toContain('private-token');
+    expect(JSON.stringify(tab)).not.toContain('spm');
+    expect(JSON.stringify(tab)).not.toContain('tab=demohouse');
+    expect(JSON.stringify(tab)).not.toContain('access_token');
+    expect(JSON.stringify(tab)).not.toContain('real-secret');
+    expect(JSON.stringify(tab)).not.toContain('#/experience/llm');
+    expect(tab).not.toHaveProperty('currentState');
+    expect(tab).not.toHaveProperty('recentEvents');
+    expect(tab).not.toHaveProperty('objectType');
+    expect(tab).not.toHaveProperty('facts');
+    expect(tab).not.toHaveProperty('pageIdentity');
+    expect(tab).not.toHaveProperty('display');
+    expect(tab).not.toHaveProperty('canTabrixOperate');
+    expect(tab).not.toHaveProperty('ownerType');
+    expect(tab).not.toHaveProperty('sourceTraceIds');
+    expect(tab).not.toHaveProperty('evidenceRefs');
+    expect(tab).not.toHaveProperty('claimBoundary');
+    expect(tab).not.toHaveProperty('confidenceScore');
+    expect(tab).not.toHaveProperty('driftScore');
+    const browserTab = objects.find((object) => object.url === 'chrome://newtab/');
+    expect(browserTab).toMatchObject({
+      title: 'New Tab',
+      location: 'chrome://newtab/',
+      status: 'restricted',
+    });
+  });
+
+  test('Object Library upserts the same BrowserWorld window and tab across context refreshes', async () => {
+    const traceService = sessionManager.memoryTraces;
+    if (!traceService) throw new Error('MKE trace service is not available in tests');
+    const requestAt = Date.parse('2026-06-06T12:10:00.000Z');
+    const browserWorldPayload = {
+      source: 'chrome_windows_get_all_with_browser_world_inventory',
+      browserWorld: {
+        status: 'fresh',
+        windows: [{ windowId: 10, focused: true, state: 'normal', tabCount: 1, activeTabId: 21 }],
+        tabs: [
+          {
+            tabId: 21,
+            windowId: 10,
+            active: true,
+            status: 'complete',
+            ownerType: 'user_or_page',
+            canTabrixOperate: true,
+            url: 'https://example.test/search',
+            title: 'Search results - Example',
+          },
+        ],
+      },
+    };
+
+    traceService.recordToolCall({
+      taskId: 'browser-object-stable-key-task',
+      taskIntent: 'inspect browser context',
+      aiClient: 'jest',
+      toolName: 'get_windows_and_tabs',
+      stepId: 'browser-object-stable-key-step-1',
+      sequenceIndex: 1,
+      requestParams: {},
+      requestAtMs: requestAt,
+      responseAtMs: requestAt + 18,
+      browserContextKey: 'ctx-before-reload',
+      result: textResult(browserWorldPayload),
+      resultSummary: 'browser inventory read',
+    });
+
+    traceService.recordToolCall({
+      taskId: 'browser-object-stable-key-task',
+      taskIntent: 'inspect browser context',
+      aiClient: 'jest',
+      toolName: 'get_windows_and_tabs',
+      stepId: 'browser-object-stable-key-step-2',
+      sequenceIndex: 2,
+      requestParams: {},
+      requestAtMs: requestAt + 100,
+      responseAtMs: requestAt + 118,
+      browserContextKey: 'ctx-after-reload',
+      result: textResult(browserWorldPayload),
+      resultSummary: 'browser inventory read again',
+    });
+    await traceService.flushAsyncWrites();
+
+    const res = await supertest(Server.getInstance().server)
+      .get('/memory/mke/browser-objects?limit=10&offset=0')
+      .expect(200);
+
+    expect(res.body.data.total).toBe(1);
+    const objects = res.body.data.browserObjects as Array<Record<string, unknown>>;
+    const tab = objects[0];
+    expect(tab).toMatchObject({
+      tabId: '21',
+      title: 'Search results - Example',
+      status: 'running',
+    });
+    expect(tab).not.toHaveProperty('browserContextKey');
+    expect(tab).not.toHaveProperty('objectFingerprint');
+    expect(tab).not.toHaveProperty('observationCount');
+  });
+
+  test('Object Library stores one browser page object per Base URL across multiple tab ids', async () => {
+    const traceService = sessionManager.memoryTraces;
+    if (!traceService) throw new Error('MKE trace service is not available in tests');
+    const requestAt = Date.parse('2026-06-06T12:12:00.000Z');
+
+    traceService.recordToolCall({
+      taskId: 'browser-object-base-url-task',
+      taskIntent: 'inspect browser context',
+      aiClient: 'jest',
+      toolName: 'get_windows_and_tabs',
+      stepId: 'browser-object-base-url-step',
+      sequenceIndex: 1,
+      requestParams: {},
+      requestAtMs: requestAt,
+      responseAtMs: requestAt + 18,
+      browserContextKey: 'ctx-base-url',
+      result: textResult({
+        source: 'chrome_windows_get_all_with_browser_world_inventory',
+        browserWorld: {
+          status: 'fresh',
+          windows: [{ windowId: 10, focused: true, state: 'normal', tabCount: 2, activeTabId: 22 }],
+          tabs: [
+            {
+              tabId: 21,
+              windowId: 10,
+              active: false,
+              status: 'complete',
+              ownerType: 'user_or_page',
+              canTabrixOperate: true,
+              url: 'https://example.test/search?q=first',
+              title: 'Search results - background',
+            },
+            {
+              tabId: 22,
+              windowId: 10,
+              active: true,
+              status: 'complete',
+              ownerType: 'user_or_page',
+              canTabrixOperate: true,
+              url: 'https://example.test/search?q=second',
+              title: 'Search results - active',
+            },
+          ],
+        },
+      }),
+      resultSummary: 'browser inventory read',
+    });
+    await traceService.flushAsyncWrites();
+
+    const res = await supertest(Server.getInstance().server)
+      .get('/memory/mke/browser-objects?limit=10&offset=0')
+      .expect(200);
+
+    expect(res.body.data.total).toBe(1);
+    expect(res.body.data.browserObjects).toHaveLength(1);
+    expect(res.body.data.browserObjects[0]).toMatchObject({
+      tabId: '22',
+      title: 'Search results - active',
+      url: 'https://example.test/search',
+      location: 'example.test',
+      status: 'running',
+    });
+  });
+
+  test('Object Library default scope returns tab webpages and object-graph scope exposes sanitized page objects', async () => {
+    const traceService = sessionManager.memoryTraces;
+    if (!traceService) throw new Error('MKE trace service is not available in tests');
+    const requestAt = Date.parse('2026-06-06T12:15:00.000Z');
+
+    traceService.recordToolCall({
+      taskId: 'browser-object-surface-task',
+      taskIntent: 'inspect browser context',
+      aiClient: 'jest',
+      toolName: 'get_windows_and_tabs',
+      stepId: 'browser-object-surface-step-1',
+      sequenceIndex: 1,
+      requestParams: {},
+      requestAtMs: requestAt,
+      responseAtMs: requestAt + 18,
+      browserContextKey: 'ctx-surface',
+      result: textResult({
+        source: 'chrome_windows_get_all_with_browser_world_inventory',
+        browserWorld: {
+          status: 'fresh',
+          windows: [{ windowId: 10, focused: true, state: 'normal', tabCount: 1, activeTabId: 21 }],
+          tabs: [
+            {
+              tabId: 21,
+              windowId: 10,
+              active: true,
+              status: 'complete',
+              ownerType: 'user',
+              canTabrixOperate: true,
+              url: 'https://example.test/search',
+              title: 'Search results - Example',
+            },
+          ],
+        },
+      }),
+      resultSummary: 'browser inventory read',
+    });
+
+    traceService.recordToolCall({
+      taskId: 'browser-object-surface-task',
+      taskIntent: 'read current page',
+      aiClient: 'jest',
+      toolName: 'chrome_read_page',
+      stepId: 'browser-object-surface-step-2',
+      sequenceIndex: 2,
+      requestParams: { tabId: 21 },
+      requestAtMs: requestAt + 100,
+      responseAtMs: requestAt + 118,
+      browserContextKey: 'ctx-surface',
+      result: textResult({
+        page: { url: 'https://example.test/search', title: 'Search results - Example' },
+        summary: { pageRole: 'multi_region_page' },
+        pageProjection: {
+          tabId: 21,
+          pageRole: 'multi_region_page',
+          pageModelKey: 'read://example.test/search',
+          chosenDataSource: 'api_rows',
+          sourceFreshness: 'fresh',
+          sourceConfidence: 0.72,
+        },
+        sourceRoute: 'knowledge_api_endpoints',
+        selectedDataSource: 'api_rows',
+        endpointFamily: 'example_search',
+        pageRegions: [{ regionId: 'content', regionType: 'content', confidence: 0.8 }],
+        candidateActions: [{ targetRef: 'open-result', actionType: 'click', confidence: 0.8 }],
+      }),
+      resultSummary: 'read page',
+    });
+
+    traceService.recordToolCall({
+      taskId: 'browser-object-surface-task',
+      taskIntent: 'collect result cards from the current search results page',
+      aiClient: 'jest',
+      toolName: 'chrome_collect_result_cards',
+      stepId: 'browser-object-surface-step-3',
+      sequenceIndex: 3,
+      requestParams: { tabId: 21, minResults: 3, maxScrolls: 1 },
+      requestAtMs: requestAt + 200,
+      responseAtMs: requestAt + 260,
+      browserContextKey: 'ctx-surface',
+      result: textResult({
+        success: true,
+        kind: 'result_card_collection',
+        page: {
+          url: 'https://example.test/search?q=private-token',
+          title: 'Search results - Example',
+        },
+        pageRole: 'search_results',
+        pageState: 'complete',
+        sourceRoute: 'visible_dom_cards_bounded_scroll',
+        selectedDataSource: 'visible_dom_result_cards',
+        freshness: 'fresh',
+        tabId: 21,
+        requestedMinResults: 3,
+        observedResultCount: 3,
+        complete: true,
+        pageRegions: [{ regionId: 'results', regionType: 'result_list', confidence: 0.84 }],
+        candidateActions: [
+          {
+            id: 'open-result-1',
+            targetRef: 'ref_result_card_1',
+            actionType: 'click',
+            confidence: 0.86,
+          },
+        ],
+        cards: [1, 2, 3].map((rank) => ({
+          rank,
+          title: `Result card ${rank}`,
+          url: `https://example.test/detail/${rank}?xsec_token=private-${rank}`,
+          targetRef: `ref_result_card_${rank}`,
+          candidateActionId: `open-result-${rank}`,
+          confidence: 0.8,
+        })),
+      }),
+      resultSummary: 'collected result cards',
+    });
+    await traceService.flushAsyncWrites();
+
+    const res = await supertest(Server.getInstance().server)
+      .get('/memory/mke/browser-objects?limit=20&offset=0')
+      .expect(200);
+
+    expect(res.body.data.total).toBe(1);
+    const surfaceObjects = res.body.data.browserObjects as Array<Record<string, unknown>>;
+    expect(surfaceObjects).toHaveLength(1);
+    expect(surfaceObjects[0]).toMatchObject({
+      tabId: '21',
+      title: 'Search results - Example',
+      status: 'running',
+    });
+    expect(JSON.stringify(surfaceObjects)).not.toContain('objectType');
+    expect(JSON.stringify(surfaceObjects)).not.toContain('pageModelKey');
+    expect(JSON.stringify(surfaceObjects)).not.toContain('actionTypes');
+
+    const graph = await supertest(Server.getInstance().server)
+      .get('/memory/mke/browser-objects?limit=20&offset=0&scope=object-graph')
+      .expect(200);
+
+    expect(graph.body.data.total).toBeGreaterThan(1);
+    const graphObjects = graph.body.data.browserObjects as Array<Record<string, unknown>>;
+    const graphText = JSON.stringify(graphObjects);
+    expect(graphText).toContain('识别到 3 个结果卡片');
+    expect(graphText).toContain('Result card 1');
+    expect(graphText).toContain('Result card 2');
+    expect(graphText).toContain('Result card 3');
+    expect(graphText).toContain('https://example.test/detail/:id');
+    expect(JSON.stringify(graphObjects)).not.toContain('browserContextKey');
+    expect(JSON.stringify(graphObjects)).not.toContain('objectFingerprint');
+    expect(JSON.stringify(graphObjects)).not.toContain('selectedDataSource');
+    expect(JSON.stringify(graphObjects)).not.toContain('sourceRoute');
+    expect(JSON.stringify(graphObjects)).not.toContain('redactionState');
+    expect(JSON.stringify(graphObjects)).not.toContain('currentState');
+    expect(JSON.stringify(graphObjects)).not.toContain('sourceTraceIds');
+    expect(JSON.stringify(graphObjects)).not.toContain('evidenceRefs');
+    expect(JSON.stringify(graphObjects)).not.toContain('"evidence"');
+    expect(JSON.stringify(graphObjects)).not.toContain('claimBoundary');
+    expect(JSON.stringify(graphObjects)).not.toContain('confidenceScore');
+    expect(JSON.stringify(graphObjects)).not.toContain('driftScore');
+    expect(graphText).not.toContain('private-token');
+    expect(graphText).not.toContain('xsec_token');
+    expect(graphText).not.toContain('private-1');
+  });
+
+  test('DELETE /memory/mke/browser-objects clears Object Library without deleting Memory traces', async () => {
+    const traceService = sessionManager.memoryTraces;
+    if (!traceService) throw new Error('MKE trace service is not available in tests');
+    const requestAt = Date.parse('2026-06-06T12:20:00.000Z');
+
+    traceService.recordToolCall({
+      taskId: 'browser-object-clear-task',
+      taskIntent: 'inspect browser context',
+      aiClient: 'jest',
+      toolName: 'get_windows_and_tabs',
+      stepId: 'browser-object-clear-step',
+      sequenceIndex: 1,
+      requestParams: {},
+      requestAtMs: requestAt,
+      responseAtMs: requestAt + 18,
+      result: textResult({
+        source: 'chrome_windows_get_all_with_browser_world_inventory',
+        browserWorld: {
+          status: 'fresh',
+          windows: [{ windowId: 10, focused: true, state: 'normal', tabCount: 1, activeTabId: 21 }],
+          tabs: [
+            {
+              tabId: 21,
+              windowId: 10,
+              active: true,
+              status: 'complete',
+              ownerType: 'ai',
+              canTabrixOperate: true,
+              url: 'https://example.test/search',
+              title: 'Search results - Example',
+            },
+          ],
+        },
+      }),
+      resultSummary: 'browser inventory read',
+    });
+    await traceService.flushAsyncWrites();
+
+    const before = await supertest(Server.getInstance().server)
+      .get('/memory/mke/browser-objects?limit=10&offset=0')
+      .expect(200);
+    expect(before.body.data.total).toBeGreaterThan(0);
+
+    const deleted = await supertest(Server.getInstance().server)
+      .delete('/memory/mke/browser-objects')
+      .expect(200);
+    expect(deleted.body.data).toMatchObject({
+      cleared: true,
+      total: 0,
+      persistenceMode: 'memory',
+    });
+
+    const afterObjects = await supertest(Server.getInstance().server)
+      .get('/memory/mke/browser-objects?limit=10&offset=0')
+      .expect(200);
+    expect(afterObjects.body.data.total).toBe(0);
+
+    const afterTraces = await supertest(Server.getInstance().server)
+      .get('/memory/mke/traces?limit=10&offset=0')
+      .expect(200);
+    expect(afterTraces.body.data.total).toBe(1);
+  });
+
+  test('GET /memory/mke/experience returns sanitized template summaries', async () => {
+    await seedMkeRows();
+
+    const res = await supertest(Server.getInstance().server)
+      .get('/memory/mke/experience')
+      .expect(200);
+
+    expect(res.body.data.total).toBe(1);
+    expect(res.body.data.experienceRecipes[0]).toMatchObject({
+      recipeName: expect.any(String),
+      scenarioKey: expect.any(String),
+      portabilityScope: 'local',
+      reuseState: 'candidate',
+      successfulUseCount: 1,
+      failedUseCount: 0,
+    });
+    expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('steps');
+    expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('preconditions');
+    expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('sourceTraceIds');
+    expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('sourceTraceCount');
+    expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('taskSignature');
+    expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('recipeFingerprint');
+    expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('driftState');
+    expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('originKind');
+    expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('exportState');
+    expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('importState');
+    expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('redactionState');
+    expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('linkedKnowledgeCount');
+    expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('successCount');
+    expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('failureCount');
+    expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('adoptionCount');
+    expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('avgDurationMs');
+    expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('avgTokenTotal');
+    expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('reliabilityScore');
+    expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('speedScore');
+    expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('tokenSavingScore');
+    expect(res.body.data.experienceRecipes[0]).not.toHaveProperty('usefulnessScore');
   });
 });

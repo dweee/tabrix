@@ -19,14 +19,14 @@ import type {
   EndpointCandidate,
   EndpointCandidateSemanticType,
 } from '../memory/knowledge/network-observe-classifier';
-import type {
-  CorrelationConfidenceLevel,
-  UpsertKnowledgeApiEndpointInput,
-} from '../memory/knowledge/knowledge-api-repository';
-import { findSensitivePaths } from '../runtime/privacy-gate';
+import type { CorrelationConfidenceLevel } from '../memory/knowledge/knowledge-api-repository';
+import { findSensitivePaths, isSensitiveKeyName } from '../runtime/privacy-gate';
 import { compactGenericRows } from './knowledge-driven-reader';
 
 const LIVE_OBSERVED_ROW_LIMIT = 10;
+const LIVE_OBSERVED_CONTENT_TEXT_CAP = 24_000;
+const LIVE_OBSERVED_CONTENT_SECTION_LIMIT = 24;
+const LIVE_OBSERVED_CONTENT_SECTION_VALUE_CAP = LIVE_OBSERVED_CONTENT_TEXT_CAP;
 const LIVE_OBSERVED_CONFIDENCE_FLOOR = 0.7;
 const LIVE_OBSERVED_TASK_QUERY_RELEVANCE_FLOOR = 0.72;
 const LIVE_OBSERVED_DOM_CORRELATION_FLOOR = 0.9;
@@ -42,7 +42,19 @@ const SAFE_SUMMARY_STRING_VALUE_CAP = 240;
 const SENSITIVE_FIELD_RE =
   /(authorization|cookie|password|passwd|token|secret|session|csrf|xsrf|api[_-]?key)/i;
 
+interface LiveObservedEndpointIdentity {
+  endpointFamily: string;
+  endpointSignature: string;
+}
+
 export type LiveObservedSelectedDataSource = 'api_rows' | 'api_detail' | 'cdp_enhanced_api_rows';
+export type LiveObservedContentSelectedDataSource = 'api_content';
+
+export interface LiveObservedContentSection {
+  path: string;
+  text: string;
+  chars: number;
+}
 
 export interface LiveObservedCdpEvidence {
   observationMode: 'no_cdp' | 'cdp_enhanced';
@@ -76,11 +88,15 @@ export interface LiveObservedApiEvidence extends LiveObservedCdpEvidence {
 }
 
 export interface LiveObservedApiData extends LiveObservedApiEvidence {
-  selectedDataSource: LiveObservedSelectedDataSource;
+  selectedDataSource: LiveObservedSelectedDataSource | LiveObservedContentSelectedDataSource;
   endpointFamily: string;
   dataPurpose: string;
   rows: ApiKnowledgeCompactRow[];
   rowCount: number;
+  contentText: string | null;
+  contentChars: number;
+  contentSections: LiveObservedContentSection[];
+  contentSectionCount: number;
   emptyResult: boolean;
   emptyReason: 'no_matching_records' | null;
   emptyMessage: string | null;
@@ -124,18 +140,24 @@ export function deriveLiveObservedApiDataFromBundle(
   for (const req of input.bundle.requests ?? []) {
     const upsert = deriveKnowledgeFromRequest(req, commonReq, commonRes, input.ctx);
     const candidate = deriveEndpointCandidateFromRequest(req, commonRes);
-    if (!upsert || !candidate) continue;
-    if (upsert.endpointSource !== 'observed') continue;
+    if (!candidate) continue;
+    const identity = upsert ? null : buildObservedEndpointIdentity(req);
+    if (!upsert && !identity) continue;
+    if (upsert && upsert.endpointSource !== 'observed') continue;
 
-    const upsertState = input.upsertedBySignature.get(upsert.endpointSignature);
+    const endpointSignature = upsert?.endpointSignature ?? identity!.endpointSignature;
+    const endpointFamily = upsert?.urlPattern ?? identity!.endpointFamily;
+    const upsertState = input.upsertedBySignature.get(endpointSignature);
+    const contentResult = buildLiveContent(req, candidate, bundleCdpEvidence);
     const relevance = buildRelevanceEvidence({
       req,
       candidate,
       upsertState,
+      contentAvailable: contentResult.ok,
       selectorContext: input.selectorContext,
     });
     const baseEvidence = buildEvidence({
-      upsert,
+      endpointSignature,
       candidate,
       req,
       upsertState,
@@ -144,8 +166,41 @@ export function deriveLiveObservedApiDataFromBundle(
       bundleCdpEvidence,
     });
 
-    const rowsResult = buildLiveRows(req, candidate, bundleCdpEvidence);
+    const allowTaskMatchedSafeSummaryRows =
+      relevance.relevant &&
+      relevance.pageRegion === 'task_query_network' &&
+      responsePayloadMatchesCurrentTask(req, input.selectorContext);
+    const rowsResult = buildLiveRows(req, candidate, bundleCdpEvidence, {
+      allowTaskMatchedSafeSummaryRows,
+    });
     if (!rowsResult.ok) {
+      if (
+        contentResult.ok &&
+        relevance.relevant &&
+        canSelectLiveContent(req, relevance.pageRegion)
+      ) {
+        selected.push({
+          ...baseEvidence,
+          selectedDataSource: 'api_content',
+          endpointFamily,
+          dataPurpose: `observed_${candidate.semanticType}_content`,
+          rows: [],
+          rowCount: 0,
+          contentText: contentResult.contentText,
+          contentChars: contentResult.contentChars,
+          contentSections: contentResult.contentSections,
+          contentSectionCount: contentResult.contentSections.length,
+          emptyResult: contentResult.contentChars === 0,
+          emptyReason: contentResult.contentChars === 0 ? 'no_matching_records' : null,
+          emptyMessage:
+            contentResult.contentChars === 0
+              ? `Observed API endpoint ${endpointFamily} succeeded but returned no safe content.`
+              : null,
+          compact: true,
+          rawBodyStored: false,
+        });
+        continue;
+      }
       rejected.push({
         ...baseEvidence,
         privacyCheck: privacyCheckForRowsFailure(rowsResult.cause),
@@ -166,27 +221,79 @@ export function deriveLiveObservedApiDataFromBundle(
     selected.push({
       ...baseEvidence,
       selectedDataSource: rowsResult.selectedDataSource,
-      endpointFamily: upsert.urlPattern,
+      endpointFamily,
       dataPurpose: `observed_${candidate.semanticType}`,
       rows: rowsResult.rows,
       rowCount: rowsResult.rows.length,
+      contentText: null,
+      contentChars: 0,
+      contentSections: [],
+      contentSectionCount: 0,
       emptyResult: rowsResult.rows.length === 0,
       emptyReason: rowsResult.rows.length === 0 ? 'no_matching_records' : null,
       emptyMessage:
         rowsResult.rows.length === 0
-          ? `Observed API endpoint ${upsert.urlPattern} succeeded but returned no records.`
+          ? `Observed API endpoint ${endpointFamily} succeeded but returned no records.`
           : null,
       compact: true,
       rawBodyStored: false,
     });
   }
 
-  selected.sort((a, b) => b.correlationScore - a.correlationScore);
+  selected.sort(
+    (a, b) =>
+      liveObservedDataSourcePriority(b.selectedDataSource) -
+        liveObservedDataSourcePriority(a.selectedDataSource) ||
+      b.correlationScore - a.correlationScore,
+  );
   return { selected, rejected };
 }
 
+function liveObservedDataSourcePriority(
+  selectedDataSource: LiveObservedApiData['selectedDataSource'],
+): number {
+  switch (selectedDataSource) {
+    case 'cdp_enhanced_api_rows':
+      return 4;
+    case 'api_rows':
+      return 3;
+    case 'api_detail':
+      return 2;
+    case 'api_content':
+      return 1;
+  }
+}
+
+function buildObservedEndpointIdentity(
+  req: CapturedNetworkRequest,
+): LiveObservedEndpointIdentity | null {
+  const method = String(req.method || 'GET').toUpperCase();
+  let parsed: URL;
+  try {
+    parsed = new URL(req.url);
+  } catch {
+    return null;
+  }
+  const collapsed = parsed.pathname
+    .split('/')
+    .filter(Boolean)
+    .map((segment) => {
+      if (/^\d+$/.test(segment)) return ':id';
+      if (/^[0-9a-f]{16,}$/i.test(segment)) return ':id';
+      if (segment.length > 24 && /^[a-z0-9_-]+$/i.test(segment)) return ':slug';
+      return segment.toLowerCase();
+    })
+    .join('/');
+  const path = collapsed.length > 0 ? `/${collapsed}` : '/';
+  const endpointFamily = `${parsed.hostname.toLowerCase()}${path}`;
+  return {
+    endpointFamily,
+    endpointSignature: `${method} ${endpointFamily}`,
+  };
+}
+
 function buildEvidence(input: {
-  upsert: UpsertKnowledgeApiEndpointInput;
+  endpointSignature: string;
   candidate: EndpointCandidate;
   req: CapturedNetworkRequest;
   upsertState:
@@ -206,7 +313,7 @@ function buildEvidence(input: {
     endpointSource: 'observed',
     ...input.bundleCdpEvidence,
     liveObservedEndpointId: input.upsertState?.endpointId ?? null,
-    endpointSignature: input.upsert.endpointSignature,
+    endpointSignature: input.endpointSignature,
     semanticType: input.candidate.semanticType,
     pageRegion: input.pageRegion,
     correlationScore: input.correlationScore,
@@ -239,6 +346,9 @@ function buildLiveRows(
   req: CapturedNetworkRequest,
   candidate: EndpointCandidate,
   cdpEvidence: LiveObservedCdpEvidence,
+  options?: {
+    allowTaskMatchedSafeSummaryRows?: boolean;
+  },
 ):
   | {
       ok: true;
@@ -270,17 +380,18 @@ function buildLiveRows(
     if (summary.capturedAfterArm !== true) {
       return { ok: false, cause: 'response_summary_before_arm' };
     }
-    if (
-      typeof req.requestTime === 'number' &&
-      typeof summary.samplerArmedAt === 'number' &&
-      req.requestTime < summary.samplerArmedAt
-    ) {
+    const requestTime = req.requestTime;
+    const samplerArmedAt = summary.samplerArmedAt;
+    if (isEpochMs(requestTime) && isEpochMs(samplerArmedAt) && requestTime < samplerArmedAt) {
       return { ok: false, cause: 'response_before_sampler_arm' };
     }
     if (summary.privacyCheck === 'failed') {
       return { ok: false, cause: summary.rejectedReason ?? 'privacy_check_failed' };
     }
-    if (candidate.confidence < LIVE_OBSERVED_CONFIDENCE_FLOOR) {
+    if (
+      candidate.confidence < LIVE_OBSERVED_CONFIDENCE_FLOOR &&
+      options?.allowTaskMatchedSafeSummaryRows !== true
+    ) {
       return { ok: false, cause: 'low_confidence' };
     }
     if (summary.fieldShapeSummaryAvailable !== true && summary.emptyResult !== true) {
@@ -289,15 +400,19 @@ function buildLiveRows(
     if (summary.emptyResult === true) {
       return { ok: true, selectedDataSource: 'api_rows', rows: [] };
     }
-    const safeSummaryPrivacy = findLiveRowsPrivacyLeak(summary.rows ?? []);
-    if (safeSummaryPrivacy !== null) {
-      return { ok: false, cause: safeSummaryPrivacy };
+    const sensitiveField = findSensitiveSummaryFieldName(summary.rows ?? []);
+    if (sensitiveField !== null) {
+      return { ok: false, cause: 'sensitive_row_content' };
     }
     const rows = Array.isArray(summary.rows)
       ? compactSafeSummaryRows(summary.rows, LIVE_OBSERVED_ROW_LIMIT)
       : [];
     if (rows.length === 0) {
       return { ok: false, cause: summary.rejectedReason ?? 'compact_rows_unavailable' };
+    }
+    const safeSummaryPrivacy = findLiveRowsPrivacyLeak(rows);
+    if (safeSummaryPrivacy !== null) {
+      return { ok: false, cause: safeSummaryPrivacy };
     }
     return {
       ok: true,
@@ -379,6 +494,148 @@ function buildLiveRows(
   };
 }
 
+function isEpochMs(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 1_000_000_000_000;
+}
+
+function buildLiveContent(
+  req: CapturedNetworkRequest,
+  candidate: EndpointCandidate,
+  cdpEvidence: LiveObservedCdpEvidence,
+):
+  | {
+      ok: true;
+      contentText: string;
+      contentChars: number;
+      contentSections: LiveObservedContentSection[];
+    }
+  | {
+      ok: false;
+      cause: string;
+    } {
+  const status =
+    typeof req.statusCode === 'number'
+      ? req.statusCode
+      : typeof req.status === 'number'
+        ? req.status
+        : null;
+  if (status !== null && (status < 200 || status >= 300))
+    return { ok: false, cause: 'endpoint_error' };
+  if (cdpEvidence.observationMode === 'cdp_enhanced' && cdpEvidence.cdpDetachSuccess !== true) {
+    return { ok: false, cause: 'cdp_detach_failed' };
+  }
+  if (cdpEvidence.observationMode === 'cdp_enhanced' && cdpEvidence.debuggerConflict === true) {
+    return { ok: false, cause: 'debugger_conflict' };
+  }
+  if (cdpEvidence.observationMode === 'cdp_enhanced' && cdpEvidence.rawBodyPersisted !== false) {
+    return { ok: false, cause: 'raw_body_persistence_risk' };
+  }
+  if (candidate.semanticType === 'noise' || candidate.semanticType === 'error') {
+    return { ok: false, cause: candidate.noiseReason ?? 'noise_endpoint' };
+  }
+  const body = typeof req.responseBody === 'string' ? req.responseBody : null;
+  if (!body || req.base64Encoded === true) {
+    return {
+      ok: false,
+      cause: candidate.responseBodyUnavailable
+        ? 'response_summary_unavailable'
+        : 'response_body_unavailable',
+    };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return { ok: false, cause: 'content_parse_failed' };
+  }
+  const sections = extractContentSections(parsed);
+  if (sections.length === 0) return { ok: false, cause: 'content_text_unavailable' };
+  if (
+    candidate.confidence < LIVE_OBSERVED_CONFIDENCE_FLOOR &&
+    !isContentSourceCandidate(req) &&
+    sections.length === 0
+  ) {
+    return { ok: false, cause: 'low_confidence' };
+  }
+  const contentPrivacy = findLiveRowsPrivacyLeak(sections);
+  if (contentPrivacy !== null) return { ok: false, cause: contentPrivacy };
+  const text = sections.map((section) => section.text).join('\n\n');
+  return {
+    ok: true,
+    contentText:
+      text.length > LIVE_OBSERVED_CONTENT_TEXT_CAP
+        ? text.slice(0, LIVE_OBSERVED_CONTENT_TEXT_CAP)
+        : text,
+    contentChars: text.length,
+    contentSections: sections,
+  };
+}
+
+function canSelectLiveContent(req: CapturedNetworkRequest, pageRegion: string): boolean {
+  if (isContentSourceCandidate(req)) return true;
+  return pageRegion !== 'task_query_network' && pageRegion !== 'current_page_network';
+}
+
+function extractContentSections(value: unknown): LiveObservedContentSection[] {
+  const sections: LiveObservedContentSection[] = [];
+  collectContentSections(value, [], sections);
+  return sections.sort((a, b) => b.chars - a.chars).slice(0, LIVE_OBSERVED_CONTENT_SECTION_LIMIT);
+}
+
+function collectContentSections(
+  value: unknown,
+  path: readonly string[],
+  out: LiveObservedContentSection[],
+): void {
+  if (out.length >= LIVE_OBSERVED_CONTENT_SECTION_LIMIT * 2) return;
+  if (typeof value === 'string') {
+    const normalized = normalizeContentText(value);
+    if (normalized.length >= 80 && path.some(isContentFieldName)) {
+      out.push({
+        path: path.join('.'),
+        text:
+          normalized.length > LIVE_OBSERVED_CONTENT_SECTION_VALUE_CAP
+            ? normalized.slice(0, LIVE_OBSERVED_CONTENT_SECTION_VALUE_CAP)
+            : normalized,
+        chars: normalized.length,
+      });
+    }
+    return;
+  }
+  if (value === null || value === undefined) return;
+  if (Array.isArray(value)) {
+    value.slice(0, 12).forEach((entry, index) => {
+      collectContentSections(entry, [...path, String(index)], out);
+    });
+    return;
+  }
+  if (typeof value !== 'object') return;
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    if (SENSITIVE_FIELD_RE.test(key)) continue;
+    collectContentSections(child, [...path, key], out);
+  }
+}
+
+function normalizeContentText(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+function isContentFieldName(value: string): boolean {
+  return /\b(content|text|body|markdown|message|answer|summary|description|title)\b/i.test(value);
+}
+
+function isContentSourceCandidate(req: CapturedNetworkRequest): boolean {
+  try {
+    const path = new URL(req.url).pathname;
+    return /\b(content|article|detail|conversation|thread|document|doc|page|body|post)\b/i.test(
+      path,
+    );
+  } catch {
+    return false;
+  }
+}
+
 function buildCdpEvidence(bundle: CapturedNetworkBundle): LiveObservedCdpEvidence {
   const cdpEnhanced = bundle.observationMode === 'cdp_enhanced' || bundle.cdpUsed === true;
   return {
@@ -405,7 +662,7 @@ function compactSafeSummaryRows(
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
     const row: ApiKnowledgeCompactRow = {};
     for (const key of Object.keys(raw)) {
-      if (SENSITIVE_FIELD_RE.test(key)) continue;
+      if (shouldDropSafeSummaryField(key)) continue;
       const value = raw[key];
       if (
         value === null ||
@@ -413,15 +670,76 @@ function compactSafeSummaryRows(
         typeof value === 'boolean' ||
         typeof value === 'string'
       ) {
-        row[key] =
-          typeof value === 'string' && value.length > SAFE_SUMMARY_STRING_VALUE_CAP
-            ? value.slice(0, SAFE_SUMMARY_STRING_VALUE_CAP)
-            : value;
+        const compacted = compactSafeSummaryScalarValue(key, value);
+        if (compacted !== undefined) row[key] = compacted;
       }
     }
+    const publicUrl = findSafeSummaryPublicUrl(raw);
+    if (publicUrl !== undefined) row.publicUrl = publicUrl;
     if (Object.keys(row).length > 0) out.push(row);
   }
   return out;
+}
+
+function shouldDropSafeSummaryField(key: string): boolean {
+  return (
+    SENSITIVE_FIELD_RE.test(key) || isSensitiveKeyName(key) || /(^|_)(object|record)?id$/i.test(key)
+  );
+}
+
+function compactSafeSummaryScalarValue(
+  key: string,
+  value: string | number | boolean | null,
+): string | number | boolean | null | undefined {
+  if (typeof value !== 'string') return value;
+  if (/(^|_)(url|href|link|permalink)$/i.test(key)) {
+    return undefined;
+  }
+  if (/^publicUrl$/i.test(key)) {
+    return sanitizeSummaryUrl(value);
+  }
+  if (value.length >= 32 && /^[A-Za-z0-9_-]+$/.test(value.trim())) return undefined;
+  return value.length > SAFE_SUMMARY_STRING_VALUE_CAP
+    ? value.slice(0, SAFE_SUMMARY_STRING_VALUE_CAP)
+    : value;
+}
+
+function sanitizeSummaryUrl(value: string): string | undefined {
+  try {
+    const url = new URL(value);
+    url.search = '';
+    url.hash = '';
+    return url.toString();
+  } catch {
+    return undefined;
+  }
+}
+
+function findSafeSummaryPublicUrl(row: Record<string, unknown>): string | undefined {
+  for (const key of ['url', 'href', 'link', 'permalink', 'publicUrl']) {
+    const value = row[key];
+    if (typeof value !== 'string') continue;
+    const sanitized = sanitizeSummaryUrl(value);
+    if (sanitized !== undefined) return sanitized;
+  }
+  return undefined;
+}
+
+function findSensitiveSummaryFieldName(value: unknown): string | null {
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const nested = findSensitiveSummaryFieldName(entry);
+      if (nested !== null) return nested;
+    }
+    return null;
+  }
+  if (!value || typeof value !== 'object') return null;
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    if (SENSITIVE_FIELD_RE.test(key)) return key;
+    const nested = findSensitiveSummaryFieldName(child);
+    if (nested !== null) return nested;
+  }
+  return null;
 }
 
 function findLiveRowsPrivacyLeak(value: unknown): string | null {
@@ -440,6 +758,7 @@ function privacyCheckForRowsFailure(cause: string): 'passed' | 'failed' {
 function buildRelevanceEvidence(args: {
   req: CapturedNetworkRequest;
   candidate: EndpointCandidate;
+  contentAvailable: boolean;
   upsertState:
     | {
         endpointId: string | null;
@@ -513,7 +832,50 @@ function buildRelevanceEvidence(args: {
       ),
     };
   }
-
+  if (
+    READ_SHAPED_TYPES.has(args.candidate.semanticType) &&
+    responsePayloadMatchesCurrentTask(args.req, args.selectorContext)
+  ) {
+    return {
+      relevant: true,
+      fallbackCause: '',
+      pageRegion: 'task_query_network',
+      correlationScore: Math.max(
+        args.candidate.confidence,
+        LIVE_OBSERVED_TASK_QUERY_RELEVANCE_FLOOR,
+      ),
+    };
+  }
+  if (
+    args.contentAvailable &&
+    isContentSourceCandidate(args.req) &&
+    sameOriginAsCurrentPage(args.req, args.selectorContext)
+  ) {
+    return {
+      relevant: true,
+      fallbackCause: '',
+      pageRegion: 'content_source_network',
+      correlationScore: Math.max(
+        args.candidate.confidence,
+        LIVE_OBSERVED_TASK_QUERY_RELEVANCE_FLOOR,
+      ),
+    };
+  }
+  if (
+    args.contentAvailable &&
+    isContentSourceCandidate(args.req) &&
+    responsePayloadMatchesCurrentTask(args.req, args.selectorContext)
+  ) {
+    return {
+      relevant: true,
+      fallbackCause: '',
+      pageRegion: 'content_source_network',
+      correlationScore: Math.max(
+        args.candidate.confidence,
+        LIVE_OBSERVED_TASK_QUERY_RELEVANCE_FLOOR,
+      ),
+    };
+  }
   return {
     relevant: false,
     fallbackCause:
@@ -525,6 +887,55 @@ function buildRelevanceEvidence(args: {
     pageRegion: 'current_page_network',
     correlationScore: args.candidate.confidence,
   };
+}
+
+function sameOriginAsCurrentPage(
+  req: CapturedNetworkRequest,
+  selectorContext:
+    | {
+        currentPageUrl?: string | null;
+      }
+    | undefined,
+): boolean {
+  const currentUrl = parseUrl(selectorContext?.currentPageUrl ?? null);
+  const requestUrl = parseUrl(req.url);
+  if (!currentUrl || !requestUrl) return false;
+  return currentUrl.origin === requestUrl.origin;
+}
+
+function responsePayloadMatchesCurrentTask(
+  req: CapturedNetworkRequest,
+  selectorContext:
+    | {
+        currentPageUrl?: string | null;
+      }
+    | undefined,
+): boolean {
+  const body = typeof req.responseBody === 'string' ? req.responseBody : null;
+  const currentUrl = parseUrl(selectorContext?.currentPageUrl ?? null);
+  if (!currentUrl) return false;
+  const currentTerms = extractComparableSearchValues(currentUrl);
+  if (currentTerms.length === 0) return false;
+  const normalizedPayload = normalizeQueryValue(
+    body ?? safeSummaryRowsComparableText(req.safeResponseSummary?.rows),
+  );
+  if (!normalizedPayload) return false;
+  return currentTerms.some((term) => term.length >= 3 && normalizedPayload.includes(term));
+}
+
+function safeSummaryRowsComparableText(
+  rows: readonly Record<string, unknown>[] | undefined,
+): string {
+  if (!Array.isArray(rows) || rows.length === 0) return '';
+  const values: string[] = [];
+  for (const row of rows.slice(0, LIVE_OBSERVED_ROW_LIMIT)) {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
+    for (const value of Object.values(row)) {
+      if (typeof value === 'string') values.push(value);
+      else if (typeof value === 'number' || typeof value === 'boolean') values.push(String(value));
+    }
+  }
+  return values.join(' ');
 }
 
 function sanitizeRegion(value: string | null): string | null {

@@ -19,19 +19,9 @@
  *    string we keep is a short content-type, never the body text.
  *
  * Scope:
- *  - Only `api.github.com` URLs (host-prefix match). Same-origin
- *    `github.com/<owner>/<repo>/...` HTML/AJAX is intentionally out: it
- *    overlaps with page-snapshot logic and adds noise without unlocking
- *    new structured data.
- *  - Semantic tagging covers the representative endpoint families
- *    that drive the highest-value structured reading decisions: issues list +
- *    detail, pulls list + detail, actions runs list + detail,
- *    actions workflows list, search/issues, search/repositories, and
- *    repo metadata. Anything else under api.github.com is captured as
- *    `github.unclassified` with a path collapsed by
- *    `collapseUnknownPath` (identity-bearing prefixes are normalized;
- *    see that function for the exact rules — short un-listed segments
- *    DO survive on purpose so we keep some structural information).
+ *  - Generic HTTP(S) API requests from real browser/network observation.
+ *  - No platform-specific endpoint families are bundled here. Semantics come
+ *    from request/response shape, method, content type, and query/body keys.
  */
 
 import type {
@@ -69,6 +59,9 @@ const SENSITIVE_HEADER_NAMES: ReadonlySet<string> = new Set([
 
 const AUTH_HEADER_NAMES: ReadonlySet<string> = new Set(['authorization', 'proxy-authorization']);
 const COOKIE_HEADER_NAMES: ReadonlySet<string> = new Set(['cookie', 'set-cookie']);
+const READ_CANDIDATE_METHODS: ReadonlySet<string> = new Set(['GET', 'HEAD', 'POST']);
+const SENSITIVE_REQUEST_SHAPE_KEY_RE =
+  /(?:^|[_-])(authorization|auth|cookie|csrf|xsrf|session|secret|signature|sig|token|access[_-]?token|refresh[_-]?token|api[_-]?key|xsec[_-]?token)(?:$|[_-])/i;
 
 const JSON_CONTENT_TYPE_RE = /\b(application\/json|application\/.*\+json|text\/json)\b/i;
 
@@ -190,7 +183,7 @@ export interface CaptureKnowledgeAnalysis {
 
 /**
  * Top-level entry point. Walks `bundle.requests`, classifies each one
- * against the GitHub family, and returns at most
+ * against generic endpoint-shape rules, and returns at most
  * `KNOWLEDGE_CAPTURE_PER_BATCH_LIMIT` ready-to-upsert rows. Pure — no
  * IO, no `Date.now()`, no `process.env` reads.
  */
@@ -248,14 +241,13 @@ export function deriveKnowledgeFromRequest(
   ctx: CaptureKnowledgeContext,
 ): UpsertKnowledgeApiEndpointInput | null {
   if (!req?.url || typeof req.url !== 'string') return null;
-  if (classifyCapturedRequestNoise(req) !== 'usable') return null;
 
   const method = normalizeMethod(req.method);
-  // First try the family-aware GitHub classifier; if it
-  // doesn't apply, fall back to a generic host-and-path normalizer
-  // so non-platform URLs (HN, Wikipedia, …) can still seed Knowledge.
-  const githubClassification = classifyGitHubFamily(req.url, method);
-  const classification = githubClassification ?? classifyGenericFamily(req.url, method);
+  if (classifyCapturedRequestNoise(req) !== 'usable' && !canRecheckShapeEvidencedReadPost(req)) {
+    return null;
+  }
+  if (!READ_CANDIDATE_METHODS.has(method)) return null;
+  const classification = classifyGenericFamily(req.url, method);
   if (!classification) return null;
 
   const mergedRequestHeaders = mergeHeaders(commonRequestHeaders, req.specificRequestHeaders);
@@ -276,30 +268,32 @@ export function deriveKnowledgeFromRequest(
       base64Encoded: req.base64Encoded === true,
     });
 
-  // Generic semantic classifier. Family-agnostic; runs
-  // for GitHub rows too so the persisted `semantic_type` stays
-  // consistent across families.
-  const observed = classifyNetworkObserveEndpoint({
+  // Generic semantic classifier. The persisted task-facing semantic type uses
+  // the v2 candidate view below so shape-evidenced read-shaped POST endpoints
+  // are not frozen as mutation/noise rows.
+  const observedV1 = classifyNetworkObserveEndpoint({
     url: req.url,
     method,
     type: req.type,
     mimeType: contentType ?? undefined,
     queryKeys: requestSummary.queryKeys,
   });
+  const candidate = classifyEndpointCandidate({
+    url: req.url,
+    method,
+    type: req.type,
+    mimeType: contentType ?? undefined,
+    status:
+      typeof req.statusCode === 'number'
+        ? req.statusCode
+        : typeof req.status === 'number'
+          ? req.status
+          : null,
+    shape: summarizeEndpointShapeFromCapturedRequest(req, commonResponseHeaders),
+  });
+  const observed = mapCandidateToPersistedObserved(candidate, observedV1);
 
-  // Derive `endpointSource` from the family
-  // hint. `family='observed'` (any non-GitHub host) -> 'observed';
-  // `family='github'` -> 'seed_adapter' (the GitHub family adapter
-  // is the seed adapter we are gradually retiring); any
-  // other / future family -> 'unknown'. The repository performs
-  // the same back-derivation on read for legacy NULL rows, so this
-  // path stays in lockstep with `deriveEndpointSource()`.
-  const endpointSource =
-    classification.family === 'observed'
-      ? 'observed'
-      : classification.family === 'github' || classification.family === 'npmjs'
-        ? 'seed_adapter'
-        : 'unknown';
+  const endpointSource = 'observed';
 
   return {
     site: classification.site,
@@ -316,7 +310,7 @@ export function deriveKnowledgeFromRequest(
     sourceHistoryRef: null,
     observedAt: ctx.observedAt,
     semanticType: observed.semanticType as EndpointSemanticType,
-    queryParamsShape: observed.queryKeysSorted.join(','),
+    queryParamsShape: sanitizeRequestShapeKeys(observed.queryKeysSorted).join(','),
     responseShapeSummary: summarizeResponseShape(responseSummary.shape),
     usableForTask: observed.usableForTask,
     noiseReason: observed.noiseReason,
@@ -334,10 +328,56 @@ export function deriveKnowledgeFromRequest(
     sourceLineage: {
       semanticSource: 'capture',
       observationCount: 1,
-      correlationReason:
-        endpointSource === 'seed_adapter' ? 'seed_adapter_default' : 'metadata_only',
+      correlationReason: 'metadata_only',
     },
   };
+}
+
+function canRecheckShapeEvidencedReadPost(req: CapturedNetworkRequest): boolean {
+  if (normalizeMethod(req.method) !== 'POST') return false;
+  const type = (req.type || '').toLowerCase();
+  if (type && type !== 'fetch' && type !== 'xmlhttprequest' && type !== 'xhr') return false;
+  const mimeType = (req.mimeType || '').toLowerCase();
+  if (mimeType && !mimeType.includes('json')) return false;
+  return typeof req.responseBody === 'string' || req.safeResponseSummary?.capturedAfterArm === true;
+}
+
+function mapCandidateToPersistedObserved(
+  candidate: EndpointCandidate,
+  fallback: ReturnType<typeof classifyNetworkObserveEndpoint>,
+): Pick<
+  ReturnType<typeof classifyNetworkObserveEndpoint>,
+  'semanticType' | 'usableForTask' | 'noiseReason' | 'queryKeysSorted'
+> {
+  switch (candidate.semanticType) {
+    case 'search':
+    case 'list':
+    case 'detail':
+    case 'pagination':
+    case 'filter':
+      return {
+        semanticType: candidate.semanticType,
+        usableForTask: true,
+        noiseReason: null,
+        queryKeysSorted: candidate.queryKeysSorted,
+      };
+    case 'noise':
+      return {
+        semanticType: fallback.semanticType === 'mutation' ? 'unknown' : fallback.semanticType,
+        usableForTask: false,
+        noiseReason: candidate.noiseReason,
+        queryKeysSorted: candidate.queryKeysSorted,
+      };
+    case 'unknown_candidate':
+      return {
+        semanticType: 'unknown',
+        usableForTask: false,
+        noiseReason: candidate.noiseReason ?? fallback.noiseReason,
+        queryKeysSorted: candidate.queryKeysSorted,
+      };
+    default:
+      return fallback;
+  }
 }
 
 /**
@@ -359,7 +399,7 @@ function summarizeResponseShape(shape: KnowledgeApiResponseShape): string {
 }
 
 /**
- * Generic, non-GitHub URL→pattern collapser. Produces a
+ * Generic URL→pattern collapser. Produces a
  * deterministic `urlPattern` / `endpointSignature` for any host so
  * dedup still works without a curated family adapter. Reuses the
  * same identity-prefix and id/slug rules as `collapseUnknownPath`.
@@ -371,10 +411,9 @@ function classifyGenericFamily(rawUrl: string, method: string): ClassifiedEndpoi
   } catch {
     return null;
   }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
   const host = parsed.hostname.toLowerCase();
-  // Skip GitHub host — the family-aware classifier owns it. We never
-  // want two parallel rows for the same endpoint.
-  if (host === GITHUB_API_HOST) return null;
+  if (!host || host === 'invalid') return null;
   const path = parsed.pathname.length === 0 ? '/' : parsed.pathname;
   const collapsed = collapseUnknownPath(path);
   const urlPattern = `${host}${collapsed}`;
@@ -404,11 +443,15 @@ export function classifyCapturedRequestNoise(
   const mimeType = (req.mimeType || '').toLowerCase();
   const url = req.url.toLowerCase();
 
-  if (/(doubleclick|google-analytics|googletagmanager|segment|sentry|amplitude)\./.test(url)) {
-    return 'analytics';
-  }
   if (path.includes('/_private/') || path.includes('/private/')) return 'private';
   if (/\b(login|logout|session|oauth|token|authorize|auth)\b/.test(path)) return 'auth';
+  if (
+    /(^|[.-])(analytics|tagmanager|doubleclick|adservice|adsystem|telemetry|metrics|stats|collect|beacon|pixel|segment|sentry|amplitude)([.-]|$)/.test(
+      host,
+    )
+  ) {
+    return 'analytics';
+  }
   if (/\b(stats|telemetry|metrics|collect|beacon|events?)\b/.test(path)) return 'telemetry';
   if (
     type === 'image' ||
@@ -419,7 +462,6 @@ export function classifyCapturedRequestNoise(
   ) {
     return 'asset';
   }
-  if (host === GITHUB_API_HOST) return 'usable';
   if ((method === 'GET' || method === 'HEAD') && (type === 'xmlhttprequest' || type === 'fetch')) {
     return 'usable';
   }
@@ -440,17 +482,11 @@ function createEmptyFilteredCounts(): Record<CaptureKnowledgeNoiseClass, number>
 }
 
 // ---------------------------------------------------------------------
-// GitHub-family classifier
+// Generic observed endpoint classifier
 // ---------------------------------------------------------------------
 
 interface ClassifiedEndpoint {
   site: string;
-  /**
-   * Widened from the original GitHub-only literal to a
-   * string so the generic, non-platform branch can write `'observed'`
-   * (or any future family adapter the chooser learns) without a
-   * second classifier interface.
-   */
   family: string;
   method: string;
   urlPattern: string;
@@ -459,130 +495,15 @@ interface ClassifiedEndpoint {
   semanticTag: string | null;
 }
 
-const GITHUB_API_HOST = 'api.github.com';
-
-interface GithubRule {
-  pattern: RegExp;
-  template: string;
-  semanticTag: string;
-  methods?: ReadonlySet<string>;
-}
-
-const GITHUB_API_RULES: readonly GithubRule[] = [
-  {
-    pattern: /^\/repos\/[^/]+\/[^/]+\/issues\/\d+(?:\/comments)?\/?$/,
-    template: '/repos/:owner/:repo/issues/:number',
-    semanticTag: 'github.issue_detail',
-  },
-  {
-    pattern: /^\/repos\/[^/]+\/[^/]+\/issues\/?$/,
-    template: '/repos/:owner/:repo/issues',
-    semanticTag: 'github.issues_list',
-  },
-  {
-    pattern: /^\/repos\/[^/]+\/[^/]+\/pulls\/\d+(?:\/[^/]+)?\/?$/,
-    template: '/repos/:owner/:repo/pulls/:number',
-    semanticTag: 'github.pull_detail',
-  },
-  {
-    pattern: /^\/repos\/[^/]+\/[^/]+\/pulls\/?$/,
-    template: '/repos/:owner/:repo/pulls',
-    semanticTag: 'github.pulls_list',
-  },
-  {
-    pattern: /^\/repos\/[^/]+\/[^/]+\/actions\/runs\/\d+\/?$/,
-    template: '/repos/:owner/:repo/actions/runs/:run_id',
-    semanticTag: 'github.workflow_run_detail',
-  },
-  {
-    pattern: /^\/repos\/[^/]+\/[^/]+\/actions\/runs\/?$/,
-    template: '/repos/:owner/:repo/actions/runs',
-    semanticTag: 'github.workflow_runs_list',
-  },
-  {
-    pattern: /^\/repos\/[^/]+\/[^/]+\/actions\/workflows\/?$/,
-    template: '/repos/:owner/:repo/actions/workflows',
-    semanticTag: 'github.workflow_list',
-  },
-  {
-    pattern: /^\/search\/issues\/?$/,
-    template: '/search/issues',
-    semanticTag: 'github.search_issues',
-  },
-  {
-    pattern: /^\/search\/repositories\/?$/,
-    template: '/search/repositories',
-    semanticTag: 'github.search_repositories',
-  },
-  {
-    pattern: /^\/repos\/[^/]+\/[^/]+\/?$/,
-    template: '/repos/:owner/:repo',
-    semanticTag: 'github.repo_metadata',
-  },
-];
-
-function classifyGitHubFamily(rawUrl: string, method: string): ClassifiedEndpoint | null {
-  let parsed: URL;
-  try {
-    parsed = new URL(rawUrl);
-  } catch {
-    return null;
-  }
-  if (parsed.hostname.toLowerCase() !== GITHUB_API_HOST) return null;
-  // Strip trailing slash variations into a canonical path for matching.
-  const path = parsed.pathname.length === 0 ? '/' : parsed.pathname;
-  let chosenTemplate: string | null = null;
-  let semanticTag = 'github.unclassified';
-  for (const rule of GITHUB_API_RULES) {
-    if (rule.methods && !rule.methods.has(method)) continue;
-    if (rule.pattern.test(path)) {
-      chosenTemplate = rule.template;
-      semanticTag = rule.semanticTag;
-      break;
-    }
-  }
-  if (!chosenTemplate) {
-    // Unmatched api.github.com endpoints are still useful as "this exists";
-    // we keep them under a synthesized template so dedup still works.
-    chosenTemplate = collapseUnknownPath(path);
-  }
-  const urlPattern = `${parsed.hostname.toLowerCase()}${chosenTemplate}`;
-  const endpointSignature = `${method} ${urlPattern}`;
-  return {
-    site: parsed.hostname.toLowerCase(),
-    family: 'github',
-    method,
-    urlPattern,
-    endpointSignature,
-    semanticTag,
-  };
-}
-
 /**
- * Path normalization for `api.github.com` endpoints that did not match
- * any explicit `GITHUB_API_RULES` template above.
+ * Generic path normalization for observed API endpoints.
  *
  * Goals (in order):
- *  1. Never persist obvious identity-bearing path segments —
- *     usernames, org slugs, repo names — into `urlPattern` /
- *     `endpointSignature`. These are cross-user / cross-tenant
- *     identifiers that would (a) bloat the dedup space and
- *     (b) leak per-user identity into a table that other accounts
- *     might later import through experience flows. We collapse
- *     the known identity-bearing prefixes:
- *       /users/<name>/...      → /users/:user/...
- *       /orgs/<name>/...       → /orgs/:org/...
- *       /repos/<owner>/<repo>/... → /repos/:owner/:repo/...
- *  2. Numeric segments → `:id` (e.g. issue / run / installation IDs).
- *  3. Long opaque slugs (> 24 chars, single token) → `:slug`
- *     (commit SHAs, base64ish handles).
- *  4. Anything else passes through unchanged. We do NOT try to
- *     classify every possible GitHub path — endpoints we genuinely
- *     care about belong in `GITHUB_API_RULES`. This function is the
- *     "honestly unknown" fallback.
- *
- * NOT a general taxonomy framework. If a new identity prefix needs
- * normalizing, add it explicitly to `IDENTITY_PREFIX_RULES` below.
+ *  1. Never persist obvious identity-bearing path segments into
+ *     `urlPattern` / `endpointSignature`.
+ *  2. Numeric segments → `:id`.
+ *  3. Long opaque slugs (> 24 chars, single token) → `:slug`.
+ *  4. Anything else passes through unchanged.
  */
 const IDENTITY_PREFIX_RULES: ReadonlyArray<{
   prefix: string;
@@ -643,8 +564,8 @@ function buildRequestSummary(input: {
   const safeHeaderKeys = headerKeys.filter((k) => !SENSITIVE_HEADER_NAMES.has(k));
   const dedupedHeaderKeys = Array.from(new Set(safeHeaderKeys)).sort();
 
-  const queryKeys = extractQueryKeys(input.url);
-  const bodyKeys = extractBodyKeys(input.body);
+  const queryKeys = sanitizeRequestShapeKeys(extractQueryKeys(input.url));
+  const bodyKeys = sanitizeRequestShapeKeys(extractBodyKeys(input.body));
 
   return {
     headerKeys: dedupedHeaderKeys,
@@ -667,6 +588,13 @@ function extractQueryKeys(url: string): readonly string[] {
     if (key.length > 0) keys.add(key);
   }
   return Array.from(keys).sort().slice(0, QUERY_KEY_LIMIT);
+}
+
+function sanitizeRequestShapeKeys(keys: readonly string[]): readonly string[] {
+  return keys.filter((key) => {
+    const normalized = key.trim();
+    return normalized.length > 0 && !SENSITIVE_REQUEST_SHAPE_KEY_RE.test(normalized);
+  });
 }
 
 function extractBodyKeys(body: string | null): readonly string[] {

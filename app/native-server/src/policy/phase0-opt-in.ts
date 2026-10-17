@@ -11,7 +11,7 @@
  *  - P0 / P1 / P2 tools are never blocked by this module.
  *  - Site / PageRole / Task-level policy lives in Phase 1.
  *
- * See docs/POLICY_PHASE_0.md for the full design.
+ * See docs/PRODUCT_SURFACE_MATRIX.md for the public capability boundary.
  */
 
 import { P3_EXPLICIT_OPT_IN_TOOLS, getToolRiskTier, isExplicitOptInTool } from '@tabrix/shared';
@@ -33,6 +33,8 @@ export interface PolicyDeniedPayload {
   requiresExplicitOptIn: true;
   summary: string;
   hint: string;
+  callerResponsibility: string;
+  tabrixExecutionBoundary: string;
   nextAction: string | null;
 }
 
@@ -86,7 +88,11 @@ export function buildPolicyDeniedPayload(toolName: string): PolicyDeniedPayload 
     riskTier: 'P3',
     requiresExplicitOptIn: true,
     summary: '高风险工具已被 Tabrix Policy 默认拦截。',
-    hint: `如需放行，请在启动环境中设置 TABRIX_POLICY_ALLOW_P3（例如 TABRIX_POLICY_ALLOW_P3=${toolName} 或 TABRIX_POLICY_ALLOW_P3=all），或通过 ENABLE_MCP_TOOLS 白名单显式列出该工具。`,
+    hint: `如需放行，请调用方 AI/client 先自行审查脚本意图、数据访问和副作用，并在启动环境中设置 TABRIX_POLICY_ALLOW_P3（例如 TABRIX_POLICY_ALLOW_P3=${toolName} 或 TABRIX_POLICY_ALLOW_P3=all），或通过 ENABLE_MCP_TOOLS 白名单显式列出该工具。`,
+    callerResponsibility:
+      'The calling AI/client is responsible for reviewing the supplied script intent, data access, and side effects before opting in.',
+    tabrixExecutionBoundary:
+      'Tabrix executes the supplied tool/script request and does not statically analyze, sanitize, or certify arbitrary JavaScript safety.',
     nextAction: null,
   };
 }

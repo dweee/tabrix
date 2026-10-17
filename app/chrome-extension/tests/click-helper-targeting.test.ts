@@ -25,6 +25,12 @@ function installClickHelper() {
   messageListener = null;
   delete (window as Window & { __CLICK_HELPER_INITIALIZED__?: boolean })
     .__CLICK_HELPER_INITIALIZED__;
+  delete (window as Window & { __TABRIX_CLICK_HELPER_VERSION__?: string })
+    .__TABRIX_CLICK_HELPER_VERSION__;
+  delete (window as Window & { __TABRIX_CLICK_HELPER_MESSAGE_HANDLER__?: RuntimeListener })
+    .__TABRIX_CLICK_HELPER_MESSAGE_HANDLER__;
+  delete (window as Window & { __claudeElementMap?: Record<string, WeakRef<Element>> })
+    .__claudeElementMap;
   (
     window as Window & { __claudeElementMap?: Record<string, WeakRef<Element>> }
   ).__claudeElementMap = {};
@@ -71,6 +77,10 @@ async function sendClickRequest(request: Record<string, unknown>) {
 describe('click-helper targeting', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    });
     document.elementFromPoint = vi.fn(() => null);
     Element.prototype.scrollIntoView = vi.fn();
     class TestMouseEvent extends Event {
@@ -101,6 +111,8 @@ describe('click-helper targeting', () => {
       OriginalMouseEvent;
     (globalThis as typeof globalThis & { PointerEvent?: typeof MouseEvent }).PointerEvent =
       OriginalPointerEvent;
+    delete (window as Window & { __claudeElementMap?: Record<string, WeakRef<Element>> })
+      .__claudeElementMap;
   });
 
   it('fires one click event for native clickable elements', async () => {
@@ -127,6 +139,91 @@ describe('click-helper targeting', () => {
     expect(clickCount).toBe(1);
   });
 
+  it('dispatches plain div clicks without calling the element native click method', async () => {
+    document.body.innerHTML = '<div id="filter">Most saved</div>';
+    const filter = document.getElementById('filter') as HTMLDivElement;
+    setRect(filter, { left: 20, top: 30, width: 120, height: 32 });
+    document.elementFromPoint = vi.fn(() => filter);
+
+    let clickCount = 0;
+    const nativeClick = vi.fn();
+    Object.defineProperty(filter, 'click', {
+      configurable: true,
+      value: nativeClick,
+    });
+    filter.addEventListener('click', () => {
+      clickCount += 1;
+    });
+
+    const result = await sendClickRequest({
+      action: 'clickElement',
+      selector: '#filter',
+      waitForNavigation: false,
+      timeout: 1000,
+    });
+
+    expect(result.success).toBe(true);
+    expect(nativeClick).not.toHaveBeenCalled();
+    expect(clickCount).toBe(1);
+  });
+
+  it('bounds dynamic filter verification instead of consuming the caller timeout', async () => {
+    document.body.innerHTML = '<div id="filter">Most saved</div>';
+    const filter = document.getElementById('filter') as HTMLDivElement;
+    setRect(filter, { left: 20, top: 30, width: 120, height: 32 });
+    document.elementFromPoint = vi.fn(() => filter);
+
+    let clickCount = 0;
+    filter.addEventListener('click', () => {
+      clickCount += 1;
+    });
+
+    const startedAt = performance.now();
+    const result = await sendClickRequest({
+      action: 'clickElement',
+      selector: '#filter',
+      waitForNavigation: false,
+      timeout: 13000,
+      intent: 'search.apply_filter.sort',
+    });
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(result.dispatchSucceeded).toBe(true);
+    expect(clickCount).toBe(1);
+    expect(result.signals.waitDiagnostics.verification).toMatchObject({
+      reason: 'timeout',
+    });
+    expect(result.signals.waitDiagnostics.verification.waitedMs).toBeLessThan(1000);
+    expect(elapsedMs).toBeLessThan(2000);
+  });
+
+  it('returns promptly after dispatch when the page document is hidden', async () => {
+    document.body.innerHTML = '<div id="filter">Unread</div>';
+    const filter = document.getElementById('filter') as HTMLDivElement;
+    setRect(filter, { left: 20, top: 30, width: 120, height: 32 });
+    document.elementFromPoint = vi.fn(() => filter);
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'hidden',
+    });
+
+    let clickCount = 0;
+    filter.addEventListener('click', () => {
+      clickCount += 1;
+    });
+
+    const result = await sendClickRequest({
+      action: 'clickElement',
+      selector: '#filter',
+      waitForNavigation: false,
+      timeout: 1000,
+    });
+
+    expect(result.success).toBe(true);
+    expect(clickCount).toBe(1);
+    expect(result.signals.waitDiagnostics.verification.reason).toBe('hidden_document_fast_path');
+  });
+
   it('keeps actionable option refs instead of promoting them to combobox shells', async () => {
     document.body.innerHTML = `
       <div class="arco-select-view" id="combo">
@@ -139,6 +236,7 @@ describe('click-helper targeting', () => {
     const option = document.getElementById('opt') as HTMLDivElement;
     setRect(combo, { left: 10, top: 10, width: 220, height: 140 });
     setRect(option, { left: 18, top: 48, width: 180, height: 28 });
+    document.elementFromPoint = vi.fn(() => option);
 
     (
       window as Window & { __claudeElementMap?: Record<string, WeakRef<Element>> }
@@ -169,5 +267,50 @@ describe('click-helper targeting', () => {
     expect(result.success).toBe(true);
     expect(directOptionClicks).toBe(1);
     expect(directComboClicks).toBe(0);
+  });
+
+  it('reports ref lookup failures instead of treating them as stale page objects', async () => {
+    Object.defineProperty(window, '__claudeElementMap', {
+      configurable: true,
+      get() {
+        throw new Error('element map unavailable');
+      },
+    });
+
+    const result = await sendClickRequest({
+      action: 'clickElement',
+      ref: 'brokenRef',
+      waitForNavigation: false,
+      timeout: 1000,
+    });
+
+    expect(result).toMatchObject({
+      reason: 'ref_lookup_failed',
+    });
+    expect(result.error).toContain('Element ref lookup failed: element map unavailable');
+  });
+
+  it('reinstalls the message listener when a stale initialized flag survived reload', async () => {
+    messageListener = null;
+    (window as Window & { __CLICK_HELPER_INITIALIZED__?: boolean }).__CLICK_HELPER_INITIALIZED__ =
+      true;
+    delete (window as Window & { __TABRIX_CLICK_HELPER_VERSION__?: string })
+      .__TABRIX_CLICK_HELPER_VERSION__;
+
+    const runtime = (globalThis.chrome as typeof chrome).runtime;
+    const addListener = vi.fn((listener: RuntimeListener) => {
+      messageListener = listener;
+    }) as typeof runtime.onMessage.addListener;
+    runtime.onMessage.addListener = addListener;
+
+    window.eval(clickHelperSource);
+
+    expect(addListener).toHaveBeenCalledTimes(1);
+    expect(messageListener).toBeTypeOf('function');
+
+    const result = await sendClickRequest({
+      action: 'chrome_click_element_ping',
+    });
+    expect(result).toEqual({ status: 'pong' });
   });
 });

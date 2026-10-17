@@ -89,6 +89,229 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
     });
   }
 
+  function dispatchMouseLikeEvent(element, type) {
+    if (!element || typeof element.dispatchEvent !== 'function') return false;
+    try {
+      return element.dispatchEvent(
+        new window.MouseEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          view: window,
+        }),
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  function resolveElementRef(ref) {
+    if (!ref || typeof ref !== 'string') return null;
+    try {
+      const map = window.__claudeElementMap;
+      const weak = map && map[ref];
+      const element = weak && typeof weak.deref === 'function' ? weak.deref() : null;
+      return element instanceof window.Element ? element : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function prepareKeyboardTarget(element) {
+    if (!element || document.activeElement === element || typeof element.focus !== 'function') {
+      return { waitedMs: 0, reason: 'already_focused', ready: document.activeElement === element };
+    }
+
+    if (typeof element.scrollIntoView === 'function') {
+      try {
+        element.scrollIntoView({ block: 'center', inline: 'nearest' });
+      } catch {
+        element.scrollIntoView();
+      }
+    }
+
+    dispatchMouseLikeEvent(element, 'pointerdown');
+    dispatchMouseLikeEvent(element, 'mousedown');
+    try {
+      element.focus({ preventScroll: true });
+    } catch {
+      element.focus();
+    }
+    dispatchMouseLikeEvent(element, 'mouseup');
+    dispatchMouseLikeEvent(element, 'click');
+
+    let focusWait = await waitForFocusReady(element, { maxMs: 250 });
+    if (!focusWait.ready) {
+      try {
+        element.focus();
+      } catch {
+        // Keep the original focus wait diagnostics below.
+      }
+      const retry = await waitForFocusReady(element, { maxMs: 250 });
+      focusWait = {
+        waitedMs: focusWait.waitedMs + retry.waitedMs,
+        reason: retry.ready ? 'focused_after_retry' : retry.reason,
+        ready: retry.ready,
+      };
+    }
+    return focusWait;
+  }
+
+  function getScrollDiagnostics() {
+    const scrollingElement = document.scrollingElement || document.documentElement || document.body;
+    const activeElement = document.activeElement || document.body;
+    const activeScroll = getElementScrollMetrics(activeElement);
+    return {
+      window: {
+        scrollX: Math.round(window.scrollX || 0),
+        scrollY: Math.round(window.scrollY || 0),
+        innerWidth: Math.round(window.innerWidth || 0),
+        innerHeight: Math.round(window.innerHeight || 0),
+      },
+      document: {
+        scrollTop: Math.round(scrollingElement ? scrollingElement.scrollTop || 0 : 0),
+        scrollLeft: Math.round(scrollingElement ? scrollingElement.scrollLeft || 0 : 0),
+        scrollHeight: Math.round(scrollingElement ? scrollingElement.scrollHeight || 0 : 0),
+        scrollWidth: Math.round(scrollingElement ? scrollingElement.scrollWidth || 0 : 0),
+        clientHeight: Math.round(scrollingElement ? scrollingElement.clientHeight || 0 : 0),
+        clientWidth: Math.round(scrollingElement ? scrollingElement.clientWidth || 0 : 0),
+      },
+      activeElement: {
+        tagName: activeElement && activeElement.tagName,
+        id: activeElement && activeElement.id,
+        className: activeElement && activeElement.className,
+        type: activeElement && activeElement.type,
+        ...activeScroll,
+      },
+    };
+  }
+
+  function getElementScrollMetrics(element) {
+    if (!element) return {};
+    return {
+      scrollTop: Math.round(Number(element.scrollTop || 0)),
+      scrollLeft: Math.round(Number(element.scrollLeft || 0)),
+      scrollHeight: Math.round(Number(element.scrollHeight || 0)),
+      scrollWidth: Math.round(Number(element.scrollWidth || 0)),
+      clientHeight: Math.round(Number(element.clientHeight || 0)),
+      clientWidth: Math.round(Number(element.clientWidth || 0)),
+    };
+  }
+
+  function hasScrollChanged(before, after) {
+    if (!before || !after) return false;
+    return (
+      before.window.scrollX !== after.window.scrollX ||
+      before.window.scrollY !== after.window.scrollY ||
+      before.document.scrollTop !== after.document.scrollTop ||
+      before.document.scrollLeft !== after.document.scrollLeft ||
+      before.activeElement?.scrollTop !== after.activeElement?.scrollTop ||
+      before.activeElement?.scrollLeft !== after.activeElement?.scrollLeft
+    );
+  }
+
+  function isScrollableElement(element) {
+    if (!element) return false;
+    return Number(element.scrollHeight || 0) > Number(element.clientHeight || 0) + 1;
+  }
+
+  function findFallbackScrollElement(startElement) {
+    const scrollingElement = document.scrollingElement || document.documentElement || document.body;
+    if (isScrollableElement(scrollingElement)) {
+      return { element: scrollingElement, kind: 'document' };
+    }
+
+    let current = startElement && startElement.nodeType === 1 ? startElement : null;
+    while (current && current !== document.body && current !== document.documentElement) {
+      if (isScrollableElement(current)) {
+        return { element: current, kind: 'element' };
+      }
+      current = current.parentElement;
+    }
+
+    return null;
+  }
+
+  function getFallbackViewportHeight(scrollTarget) {
+    if (scrollTarget?.kind === 'element') {
+      return Math.max(1, scrollTarget.element.clientHeight || window.innerHeight || 0);
+    }
+    return Math.max(1, window.innerHeight || scrollTarget?.element?.clientHeight || 0);
+  }
+
+  function maybeFallbackScroll(parsedKeyInfo, before, after, eventTarget) {
+    if (!parsedKeyInfo || hasScrollChanged(before, after)) {
+      return null;
+    }
+
+    const scrollTarget = findFallbackScrollElement(
+      eventTarget || document.activeElement || document.body,
+    );
+    if (!scrollTarget) {
+      return null;
+    }
+
+    const scrollingElement = scrollTarget.element;
+    const viewportHeight = getFallbackViewportHeight(scrollTarget);
+    const key = parsedKeyInfo.key;
+    let deltaY = 0;
+    let targetTop = null;
+
+    if (key === 'PageDown') {
+      deltaY = Math.max(1, Math.round(viewportHeight * 0.85));
+    } else if (key === 'PageUp') {
+      deltaY = -Math.max(1, Math.round(viewportHeight * 0.85));
+    } else if (key === 'ArrowDown') {
+      deltaY = 80;
+    } else if (key === 'ArrowUp') {
+      deltaY = -80;
+    } else if (key === 'Home') {
+      targetTop = 0;
+    } else if (key === 'End') {
+      targetTop = scrollingElement.scrollHeight;
+    } else {
+      return null;
+    }
+
+    const beforeTop = scrollingElement.scrollTop || window.scrollY || 0;
+    if (targetTop !== null) {
+      scrollingElement.scrollTop = targetTop;
+      if (scrollTarget.kind === 'document') {
+        window.scrollTo(window.scrollX || 0, targetTop);
+      }
+    } else {
+      scrollingElement.scrollTop = beforeTop + deltaY;
+      if (scrollTarget.kind === 'document') {
+        window.scrollBy(0, deltaY);
+      }
+    }
+
+    const fallbackAfter = getScrollDiagnostics();
+    const applied =
+      scrollTarget.kind === 'document'
+        ? hasScrollChanged(before, fallbackAfter)
+        : scrollingElement.scrollTop !== beforeTop;
+    return {
+      applied,
+      key,
+      reason:
+        scrollTarget.kind === 'document'
+          ? 'synthetic_keyboard_did_not_scroll_page'
+          : 'synthetic_keyboard_did_not_scroll_container',
+      targetKind: scrollTarget.kind,
+      targetTagName: scrollingElement.tagName || null,
+      targetId: scrollingElement.id || null,
+      targetClassName: String(scrollingElement.className || '').slice(0, 120) || null,
+      beforeTop: Math.round(beforeTop),
+      deltaY,
+      targetTop,
+      afterTop:
+        scrollTarget.kind === 'document'
+          ? fallbackAfter.document.scrollTop
+          : Math.round(scrollingElement.scrollTop || 0),
+      diagnosticsAfter: fallbackAfter,
+    };
+  }
+
   /**
    * Parses a key string (e.g., "Ctrl+Shift+A", "Enter") into a main key and modifiers.
    * @param {string} keyString - String representation of a single key press (can include modifiers).
@@ -180,7 +403,6 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
       bubbles: true,
       cancelable: true,
       composed: true, // Important for shadow DOM
-      view: window,
       ...modifiers, // ctrlKey, altKey, shiftKey, metaKey
       // keyCode/which are deprecated but often set for compatibility
       keyCode: keyCode || (key.length === 1 ? key.charCodeAt(0) : 0),
@@ -221,14 +443,38 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
       let focusWait = null;
 
       if (element !== document.activeElement && typeof element.focus === 'function') {
-        element.focus();
-        focusWait = await waitForFocusReady(element);
+        focusWait = await prepareKeyboardTarget(element);
       }
 
       const keyCombinations = keysSequenceString
         .split(',')
         .map((k) => k.trim())
         .filter((k) => k.length > 0);
+      const hasSubmitKey = keyCombinations.some((combo) =>
+        combo
+          .toLowerCase()
+          .split('+')
+          .some((token) => token.trim() === 'enter'),
+      );
+      const tagName = element && element.tagName ? element.tagName.toUpperCase() : '';
+      if (!targetElement && hasSubmitKey && (tagName === 'BODY' || tagName === 'HTML')) {
+        return {
+          success: false,
+          error:
+            'Refusing to send Enter to BODY/HTML. Provide a selector or read_page target ref for the input/control that should receive the submit key.',
+          results: [],
+          targetElement: {
+            tagName: element.tagName,
+            id: element.id,
+            className: element.className,
+            type: element.type,
+            scrollDiagnostics: getScrollDiagnostics(),
+            waitDiagnostics: {
+              focus: { waitedMs: 0, reason: 'body_html_submit_guard', ready: false },
+            },
+          },
+        };
+      }
       const operationResults = [];
 
       for (let i = 0; i < keyCombinations.length; i++) {
@@ -244,10 +490,40 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
           continue; // Skip to next combination in sequence
         }
 
+        const scrollBefore = getScrollDiagnostics();
         const dispatchResult = dispatchKeyEvents(parsedKeyInfo, element);
+        const scrollAfterDispatch = getScrollDiagnostics();
+        const fallbackScroll = maybeFallbackScroll(
+          parsedKeyInfo,
+          scrollBefore,
+          scrollAfterDispatch,
+          element,
+        );
+        const scrollAfter = fallbackScroll?.diagnosticsAfter || scrollAfterDispatch;
+        const scrollChanged =
+          hasScrollChanged(scrollBefore, scrollAfter) || !!fallbackScroll?.applied;
         operationResults.push({
           keyCombination: comboString,
           ...dispatchResult,
+          scrollDiagnostics: {
+            before: scrollBefore,
+            after: scrollAfter,
+            changed: scrollChanged,
+            fallback: fallbackScroll
+              ? {
+                  applied: fallbackScroll.applied,
+                  reason: fallbackScroll.reason,
+                  targetKind: fallbackScroll.targetKind,
+                  targetTagName: fallbackScroll.targetTagName,
+                  targetId: fallbackScroll.targetId,
+                  targetClassName: fallbackScroll.targetClassName,
+                  deltaY: fallbackScroll.deltaY,
+                  targetTop: fallbackScroll.targetTop,
+                  beforeTop: fallbackScroll.beforeTop,
+                  afterTop: fallbackScroll.afterTop,
+                }
+              : null,
+          },
         });
 
         if (dispatchResult.error) {
@@ -274,6 +550,7 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
           id: element.id,
           className: element.className,
           type: element.type, // if applicable e.g. for input
+          scrollDiagnostics: getScrollDiagnostics(),
           waitDiagnostics: {
             focus: focusWait || { waitedMs: 0, reason: 'already_focused', ready: true },
           },
@@ -301,6 +578,16 @@ if (window.__KEYBOARD_HELPER_INITIALIZED__) {
             results: [],
           });
           return true; // Keep channel open for async response
+        }
+      } else if (request.ref) {
+        targetEl = resolveElementRef(request.ref);
+        if (!targetEl) {
+          sendResponse({
+            success: false,
+            error: `Element ref "${request.ref}" not found. Please call chrome_read_page first and ensure the ref is still valid.`,
+            results: [],
+          });
+          return true;
         }
       }
 

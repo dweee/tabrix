@@ -61,14 +61,14 @@ describe('V27-01 lifecycle state machine — cold load', () => {
       makeEvent({
         tabId: 7,
         eventKind: 'before_navigate',
-        urlPattern: 'github.com/owner/repo',
+        urlPattern: 'code.example/owner/repo',
         navigationIntent: 'user_initiated',
       }),
     );
     expect(a.lifecycleState).toBe('navigating');
     expect(a.lifecycleFlag).toBe('cold_load');
     expect(a.navigationIntent).toBe('user_initiated');
-    expect(a.urlPattern).toBe('github.com/owner/repo');
+    expect(a.urlPattern).toBe('code.example/owner/repo');
     expect(a.lifecycleConfidence).toBe(0.5);
 
     const b = m.ingest(makeEvent({ tabId: 7, eventKind: 'committed' }));
@@ -82,7 +82,7 @@ describe('V27-01 lifecycle state machine — cold load', () => {
     const d = m.ingest(makeEvent({ tabId: 7, eventKind: 'document_complete' }));
     expect(d.lifecycleState).toBe('route_stable');
     expect(d.lifecycleConfidence).toBe(0.95);
-    expect(d.urlPattern).toBe('github.com/owner/repo');
+    expect(d.urlPattern).toBe('code.example/owner/repo');
   });
 });
 
@@ -99,13 +99,13 @@ describe('V27-01 lifecycle state machine — SPA route change', () => {
       makeEvent({
         tabId: 9,
         eventKind: 'history_state_updated',
-        urlPattern: 'github.com/owner/repo/issues',
+        urlPattern: 'code.example/owner/repo/issues',
       }),
     );
     expect(snap.lifecycleState).toBe('route_stable');
     expect(snap.lifecycleFlag).toBe('spa_route_change');
     expect(snap.lifecycleConfidence).toBe(0.7);
-    expect(snap.urlPattern).toBe('github.com/owner/repo/issues');
+    expect(snap.urlPattern).toBe('code.example/owner/repo/issues');
   });
 
   it('promotes "unknown" tab to "document_ready" when only history_state_updated arrives', () => {
@@ -114,7 +114,7 @@ describe('V27-01 lifecycle state machine — SPA route change', () => {
       makeEvent({
         tabId: 11,
         eventKind: 'history_state_updated',
-        urlPattern: 'github.com/explore',
+        urlPattern: 'code.example/explore',
       }),
     );
     expect(snap.lifecycleState).toBe('document_ready');
