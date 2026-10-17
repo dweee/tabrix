@@ -1,0 +1,43 @@
+{
+  "branch": "5f76da03cade36d16d870442ec07f45b31fea29a",
+  "filtered_branch": "403613e7de24d1622d02ba7c3abc7f68f8e21684",
+  "history_exclude": [
+    ".claude",
+    ".codex",
+    ".codex-prompts",
+    ".cursor",
+    ".docs",
+    ".omx",
+    ".playwright-mcp",
+    ".private-artifacts",
+    ".private-tests",
+    ".tmp",
+    "app/chrome-extension/CACHE_MANAGEMENT_SUMMARY.md",
+    "builder-plan.md",
+    "docs/BEGINNER_HANDOFF_zh.md",
+    "docs/CLICK_V2_PRODUCT_AND_TECHNICAL_PLAN.md",
+    "docs/DELIVERABLE_HANDOFF_zh.md",
+    "docs/NIGHTLY_REPORT_2026-04-11.md",
+    "docs/OMX_REORG_PLAN.md",
+    "docs/PHASE0_ISSUE_PRIORITY_SUMMARY.md",
+    "docs/PHASE0_OMX_SPRINT_PLAN.md",
+    "docs/PHASE0_OVERNIGHT_PLAN.md",
+    "docs/PHASE0_TOOL_VALIDATION_MATRIX.md",
+    "docs/PRODUCT_PRUNING_PLAN.md",
+    "docs/PRODUCT_STRATEGY.md",
+    "docs/PROGRAM1_PHASE1_APPROVED_PLAN.md",
+    "docs/benchmarks",
+    "editor-plan.md",
+    "plan.md",
+    "props-plan.md"
+  ],
+  "release": {
+    "filtered_sha": "f207a3a2837e9fe93711b5313a214e07c172b85d",
+    "id": 323915463,
+    "sha": "dbc217a4ac11bf1ff523e5997094ee4902f76616",
+    "tag": "v2.7.0"
+  },
+  "track": "both",
+  "upstream": "guodaxia103/tabrix",
+  "version": 1
+}
