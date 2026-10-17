@@ -50,6 +50,17 @@ function createLaunchProcess(onLaunch?: () => void) {
 }
 
 function mockCurrentPlatform(platform: NodeJS.Platform) {
+  // Simulated Windows recovery must not discover/write the real runner's
+  // browser configuration or depend on a browser being installed there.
+  if (platform === 'win32') {
+    jest.spyOn(browserLaunchConfig, 'readPersistedBrowserLaunchConfig').mockReturnValue({
+      preferredBrowser: 'chrome',
+      executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+      source: 'app-path',
+      detectedAt: new Date().toISOString(),
+    });
+    jest.spyOn(browserLaunchConfig, 'resolveAndPersistBrowserLaunchConfig').mockReturnValue(null);
+  }
   return jest
     .spyOn(__bridgeLaunchInternals.platformRuntime, 'getCurrentPlatform')
     .mockReturnValue(platform);
