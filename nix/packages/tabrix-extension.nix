@@ -17,7 +17,9 @@
 
   # Extension + shared only — do not pull native-server / better-sqlite3.
   restrictWorkspace = ''
-    cat > pnpm-workspace.yaml <<'EOF'
+    # Preserve dependency overrides and other workspace settings from upstream.
+    sed -i "/^packages:/,/^[^[:space:]#]/{ /^packages:/d; /^  /d; }" pnpm-workspace.yaml
+    cat >> pnpm-workspace.yaml <<'EOF'
     packages:
       - 'app/chrome-extension'
       - 'packages/shared'

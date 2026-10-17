@@ -23,7 +23,9 @@ let
 
   # CLI-only workspace so fetch never resolves extension-only deps.
   restrictWorkspace = ''
-    cat > pnpm-workspace.yaml <<'EOF'
+    # Preserve dependency overrides and other workspace settings from upstream.
+    sed -i "/^packages:/,/^[^[:space:]#]/{ /^packages:/d; /^  /d; }" pnpm-workspace.yaml
+    cat >> pnpm-workspace.yaml <<'EOF'
     packages:
       - 'app/native-server'
       - 'packages/shared'
