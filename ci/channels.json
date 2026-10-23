@@ -1,0 +1,42 @@
+{
+  "targets": {
+    "aarch64-darwin": [
+      {
+        "attribute": "packages.aarch64-darwin.tabrix",
+        "visibility": "public"
+      },
+      {
+        "attribute": "packages.aarch64-darwin.tabrix-extension",
+        "visibility": "public"
+      }
+    ],
+    "x86_64-linux": [
+      {
+        "attribute": "packages.x86_64-linux.tabrix",
+        "visibility": "public"
+      },
+      {
+        "attribute": "packages.x86_64-linux.tabrix-extension",
+        "visibility": "public"
+      }
+    ],
+    "aarch64-linux": [
+      {
+        "attribute": "packages.aarch64-linux.tabrix",
+        "visibility": "public"
+      },
+      {
+        "attribute": "packages.aarch64-linux.tabrix-extension",
+        "visibility": "public"
+      }
+    ]
+  },
+  "excludedSystems": [],
+  "submodules": false,
+  "integrationInventory": false,
+  "version": 1,
+  "forge": "github",
+  "repository": "dweee/tabrix",
+  "branch": "flakey",
+  "remote": "https://github.com/dweee/tabrix.git"
+}
