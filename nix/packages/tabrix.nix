@@ -105,8 +105,16 @@ stdenv.mkDerivation (finalAttrs: {
     # Hoisted node_modules at the workspace root (and package-local links).
     # Copy with -L so the store path is self-contained.
     if [ -d node_modules ]; then
-      rsync -aL --delete node_modules/ "$out/lib/tabrix/node_modules/"
+      # pnpm state records install locations/times; node-gyp also leaves build
+      # paths and a nondeterministic static archive. None is needed at runtime.
+      rsync -aL --delete \
+        --exclude='/.modules.yaml' \
+        --exclude='/.pnpm-workspace-state-v1.json' \
+        --exclude='/better-sqlite3/build' \
+        node_modules/ "$out/lib/tabrix/node_modules/"
     fi
+    install -Dm755 node_modules/better-sqlite3/build/Release/better_sqlite3.node \
+      "$out/lib/tabrix/node_modules/better-sqlite3/build/Release/better_sqlite3.node"
     # Ensure workspace package is a real directory with built dist.
     rm -rf "$out/lib/tabrix/node_modules/@tabrix/shared"
     mkdir -p "$out/lib/tabrix/node_modules/@tabrix"
