@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "checks": [],
+  "upstreams": [
+    {
+      "name": "guodaxia103/tabrix",
+      "api": "https://api.github.com/repos/guodaxia103/tabrix/releases/latest"
+    }
+  ]
+}
