@@ -38,5 +38,10 @@
   "forge": "github",
   "repository": "dweee/tabrix",
   "branch": "flakey",
-  "remote": "https://github.com/dweee/tabrix.git"
+  "remote": "https://github.com/dweee/tabrix.git",
+  "inputCheckWorkflows": [
+    "release-channels.yml",
+    "darwin-actions.yml",
+    "others-actions.yml"
+  ]
 }
