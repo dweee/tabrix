@@ -101,3 +101,5 @@ releases/chrome-extension/latest/*.zip
 # Local verification scratch logs
 typecheck-click-diff.log
 vitest-click-diff.log
+__pycache__/
+*.pyc
