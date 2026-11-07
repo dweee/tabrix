@@ -2,7 +2,7 @@
   description = "Tabrix — Chrome Native Messaging host and MCP bridge (NixOS / nix-darwin / Home Manager)";
 
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs/1d060086d60cb76a40cf37109f979d88a5bd6396";
+    nixpkgs.url = "github:nixos/nixpkgs/f9a75f41be3a74eab55d3a7679d34ad6cc0da977";
   };
 
   outputs =
